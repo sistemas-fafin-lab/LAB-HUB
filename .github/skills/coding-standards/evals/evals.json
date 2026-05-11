@@ -1,0 +1,77 @@
+{
+  "skill_name": "coding-standards",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "cria pra mim uma função em Python que recebe uma lista de pedidos e calcula o total com desconto pra membros",
+      "expected_output": "Função Python com boa nomenclatura, separação de responsabilidades, tratamento de casos de borda e código legível",
+      "files": [],
+      "assertions": [
+        {
+          "name": "funcao_com_nome_descritivo",
+          "description": "A função principal tem nome que revela intenção (não proc, calc, f, fn)"
+        },
+        {
+          "name": "constante_para_desconto",
+          "description": "O percentual de desconto é uma constante nomeada, não um número mágico como 0.9 ou 10"
+        },
+        {
+          "name": "logica_desconto_separada",
+          "description": "A lógica de aplicar o desconto de membro está separada do loop principal (em função ou constante própria)"
+        },
+        {
+          "name": "trata_lista_vazia_ou_casos_borda",
+          "description": "Há menção ou tratamento de casos de borda como lista vazia ou pedidos sem preço"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "revisa esse código aqui, tá funcionando mas acho que tá feio:\n\n```python\ndef proc(x, t):\n    d = []\n    for i in x:\n        if t == 'admin':\n            d.append(i)\n        elif t == 'user' and i['active']:\n            d.append(i)\n    return d\n```",
+      "expected_output": "Revisão identificando problemas de nomenclatura, sugerindo nomes descritivos, uso de list comprehension, e explicando o porquê das mudanças",
+      "files": [],
+      "assertions": [
+        {
+          "name": "identifica_nomes_ruins",
+          "description": "A revisão aponta explicitamente os nomes proc, x, t, d ou i como problemáticos"
+        },
+        {
+          "name": "sugere_nomes_descritivos",
+          "description": "Propõe nomes alternativos que revelam a intenção (ex: filter_items, user_type, results)"
+        },
+        {
+          "name": "explica_o_porque",
+          "description": "Explica a motivação das mudanças (legibilidade, manutenção), não apenas lista o quê mudar"
+        },
+        {
+          "name": "apresenta_codigo_corrigido",
+          "description": "Fornece o código refatorado completo, não apenas sugestões abstratas"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "tenho um arquivo routes.py com 800 linhas misturando validação, lógica de negócio e queries no banco — como devo reorganizar isso?",
+      "expected_output": "Plano de reorganização com separação de camadas (routes/services/repositories), exemplos concretos e estratégia de migração incremental",
+      "files": [],
+      "assertions": [
+        {
+          "name": "menciona_tres_camadas",
+          "description": "Propõe separação em pelo menos 3 camadas: routes/controllers, services e repositories/DAOs"
+        },
+        {
+          "name": "exemplo_concreto_de_codigo",
+          "description": "Mostra código exemplo (mesmo que curto) ilustrando a separação, não só teoria"
+        },
+        {
+          "name": "estrategia_incremental",
+          "description": "Sugere migração gradual/incremental em vez de reescrever tudo de uma vez"
+        },
+        {
+          "name": "menciona_testabilidade",
+          "description": "Cita que a separação de camadas facilita a escrita de testes"
+        }
+      ]
+    }
+  ]
+}

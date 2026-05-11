@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-native",
+    "lib": [
+      "ES2022"
+    ],
+    "moduleResolution": "bundler",
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "App.tsx",
+    "src",
+    "app.json",
+    "nativewind-env.d.ts"
+  ]
+}

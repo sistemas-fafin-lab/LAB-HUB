@@ -1,0 +1,35 @@
+{
+  "name": "@lab-hub/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@babel/runtime": "^7.29.2",
+    "@lab-hub/shared": "*",
+    "expo": "^54.0.0",
+    "expo-linear-gradient": "~15.0.8",
+    "expo-status-bar": "~3.0.9",
+    "lucide-react-native": "^0.424.0",
+    "nativewind": "^4.0.36",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-css-interop": "^0.2.3",
+    "react-native-reanimated": "~4.1.1",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-svg": "15.12.1",
+    "react-native-worklets": "0.8.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@types/react": "^19.1.0",
+    "babel-preset-expo": "~13.0.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "~5.3.3"
+  }
+}

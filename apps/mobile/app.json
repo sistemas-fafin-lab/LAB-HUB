@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "lab-hub-mobile",
+    "slug": "lab-hub-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"],
+    "sdkVersion": "54.0.0",
+    "userInterfaceStyle": "automatic"
+  }
+}
