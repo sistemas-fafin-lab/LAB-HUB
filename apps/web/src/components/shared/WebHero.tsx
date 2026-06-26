@@ -1,5 +1,6 @@
 import { WIcon } from '../primitives/WIcon'
 import type { ExamStatus } from '../primitives/WStatus'
+import { api } from '../../lib/api'
 
 export interface ExamPanel {
   name: string
@@ -22,6 +23,7 @@ export interface Exam {
   status: ExamStatus
   summary: string
   panels: ExamPanel[]
+  declaracaoUrl?: string // path da declaração no bucket privado (signed URL sob demanda)
 }
 
 interface WebHeroProps {
@@ -31,6 +33,16 @@ interface WebHeroProps {
 }
 
 export function WebHero({ exam, onOpen, dark: _dark }: WebHeroProps) {
+  // Mesmo padrão da LaudoPage: busca a signed URL sob demanda e abre o PDF.
+  const handleDownload = async () => {
+    try {
+      const { url } = await api.declaracao(exam.id)
+      window.open(url, '_blank', 'noopener')
+    } catch {
+      /* sem declaração disponível */
+    }
+  }
+
   return (
     <div className="rounded-3xl p-7 text-white relative overflow-hidden shadow-lg shadow-blue-900/20 bg-gradient-to-br from-blue-900 via-blue-700 to-indigo-800">
       <div className="absolute -top-16 -right-12 w-64 h-64 rounded-full bg-white/10 blur-3xl pointer-events-none" />
@@ -60,9 +72,14 @@ export function WebHero({ exam, onOpen, dark: _dark }: WebHeroProps) {
             >
               Ver resultado completo<WIcon name="arrow-right" className="w-4 h-4" strokeWidth={2.4} />
             </button>
-            <button className="text-white/90 rounded-xl px-3 py-2.5 font-medium text-sm inline-flex items-center gap-2 hover:bg-white/10 transition">
-              <WIcon name="download" className="w-4 h-4" strokeWidth={2.2} />Baixar PDF
-            </button>
+            {exam.declaracaoUrl && (
+              <button
+                onClick={() => void handleDownload()}
+                className="text-white/90 rounded-xl px-3 py-2.5 font-medium text-sm inline-flex items-center gap-2 hover:bg-white/10 transition"
+              >
+                <WIcon name="download" className="w-4 h-4" strokeWidth={2.2} />Baixar PDF
+              </button>
+            )}
           </div>
         </div>
 

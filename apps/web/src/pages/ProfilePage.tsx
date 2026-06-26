@@ -1,9 +1,12 @@
 import { WIcon } from '../components/primitives/WIcon'
 import type { Dependent } from '../components/layout/Topbar'
+import { usePaciente } from '../lib/usePaciente'
+import { formatarCpf, formatarData, formatarTelefone } from '../lib/validators'
 
 interface ProfilePageProps {
-  patient: Dependent
-  dark:    boolean
+  patient:  Dependent
+  dark:     boolean
+  onLogout: () => void | Promise<void>
 }
 
 interface Field {
@@ -11,14 +14,16 @@ interface Field {
   value: string
 }
 
-export function ProfilePage({ patient, dark }: ProfilePageProps) {
+export function ProfilePage({ patient, dark, onLogout }: ProfilePageProps) {
+  // Dados reais do paciente autenticado; o switcher/avatar (patient) permanece mock (D2).
+  const { paciente } = usePaciente()
   const fields: Field[] = [
-    { label: 'Nome completo',     value: patient.name          },
-    { label: 'CPF',               value: '•••.•••.123-45'     },
-    { label: 'Data de nascimento', value: '12/03/1989'         },
-    { label: 'Email',             value: 'joao.madeiro@email.com' },
-    { label: 'Telefone',          value: '(61) 9 9123-4567'   },
-    { label: 'Convênio',          value: 'Unimed · Plano Premium' },
+    { label: 'Nome completo',      value: paciente?.nome ?? '—' },
+    { label: 'CPF',                value: paciente ? formatarCpf(paciente.cpf) : '—' },
+    { label: 'Data de nascimento', value: paciente ? formatarData(paciente.dataNascimento) : '—' },
+    { label: 'Email',              value: paciente?.email ?? '—' },
+    { label: 'Telefone',           value: paciente?.telefone ? formatarTelefone(paciente.telefone) : '—' },
+    { label: 'Convênio',           value: 'Unimed · Plano Premium' },
   ]
 
   return (
@@ -47,10 +52,21 @@ export function ProfilePage({ patient, dark }: ProfilePageProps) {
             </span>
           </div>
         </div>
-        <button className="bg-blue-600 text-white rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25 hover:bg-blue-700">
-          <WIcon name="pencil" className="w-4 h-4" strokeWidth={2.2} />
-          Editar
-        </button>
+        <div className="flex items-center gap-2">
+          <button className="bg-blue-600 text-white rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25 hover:bg-blue-700">
+            <WIcon name="pencil" className="w-4 h-4" strokeWidth={2.2} />
+            Editar
+          </button>
+          <button
+            onClick={() => void onLogout()}
+            className={`rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 border ${
+              dark ? 'border-gray-700 text-gray-300 hover:bg-gray-800' : 'border-gray-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <WIcon name="log-out" className="w-4 h-4" strokeWidth={2.2} />
+            Sair
+          </button>
+        </div>
       </div>
 
       {/* Personal data */}

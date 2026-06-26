@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { WIcon } from '../components/primitives/WIcon'
 import { ExamRow } from '../components/shared/ExamRow'
 import type { Exam } from '../components/shared/WebHero'
-import { WEB_EXAMS } from '../mocks/exams'
+import { useResultados } from '../lib/useResultados'
 
 type FilterId = 'all' | 'ready' | 'analyzing'
 
@@ -23,10 +23,11 @@ interface ResultsPageProps {
 }
 
 export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
+  const { exams, loading, error } = useResultados()
   const [filter, setFilter] = useState<FilterId>('all')
   const [query, setQuery]   = useState('')
 
-  const filtered = WEB_EXAMS.filter((e) =>
+  const filtered = exams.filter((e) =>
     (filter === 'all' || e.status === filter) &&
     (
       e.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -116,10 +117,16 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
           dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
         } p-2 shadow-sm flex flex-col gap-1`}
       >
-        {filtered.map((e) => (
+        {loading && (
+          <div className="text-center text-sm text-gray-400 py-10">Carregando resultados…</div>
+        )}
+        {error && !loading && (
+          <div className="text-center text-sm text-red-500 py-10">{error}</div>
+        )}
+        {!loading && !error && filtered.map((e) => (
           <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(e)} dark={dark} />
         ))}
-        {filtered.length === 0 && (
+        {!loading && !error && filtered.length === 0 && (
           <div className="text-center text-sm text-gray-400 py-10">Nenhum exame encontrado.</div>
         )}
       </div>

@@ -12,6 +12,8 @@ import { DocumentsPage }   from './pages/DocumentsPage'
 import { BillingPage }     from './pages/BillingPage'
 import { SettingsPage }    from './pages/SettingsPage'
 import { ProfilePage }     from './pages/ProfilePage'
+import { AuthGate }        from './pages/AuthGate'
+import { useAuth }         from './lib/AuthContext'
 import type { AppRoute, Dependent } from './components/layout/Topbar'
 import type { Exam } from './components/shared/WebHero'
 
@@ -29,16 +31,32 @@ const DEPENDENTS: Dependent[] = [
 // App — shell that owns all navigation and theme state
 // ---------------------------------------------------------------------------
 export function App() {
+  const { session, loading, signOut } = useAuth()
   const [route,    setRoute]    = useState<AppRoute>('home')
   const [openExam, setOpenExam] = useState<Exam | null>(null)
   const [dark,     setDark]     = useState(false)
   const [patient,  setPatient]  = useState<Dependent>(DEPENDENTS[0]!)
 
-  // Re-create Lucide icons after every render (CDN-loaded icons need this)
+  // Passada única no mount como fallback: cada WIcon já cria o próprio ícone no seu
+  // useEffect, então não é preciso re-rodar createIcons a cada render.
   useEffect(() => {
     const win = window as Window & typeof globalThis & { lucide?: { createIcons: (opts: object) => void } }
     win.lucide?.createIcons({ attrs: { 'stroke-width': 2 } })
-  })
+  }, [])
+
+  // ---------------------------------------------------------------------------
+  // Auth gate — sem sessão, mostra o login (hooks acima sempre executam)
+  // ---------------------------------------------------------------------------
+  if (loading) {
+    return (
+      <div className="min-h-screen w-full bg-slate-50 flex items-center justify-center text-sm text-slate-400">
+        Carregando…
+      </div>
+    )
+  }
+  if (session === null) {
+    return <AuthGate />
+  }
 
   // ---------------------------------------------------------------------------
   // Navigation helpers
@@ -87,7 +105,7 @@ export function App() {
   } else if (route === 'settings') {
     content = <SettingsPage  dark={dark} />
   } else if (route === 'profile') {
-    content = <ProfilePage patient={patient} dark={dark} />
+    content = <ProfilePage patient={patient} dark={dark} onLogout={signOut} />
   } else {
     content = <HomePage dark={dark} onOpenExam={handleOpenExam} />
   }

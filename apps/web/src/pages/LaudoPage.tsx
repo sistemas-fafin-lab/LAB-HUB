@@ -1,5 +1,8 @@
 import { WIcon } from '../components/primitives/WIcon'
 import type { Exam } from '../components/shared/WebHero'
+import { api } from '../lib/api'
+import { usePaciente } from '../lib/usePaciente'
+import { formatarCpf, formatarData } from '../lib/validators'
 
 interface LaudoPageProps {
   exam: Exam
@@ -8,6 +11,17 @@ interface LaudoPageProps {
 }
 
 export function LaudoPage({ exam, onBack }: LaudoPageProps) {
+  const { paciente } = usePaciente()
+
+  const handleDownload = async () => {
+    try {
+      const { url } = await api.declaracao(exam.id)
+      window.open(url, '_blank', 'noopener')
+    } catch {
+      /* sem declaração disponível */
+    }
+  }
+
   return (
     <div className="max-w-5xl mx-auto">
       {/* Toolbar */}
@@ -28,9 +42,14 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
           <button className="text-xs font-semibold px-3 h-9 rounded-lg bg-blue-50 text-blue-700 inline-flex items-center gap-1.5">
             <WIcon name="send" className="w-4 h-4" strokeWidth={2.2} />Enviar ao médico
           </button>
-          <button className="text-xs font-semibold px-3 h-9 rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25">
-            <WIcon name="download" className="w-4 h-4" strokeWidth={2.2} />Baixar PDF
-          </button>
+          {exam.declaracaoUrl && (
+            <button
+              onClick={() => void handleDownload()}
+              className="text-xs font-semibold px-3 h-9 rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25"
+            >
+              <WIcon name="download" className="w-4 h-4" strokeWidth={2.2} />Baixar PDF
+            </button>
+          )}
         </div>
       </div>
 
@@ -64,8 +83,11 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
         <div className="px-10 py-6 grid grid-cols-2 gap-x-10 gap-y-4 border-b border-gray-100">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Paciente</div>
-            <div className="text-base font-semibold text-slate-900">João Madeiro</div>
-            <div className="text-xs text-gray-600">CPF •••.•••.123-45 · Nasc. 12/03/1989 · Sexo M</div>
+            <div className="text-base font-semibold text-slate-900">{paciente?.nome ?? '—'}</div>
+            <div className="text-xs text-gray-600">
+              CPF {paciente ? formatarCpf(paciente.cpf) : '—'} · Nasc.{' '}
+              {paciente ? formatarData(paciente.dataNascimento) : '—'} · Sexo {paciente?.sexo ?? '—'}
+            </div>
           </div>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Médico solicitante</div>

@@ -2,6 +2,7 @@ import { WIcon } from '../components/primitives/WIcon'
 import { WStatus } from '../components/primitives/WStatus'
 import { Sparkline } from '../components/primitives/Sparkline'
 import type { Exam } from '../components/shared/WebHero'
+import { api } from '../lib/api'
 
 interface ExamDetailPageProps {
   exam: Exam
@@ -11,6 +12,15 @@ interface ExamDetailPageProps {
 }
 
 export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPageProps) {
+  const handleDownload = async () => {
+    try {
+      const { url } = await api.declaracao(exam.id)
+      window.open(url, '_blank', 'noopener')
+    } catch {
+      /* sem declaração disponível */
+    }
+  }
+
   return (
     <div className="max-w-5xl mx-auto">
       <button
@@ -53,9 +63,14 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
             >
               <WIcon name="file-text" className="w-4 h-4" strokeWidth={2.2} />Ver laudo
             </button>
-            <button className="bg-blue-600 text-white rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25 hover:bg-blue-700">
-              <WIcon name="download" className="w-4 h-4" strokeWidth={2.2} />Baixar PDF
-            </button>
+            {exam.declaracaoUrl && (
+              <button
+                onClick={() => void handleDownload()}
+                className="bg-blue-600 text-white rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25 hover:bg-blue-700"
+              >
+                <WIcon name="download" className="w-4 h-4" strokeWidth={2.2} />Baixar PDF
+              </button>
+            )}
           </div>
         </div>
 

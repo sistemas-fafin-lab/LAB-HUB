@@ -2,7 +2,16 @@ import { WIcon } from '../components/primitives/WIcon'
 import { WebHero } from '../components/shared/WebHero'
 import { ExamRow } from '../components/shared/ExamRow'
 import type { Exam } from '../components/shared/WebHero'
-import { WEB_EXAMS } from '../mocks/exams'
+import { useResultados } from '../lib/useResultados'
+import { useAgendamentos } from '../lib/useAgendamentos'
+
+// Próxima coleta: dd/mmm às hh:mm (ex.: "28 jun · 09:30").
+const proximaColetaFmt = new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+})
 
 // ---------------------------------------------------------------------------
 // Inline data for "Acompanhamento" and "Próximos passos" cards
@@ -50,7 +59,34 @@ interface HomePageProps {
 }
 
 export function HomePage({ dark, onOpenExam }: HomePageProps) {
-  const last = WEB_EXAMS[0]!
+  const { exams, loading } = useResultados()
+  const { agendamentos } = useAgendamentos()
+  const last = exams[0]
+
+  // Próximo agendamento ativo (pendente/confirmado) no futuro.
+  const proximoAgendamento = agendamentos
+    .filter(
+      (a) =>
+        (a.status === 'pendente' || a.status === 'confirmado') &&
+        new Date(a.dataHora).getTime() > Date.now(),
+    )
+    .sort((a, b) => new Date(a.dataHora).getTime() - new Date(b.dataHora).getTime())[0]
+
+  // O primeiro passo reflete o agendamento real (ou um CTA para agendar).
+  const agendamentoStep: NextStep = proximoAgendamento
+    ? {
+        icon: 'calendar-check',
+        title: 'Próxima coleta agendada',
+        sub: `${proximaColetaFmt.format(new Date(proximoAgendamento.dataHora))} · ${proximoAgendamento.postoNome}`,
+        action: 'Detalhes',
+      }
+    : {
+        icon: 'calendar-plus',
+        title: 'Agendar nova coleta',
+        sub: 'Você não tem coletas agendadas',
+        action: 'Agendar',
+      }
+  const steps: NextStep[] = [agendamentoStep, ...NEXT_STEPS.slice(1)]
 
   return (
     <div className="grid grid-cols-12 gap-5">
@@ -70,7 +106,17 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
 
       {/* Hero */}
       <div className="col-span-12 lg:col-span-8">
-        <WebHero exam={last} onOpen={() => onOpenExam(last)} dark={dark} />
+        {last ? (
+          <WebHero exam={last} onOpen={() => onOpenExam(last)} dark={dark} />
+        ) : (
+          <div
+            className={`rounded-3xl p-7 h-full flex items-center justify-center text-sm ${
+              dark ? 'bg-gray-900 border border-gray-800 text-gray-400' : 'bg-white border border-gray-100 text-gray-500'
+            }`}
+          >
+            {loading ? 'Carregando seus exames…' : 'Você ainda não tem resultados disponíveis.'}
+          </div>
+        )}
       </div>
 
       {/* Acompanhamento */}
@@ -118,7 +164,7 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
             <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>Próximos passos</h3>
           </div>
           <div className="flex flex-col gap-2">
-            {NEXT_STEPS.map((s, i) => (
+            {steps.map((s, i) => (
               <div
                 key={i}
                 className={`flex items-center gap-3 p-3 rounded-xl border ${
@@ -164,9 +210,12 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            {WEB_EXAMS.map((e) => (
+            {exams.map((e) => (
               <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(e)} dark={dark} />
             ))}
+            {!loading && exams.length === 0 && (
+              <div className="text-center text-sm text-gray-400 py-6">Nenhum exame recente.</div>
+            )}
           </div>
         </div>
       </div>
