@@ -86,10 +86,7 @@ create table resultados (
   declaracao_url     text,                                -- PDF opcional (D1)
   liberado_em        timestamptz,
   flowlab_analise_id uuid,                                -- id no FlowLab
-  criado_em          timestamptz not null default now(),
-  -- Idempotência do webhook (#6): 1 resultado por (agendamento, exame). Reentrega
-  -- do FlowLab viola esta unique (SQLSTATE 23505) e a API trata como já processado.
-  constraint uq_resultado_agendamento_exame unique (agendamento_id, exame_nome)
+  criado_em          timestamptz not null default now()
 );
 
 alter table resultados enable row level security;
