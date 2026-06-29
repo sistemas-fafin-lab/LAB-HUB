@@ -26,6 +26,7 @@ export function ColetaCard({
 }: ColetaCardProps) {
   const { id, postoNome, dataHora, status } = agendamento
   const isPendente = status === 'pendente'
+  const isCancelado = status === 'cancelado'
   // Cancelável enquanto não foi realizada nem já cancelada.
   const canCancel = onCancel && (status === 'pendente' || status === 'confirmado')
   const [confirming, setConfirming] = useState(false)
@@ -34,17 +35,18 @@ export function ColetaCard({
     <div
       className={`rounded-2xl border ${
         dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-      } p-4 shadow-sm flex items-center gap-4`}
+      } p-4 shadow-sm flex items-center gap-4 ${isCancelado ? 'opacity-60' : ''}`}
     >
       <div className="h-11 w-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
         <WIcon name="calendar" className="w-5 h-5" strokeWidth={2.2} />
       </div>
 
-      <div className="flex-1 min-w-0">
-        <div className={`text-sm font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>
+      <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+        <span className={`text-sm font-semibold truncate min-w-0 ${dark ? 'text-white' : 'text-slate-800'}`}>
           {postoNome}
-        </div>
-        <div className="text-xs text-gray-500 capitalize">{formatDataHora(dataHora)}</div>
+        </span>
+        <span className="text-gray-400 shrink-0">-</span>
+        <span className="text-xs text-gray-500 shrink-0">{formatDataHora(dataHora)}</span>
       </div>
 
       {confirming ? (

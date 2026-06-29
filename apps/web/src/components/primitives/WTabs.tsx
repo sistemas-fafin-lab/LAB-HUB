@@ -26,7 +26,7 @@ export function WTabs<T extends string>({ items, value, onChange, dark }: WTabsP
           <button
             key={t.id}
             onClick={() => onChange(t.id)}
-            className={`px-3.5 h-8 rounded-lg text-xs font-semibold transition inline-flex items-center gap-1.5 ${
+            className={`relative px-3.5 h-8 rounded-lg text-xs font-semibold transition inline-flex items-center justify-center ${
               active
                 ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/25'
                 : dark
@@ -35,14 +35,11 @@ export function WTabs<T extends string>({ items, value, onChange, dark }: WTabsP
             }`}
           >
             {t.label}
-            {t.count !== undefined && (
+            {/* Badge estilo notificação no canto superior direito. */}
+            {t.count !== undefined && t.count > 0 && (
               <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md leading-none ${
-                  active
-                    ? 'bg-white/20 text-white'
-                    : dark
-                      ? 'bg-gray-800 text-gray-400'
-                      : 'bg-slate-100 text-slate-500'
+                className={`absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex items-center justify-center ring-2 ${
+                  dark ? 'ring-gray-900' : 'ring-white'
                 }`}
               >
                 {t.count}

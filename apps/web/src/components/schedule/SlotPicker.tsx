@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { dayFmt, timeFmt } from '../../lib/datetime'
+import { formatDia, timeFmt } from '../../lib/datetime'
 
 interface SlotPickerProps {
   slots: string[] // horários ISO 8601
@@ -22,7 +22,7 @@ function groupByDay(slots: string[]): SlotGroup[] {
     const key = d.toDateString()
     const group = groups.get(key)
     if (group) group.slots.push(iso)
-    else groups.set(key, { label: dayFmt.format(d), slots: [iso] })
+    else groups.set(key, { label: formatDia(d), slots: [iso] })
   }
   return [...groups.values()]
 }

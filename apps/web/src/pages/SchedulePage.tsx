@@ -44,9 +44,15 @@ export function SchedulePage({ dark }: SchedulePageProps) {
     }
   }
 
+  // Badge da aba: só coletas em andamento (pendente/confirmado); ignora
+  // canceladas e realizadas.
+  const emAndamento = agendamentos.filter(
+    (a) => a.status === 'pendente' || a.status === 'confirmado',
+  ).length
+
   const tabs = [
     { id: 'agendar' as const, label: 'Agendar' },
-    { id: 'minhas' as const, label: 'Minhas coletas', count: agendamentos.length },
+    { id: 'minhas' as const, label: 'Minhas coletas', count: emAndamento },
   ]
 
   return (
