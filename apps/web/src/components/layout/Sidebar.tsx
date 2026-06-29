@@ -25,7 +25,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { id: 'home',     label: 'Visão geral',    icon: 'layout-dashboard' },
       { id: 'results',  label: 'Resultados',     icon: 'file-text', badge: '12' },
-      { id: 'schedule', label: 'Agendar coleta', icon: 'calendar-plus' },
+      { id: 'schedule', label: 'Coletas',        icon: 'calendar-plus' },
       { id: 'trends',   label: 'Tendências',     icon: 'trending-up' },
     ],
   },
