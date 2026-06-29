@@ -38,13 +38,27 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
     const payload = parsed.data
 
     // Resolve o agendamento para descobrir o paciente dono do resultado.
-    const { data: agendamento } = await supabase
+    // maybeSingle + checagem de error: um erro de DB devolve data=null igual a
+    // "não encontrado". Se tratássemos os dois iguais, uma falha transitória
+    // viraria um 200 'ignored' e o FlowLab pararia de retentar — perda do resultado.
+    const { data: agendamento, error: agendamentoError } = await supabase
       .from('agendamentos')
       .select('id, paciente_id')
       .eq('id', payload.agendamentoLabhubId)
-      .single()
+      .maybeSingle()
+    if (agendamentoError) {
+      // Falha transitória: não damos ack (lança 5xx) p/ o FlowLab retentar.
+      throw app.httpErrors.internalServerError('Falha ao carregar agendamento')
+    }
     if (!agendamento) {
-      throw app.httpErrors.notFound('Agendamento não encontrado')
+      // Agendamento desconhecido é falha permanente: um 404 faria o FlowLab
+      // (webhook at-least-once) retentar para sempre. Respondemos 200 'ignored'
+      // para encerrar os retries e logamos como erro p/ manter rastro.
+      request.log.error(
+        { agendamentoLabhubId: payload.agendamentoLabhubId },
+        'Webhook de resultado p/ agendamento desconhecido — ignorado',
+      )
+      return reply.code(200).send({ ok: true, ignored: 'agendamento_nao_encontrado' })
     }
 
     const { error } = await supabase.from('resultados').insert({
