@@ -21,3 +21,42 @@ describe('client FlowLab', () => {
     await expect(flowlab.getDisponibilidade()).rejects.toThrow(/get-disponibilidade: 500/)
   })
 })
+
+describe('cache de disponibilidade (só exibição)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    flowlab.invalidarDisponibilidade() // isola o estado do cache entre testes
+  })
+
+  function stubDisponibilidade(): { calls: () => number } {
+    let calls = 0
+    vi.stubGlobal('fetch', async () => {
+      calls++
+      return new Response(JSON.stringify([{ id: 'p1', nome: 'Posto', endereco: 'Rua', slots: [] }]), {
+        status: 200,
+      })
+    })
+    return { calls: () => calls }
+  }
+
+  it('reusa o cache dentro do TTL: uma única chamada ao FlowLab', async () => {
+    const fetchSpy = stubDisponibilidade()
+    await flowlab.getDisponibilidadeCacheada()
+    await flowlab.getDisponibilidadeCacheada()
+    expect(fetchSpy.calls()).toBe(1)
+  })
+
+  it('coalesce de misses concorrentes: uma única chamada ao FlowLab', async () => {
+    const fetchSpy = stubDisponibilidade()
+    await Promise.all([flowlab.getDisponibilidadeCacheada(), flowlab.getDisponibilidadeCacheada()])
+    expect(fetchSpy.calls()).toBe(1)
+  })
+
+  it('refaz a busca após invalidar (ex.: novo agendamento)', async () => {
+    const fetchSpy = stubDisponibilidade()
+    await flowlab.getDisponibilidadeCacheada()
+    flowlab.invalidarDisponibilidade()
+    await flowlab.getDisponibilidadeCacheada()
+    expect(fetchSpy.calls()).toBe(2)
+  })
+})

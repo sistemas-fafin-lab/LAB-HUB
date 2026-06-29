@@ -134,6 +134,10 @@ export async function agendamentosRoutes(app: FastifyInstance): Promise<void> {
         throw app.httpErrors.internalServerError('Falha ao criar agendamento')
       }
 
+      // O slot reservado deixa de estar disponível: descarta o cache de exibição
+      // para que a próxima leitura (GET /postos/disponibilidade) já o reflita.
+      flowlab.invalidarDisponibilidade()
+
       // 3) Sincroniza com o FlowLab. Se falhar, mantém 'pendente' (sem falhar o
       //    request) p/ reprocessamento via POST /agendamentos/:id/sync.
       await sincronizarAgendamento(criado, request.log)
@@ -190,6 +194,52 @@ export async function agendamentosRoutes(app: FastifyInstance): Promise<void> {
       }
       // 'confirmado' (ag já mutado) ou 'em_andamento' (outro request detém o lock):
       // devolve o estado atual; o cliente pode reconsultar via GET /agendamentos.
+      return toAgendamento(ag)
+    },
+  )
+
+  // POST /agendamentos/:id/cancelar — marca o agendamento como 'cancelado'.
+  // Não remove a linha: preserva o histórico do paciente. Propagar o cancelamento
+  // ao FlowLab fica como follow-up (ainda não há Edge Function de cancelamento).
+  app.post(
+    '/agendamentos/:id/cancelar',
+    {
+      preHandler: authenticate,
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string }
+
+      // Carrega com checagem de dono (evita IDOR): só o próprio paciente.
+      const { data: ag, error } = await supabase
+        .from('agendamentos')
+        .select('*')
+        .eq('id', id)
+        .eq('paciente_id', request.pacienteId)
+        .maybeSingle()
+      if (error) {
+        throw app.httpErrors.internalServerError('Falha ao carregar agendamento')
+      }
+      if (!ag) {
+        throw app.httpErrors.notFound('Agendamento não encontrado')
+      }
+      // Já cancelado: idempotente, devolve como está.
+      if (ag.status === 'cancelado') {
+        return toAgendamento(ag)
+      }
+      // Coleta já realizada não pode ser cancelada (resultado já gerado).
+      if (ag.status === 'realizado') {
+        throw app.httpErrors.conflict('Coleta já realizada não pode ser cancelada')
+      }
+
+      const { error: updateError } = await supabase
+        .from('agendamentos')
+        .update({ status: 'cancelado', atualizado_em: new Date().toISOString() })
+        .eq('id', id)
+      if (updateError) {
+        throw app.httpErrors.internalServerError('Falha ao cancelar agendamento')
+      }
+      ag.status = 'cancelado'
       return toAgendamento(ag)
     },
   )

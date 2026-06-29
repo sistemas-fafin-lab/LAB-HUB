@@ -40,8 +40,46 @@ export interface ReceiveAgendamentoResposta {
   flowlabId: string // id do agendamento criado no FlowLab
 }
 
+// Cache em memória da disponibilidade, com TTL curto (configurável via
+// FLOWLAB_DISPONIBILIDADE_TTL_MS; default 30s). Serve só à LEITURA de exibição
+// (GET /postos/disponibilidade), para evitar o cold start da Edge Function a
+// cada acesso. O fluxo de criação de agendamento NÃO usa este cache: valida o
+// slot ao vivo via getDisponibilidade(), então o cache nunca causa agendamento
+// duplo — no pior caso, exibe um horário recém-tomado até o TTL expirar.
+const parsedDispTtl = Number(process.env.FLOWLAB_DISPONIBILIDADE_TTL_MS)
+const DISP_TTL_MS = Number.isFinite(parsedDispTtl) && parsedDispTtl >= 0 ? parsedDispTtl : 30_000
+
+let dispCache: { expiraEm: number; data: PostoDisponivel[] } | null = null
+let dispInFlight: Promise<PostoDisponivel[]> | null = null // coalesce de misses concorrentes
+
+async function getDisponibilidadeCacheada(): Promise<PostoDisponivel[]> {
+  if (dispCache && dispCache.expiraEm > Date.now()) return dispCache.data
+  // Já há uma busca em andamento: reaproveita (evita estouro de chamadas no miss).
+  if (dispInFlight) return dispInFlight
+  dispInFlight = call<PostoDisponivel[]>('get-disponibilidade')
+    .then((data) => {
+      dispCache = { expiraEm: Date.now() + DISP_TTL_MS, data }
+      return data
+    })
+    .finally(() => {
+      dispInFlight = null
+    })
+  return dispInFlight
+}
+
+// Descarta o cache — chamar após criar um agendamento, pois o slot reservado
+// deixa de estar disponível.
+function invalidarDisponibilidade(): void {
+  dispCache = null
+}
+
 export const flowlab = {
+  // Leitura ao vivo (usada na validação do agendamento).
   getDisponibilidade: () => call<PostoDisponivel[]>('get-disponibilidade'),
+
+  // Leitura com cache de TTL curto (usada só para exibição).
+  getDisponibilidadeCacheada,
+  invalidarDisponibilidade,
 
   receiveAgendamento: (payload: AgendamentoPayloadFlowLab) =>
     call<ReceiveAgendamentoResposta>('receive-agendamento', payload),

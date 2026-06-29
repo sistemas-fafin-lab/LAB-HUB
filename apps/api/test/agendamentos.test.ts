@@ -68,6 +68,7 @@ function flowlabMock(over: Partial<{ receiveAgendamento: unknown; getDisponibili
   return {
     getDisponibilidade: over.getDisponibilidade ?? vi.fn(async () => []),
     receiveAgendamento: over.receiveAgendamento ?? vi.fn(async () => ({ flowlabId: 'fl-new' })),
+    invalidarDisponibilidade: vi.fn(),
   }
 }
 
@@ -163,6 +164,76 @@ describe('POST /agendamentos/:id/sync (reprocesso + lock anti-corrida)', () => {
     app = await buildApp(agendamentosRoutes)
 
     const { status } = await sync()
+    expect(status).toBe(404)
+  })
+})
+
+describe('POST /agendamentos/:id/cancelar (mantém histórico)', () => {
+  let app: FastifyInstance
+
+  async function cancelar(): Promise<{ status: number; body: Record<string, unknown> }> {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/agendamentos/${AG_ID}/cancelar`,
+      headers: { authorization: 'Bearer test-token' },
+    })
+    return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : {} }
+  }
+
+  afterEach(async () => {
+    await app?.close()
+    vi.clearAllMocks()
+  })
+
+  it('cancela um agendamento confirmado e devolve status cancelado', async () => {
+    const supa = createSupabaseMock({
+      handler: supaHandler({ load: { data: { ...pendingRow(), status: 'confirmado', flowlab_id: 'fl-old' }, error: null } }),
+    })
+    h.setSb(supa.client)
+    h.setFl(flowlabMock())
+    app = await buildApp(agendamentosRoutes)
+
+    const { status, body } = await cancelar()
+    expect(status).toBe(200)
+    expect(body.status).toBe('cancelado')
+    // Não deleta a linha — só faz UPDATE de status (preserva o histórico).
+    expect(supa.calls.some((c) => c.table === 'agendamentos' && c.op === 'delete')).toBe(false)
+    expect(supa.calls.some((c) => c.table === 'agendamentos' && c.op === 'update')).toBe(true)
+  })
+
+  it('é idempotente em agendamento já cancelado: não faz novo UPDATE', async () => {
+    const supa = createSupabaseMock({
+      handler: supaHandler({ load: { data: { ...pendingRow(), status: 'cancelado' }, error: null } }),
+    })
+    h.setSb(supa.client)
+    h.setFl(flowlabMock())
+    app = await buildApp(agendamentosRoutes)
+
+    const { status, body } = await cancelar()
+    expect(status).toBe(200)
+    expect(body.status).toBe('cancelado')
+    expect(supa.calls.some((c) => c.table === 'agendamentos' && c.op === 'update')).toBe(false)
+  })
+
+  it('responde 409 ao tentar cancelar uma coleta já realizada', async () => {
+    const supa = createSupabaseMock({
+      handler: supaHandler({ load: { data: { ...pendingRow(), status: 'realizado' }, error: null } }),
+    })
+    h.setSb(supa.client)
+    h.setFl(flowlabMock())
+    app = await buildApp(agendamentosRoutes)
+
+    const { status } = await cancelar()
+    expect(status).toBe(409)
+  })
+
+  it('responde 404 quando o agendamento não existe (ou não é do paciente)', async () => {
+    const supa = createSupabaseMock({ handler: supaHandler({ load: { data: null, error: null } }) })
+    h.setSb(supa.client)
+    h.setFl(flowlabMock())
+    app = await buildApp(agendamentosRoutes)
+
+    const { status } = await cancelar()
     expect(status).toBe(404)
   })
 })
