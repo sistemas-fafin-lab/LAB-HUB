@@ -1,4 +1,4 @@
-import type { AgendamentoPayloadFlowLab, PostoDisponivel } from '@lab-hub/shared'
+import type { AgendamentoPayloadFlowLab, CancelamentoPayloadFlowLab, PostoDisponivel } from '@lab-hub/shared'
 import { requireEnv } from './env.js'
 
 const BASE = requireEnv('FLOWLAB_EDGE_FUNCTION_URL')
@@ -38,6 +38,12 @@ async function call<T>(fn: string, body?: unknown): Promise<T> {
 
 export interface ReceiveAgendamentoResposta {
   flowlabId: string // id do agendamento criado no FlowLab
+}
+
+export interface ReceiveCancelamentoResposta {
+  flowlabId?: string // id do agendamento no FlowLab (ausente se nunca sincronizado)
+  status?: string // 'cancelado' | 'nao_encontrado'
+  idempotency?: string
 }
 
 // Cache em memória da disponibilidade, com TTL curto (configurável via
@@ -83,4 +89,8 @@ export const flowlab = {
 
   receiveAgendamento: (payload: AgendamentoPayloadFlowLab) =>
     call<ReceiveAgendamentoResposta>('receive-agendamento', payload),
+
+  // Propaga o cancelamento ao FlowLab (libera o slot). Idempotente do lado de lá.
+  receiveCancelamento: (payload: CancelamentoPayloadFlowLab) =>
+    call<ReceiveCancelamentoResposta>('receive-cancelamento', payload),
 }

@@ -199,8 +199,8 @@ export async function agendamentosRoutes(app: FastifyInstance): Promise<void> {
   )
 
   // POST /agendamentos/:id/cancelar — marca o agendamento como 'cancelado'.
-  // Não remove a linha: preserva o histórico do paciente. Propagar o cancelamento
-  // ao FlowLab fica como follow-up (ainda não há Edge Function de cancelamento).
+  // Não remove a linha: preserva o histórico do paciente. Após o cancelamento
+  // local, propaga ao FlowLab (best-effort) para liberar o slot.
   app.post(
     '/agendamentos/:id/cancelar',
     {
@@ -240,6 +240,25 @@ export async function agendamentosRoutes(app: FastifyInstance): Promise<void> {
         throw app.httpErrors.internalServerError('Falha ao cancelar agendamento')
       }
       ag.status = 'cancelado'
+
+      // Propaga ao FlowLab para liberar o slot (ocupação derivada de
+      // ac_agendamentos). Só faz sentido se o agendamento chegou a ser
+      // sincronizado (tem flowlab_id). Best-effort: o cancelamento local já está
+      // gravado — se o FlowLab estiver fora, logamos e seguimos sem falhar o
+      // request do paciente. A próxima leitura de disponibilidade volta a
+      // refletir o slot só após a propagação ter sucesso.
+      if (ag.flowlab_id) {
+        try {
+          await flowlab.receiveCancelamento({ labhubId: ag.id })
+          flowlab.invalidarDisponibilidade()
+        } catch (err) {
+          request.log.error(
+            { err, agendamentoId: ag.id },
+            'Falha ao propagar cancelamento ao FlowLab',
+          )
+        }
+      }
+
       return toAgendamento(ag)
     },
   )

@@ -102,6 +102,13 @@ export interface AgendamentoPayloadFlowLab {
   dataHora: string
 }
 
+// Payload enviado ao FlowLab ao cancelar um agendamento. O FlowLab identifica o
+// agendamento pelo labhubId (chave de idempotência usada também no receive) e o
+// marca como 'cancelado', liberando o slot.
+export interface CancelamentoPayloadFlowLab {
+  labhubId: string
+}
+
 // Payload recebido do FlowLab via webhook de resultado (D1)
 export interface ResultadoWebhookPayload {
   agendamentoLabhubId: string

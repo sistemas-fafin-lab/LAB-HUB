@@ -64,10 +64,13 @@ function supaHandler(scenario: {
   }
 }
 
-function flowlabMock(over: Partial<{ receiveAgendamento: unknown; getDisponibilidade: unknown }> = {}) {
+function flowlabMock(
+  over: Partial<{ receiveAgendamento: unknown; getDisponibilidade: unknown; receiveCancelamento: unknown }> = {},
+) {
   return {
     getDisponibilidade: over.getDisponibilidade ?? vi.fn(async () => []),
     receiveAgendamento: over.receiveAgendamento ?? vi.fn(async () => ({ flowlabId: 'fl-new' })),
+    receiveCancelamento: over.receiveCancelamento ?? vi.fn(async () => ({ flowlabId: 'fl-old', status: 'cancelado' })),
     invalidarDisponibilidade: vi.fn(),
   }
 }
@@ -235,6 +238,53 @@ describe('POST /agendamentos/:id/cancelar (mantém histórico)', () => {
 
     const { status } = await cancelar()
     expect(status).toBe(404)
+  })
+
+  it('propaga o cancelamento ao FlowLab quando há flowlab_id', async () => {
+    const supa = createSupabaseMock({
+      handler: supaHandler({ load: { data: { ...pendingRow(), status: 'confirmado', flowlab_id: 'fl-old' }, error: null } }),
+    })
+    const fl = flowlabMock()
+    h.setSb(supa.client)
+    h.setFl(fl)
+    app = await buildApp(agendamentosRoutes)
+
+    const { status } = await cancelar()
+    expect(status).toBe(200)
+    expect(fl.receiveCancelamento).toHaveBeenCalledWith({ labhubId: AG_ID })
+  })
+
+  it('não chama o FlowLab quando o agendamento nunca foi sincronizado (sem flowlab_id)', async () => {
+    const supa = createSupabaseMock({
+      handler: supaHandler({ load: { data: { ...pendingRow(), status: 'pendente', flowlab_id: null }, error: null } }),
+    })
+    const fl = flowlabMock()
+    h.setSb(supa.client)
+    h.setFl(fl)
+    app = await buildApp(agendamentosRoutes)
+
+    const { status, body } = await cancelar()
+    expect(status).toBe(200)
+    expect(body.status).toBe('cancelado')
+    expect(fl.receiveCancelamento).not.toHaveBeenCalled()
+  })
+
+  it('não falha o cancelamento quando o FlowLab está indisponível', async () => {
+    const supa = createSupabaseMock({
+      handler: supaHandler({ load: { data: { ...pendingRow(), status: 'confirmado', flowlab_id: 'fl-old' }, error: null } }),
+    })
+    const fl = flowlabMock({
+      receiveCancelamento: vi.fn(async () => {
+        throw new Error('FlowLab fora')
+      }),
+    })
+    h.setSb(supa.client)
+    h.setFl(fl)
+    app = await buildApp(agendamentosRoutes)
+
+    const { status, body } = await cancelar()
+    expect(status).toBe(200)
+    expect(body.status).toBe('cancelado')
   })
 })
 
