@@ -126,7 +126,7 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
     // encontrado" de falha transitória (mesma razão do /webhooks/resultados).
     const { data: agendamento, error: agendamentoError } = await supabase
       .from('agendamentos')
-      .select('id, status')
+      .select('id, status, exames')
       .eq('id', payload.agendamentoLabhubId)
       .maybeSingle()
     if (agendamentoError) {
@@ -144,6 +144,10 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const atual = agendamento.status as AgendamentoStatus
+    // Exames coletados vêm junto do 'coletado' (snapshot p/ a timeline). Só
+    // gravamos quando a lista chega não-vazia.
+    const exames = payload.exames
+    const temExames = Array.isArray(exames) && exames.length > 0
     // Guardas de ordenação/idempotência — o webhook é at-least-once e pode chegar
     // fora de ordem. Não revivemos um cancelado nem regredimos de um já realizado.
     if (atual === 'cancelado') {
@@ -153,13 +157,29 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(200).send({ ok: true, ignored: 'ja_realizado' })
     }
     if (atual === novoStatus) {
+      // Status já é o alvo. Ainda assim, uma reentrega/reconciliação pode trazer os
+      // exames que faltavam (ex.: curl no deliver-coleta sobre uma coleta já
+      // 'realizado' cujo snapshot ficou null). Grava só os exames nesse caso.
+      if (temExames && agendamento.exames == null) {
+        const { error } = await supabase
+          .from('agendamentos')
+          .update({ exames, atualizado_em: new Date().toISOString() })
+          .eq('id', agendamento.id)
+        if (error) {
+          throw app.httpErrors.internalServerError('Falha ao gravar exames do agendamento')
+        }
+        return reply.code(200).send({ ok: true, exames: exames.length })
+      }
       return reply.code(200).send({ ok: true, idempotency: 'ignored' })
     }
 
-    const { error } = await supabase
-      .from('agendamentos')
-      .update({ status: novoStatus, atualizado_em: new Date().toISOString() })
-      .eq('id', agendamento.id)
+    const patch: Record<string, unknown> = {
+      status: novoStatus,
+      atualizado_em: new Date().toISOString(),
+    }
+    if (temExames) patch.exames = exames
+
+    const { error } = await supabase.from('agendamentos').update(patch).eq('id', agendamento.id)
     if (error) {
       throw app.httpErrors.internalServerError('Falha ao atualizar status do agendamento')
     }

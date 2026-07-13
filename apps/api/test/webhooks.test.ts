@@ -116,6 +116,12 @@ function validColeta(status: 'em_coleta' | 'coletado' | 'bloqueado' = 'coletado'
   return { agendamentoLabhubId: AG_ID, status }
 }
 
+// Snapshot de exames que acompanha o 'coletado' (um comum + uma cultura).
+const EXAMES = [
+  { nome: 'Hemograma completo', isCultura: false, material: 'Soro' },
+  { nome: 'Urocultura', isCultura: true, material: 'Urina' },
+]
+
 async function postColeta(
   app: FastifyInstance,
   raw: string,
@@ -249,5 +255,38 @@ describe('POST /webhooks/coletas', () => {
     })
     const { status } = await postColeta(app, JSON.stringify(validColeta('coletado')))
     expect(status).toBe(500)
+  })
+
+  it("grava status e exames quando o 'coletado' traz a lista", async () => {
+    const supa = await setup(agendamentoComStatus('em_coleta'))
+    const raw = JSON.stringify({ ...validColeta('coletado'), exames: EXAMES })
+    const { status, body } = await postColeta(app, raw)
+    expect(status).toBe(200)
+    expect(body.status).toBe('realizado')
+    const upd = supa.calls.find((c) => c.table === 'agendamentos' && c.op === 'update')
+    const payload = upd?.payload as { status?: string; exames?: unknown[] }
+    expect(payload?.status).toBe('realizado')
+    expect(payload?.exames).toEqual(EXAMES)
+  })
+
+  it("não grava exames quando o 'coletado' vem sem a lista", async () => {
+    const supa = await setup(agendamentoComStatus('em_coleta'))
+    const { status } = await postColeta(app, JSON.stringify(validColeta('coletado')))
+    expect(status).toBe(200)
+    const upd = supa.calls.find((c) => c.table === 'agendamentos' && c.op === 'update')
+    expect(upd?.payload as object).not.toHaveProperty('exames')
+  })
+
+  it('reconciliação: já realizado sem exames grava só os exames (200)', async () => {
+    const supa = await setup(agendamentoComStatus('realizado'))
+    const raw = JSON.stringify({ ...validColeta('coletado'), exames: EXAMES })
+    const { status, body } = await postColeta(app, raw)
+    expect(status).toBe(200)
+    expect(body.exames).toBe(EXAMES.length)
+    const upd = supa.calls.find((c) => c.table === 'agendamentos' && c.op === 'update')
+    const payload = upd?.payload as { status?: string; exames?: unknown[] }
+    expect(payload?.exames).toEqual(EXAMES)
+    // Update só de exames — não mexe no status.
+    expect(payload?.status).toBeUndefined()
   })
 })

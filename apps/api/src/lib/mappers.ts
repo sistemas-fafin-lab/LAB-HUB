@@ -1,6 +1,7 @@
 import type {
   Agendamento,
   AgendamentoStatus,
+  ExameColeta,
   Paciente,
   PainelResultado,
   Resultado,
@@ -20,6 +21,7 @@ interface AgendamentoRow {
   status: string
   flowlab_id: string | null
   criado_em: string
+  exames: ExameColeta[] | null
 }
 
 export function toAgendamento(row: AgendamentoRow): Agendamento {
@@ -32,6 +34,7 @@ export function toAgendamento(row: AgendamentoRow): Agendamento {
     status: row.status as AgendamentoStatus,
     ...(row.flowlab_id ? { flowlabId: row.flowlab_id } : {}),
     criadoEm: row.criado_em,
+    ...(row.exames ? { exames: row.exames } : {}),
   }
 }
 

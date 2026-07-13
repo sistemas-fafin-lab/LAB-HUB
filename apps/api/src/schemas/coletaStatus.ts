@@ -9,6 +9,16 @@ export const coletaStatusWebhookSchema = z.object({
   status: z.enum(['em_coleta', 'coletado', 'bloqueado']),
   // Momento da mudança no FlowLab (informativo; opcional).
   ocorridoEm: z.string().datetime().optional(),
+  // Exames marcados no check-in (snapshot). Só acompanham o 'coletado'; opcional.
+  exames: z
+    .array(
+      z.object({
+        nome: z.string(),
+        isCultura: z.boolean(),
+        material: z.string().optional(),
+      }),
+    )
+    .optional(),
 })
 
 export type ColetaStatusWebhookInput = z.infer<typeof coletaStatusWebhookSchema>

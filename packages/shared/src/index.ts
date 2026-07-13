@@ -16,6 +16,15 @@ export type AgendamentoStatus =
   | 'bloqueado'
   | 'cancelado'
 
+// Exame marcado no check-in da coleta (snapshot vindo do FlowLab via
+// /webhooks/coletas). `isCultura` destaca os microbiológicos que geram
+// acompanhamento de cultura; `material` é o tipo de amostra (ex.: "Soro").
+export interface ExameColeta {
+  nome: string
+  isCultura: boolean
+  material?: string
+}
+
 export interface Agendamento {
   id: string
   pacienteId: string
@@ -25,6 +34,9 @@ export interface Agendamento {
   status: AgendamentoStatus
   flowlabId?: string
   criadoEm: string
+  // Exames coletados (snapshot). Só chega a partir de 'realizado' — os exames são
+  // selecionados no FlowLab na hora de registrar a coleta.
+  exames?: ExameColeta[]
 }
 
 // ---------------------------------------------------------------------------
