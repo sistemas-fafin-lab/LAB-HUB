@@ -13,12 +13,15 @@ import { webhooksRoutes } from './routes/webhooks.js'
 const server = Fastify({ logger: { level: 'info' } })
 
 server.register(sensible)
+// Origens do frontend permitidas. Em produção, defina CORS_ORIGIN com o(s) domínio(s)
+// exato(s), separados por vírgula. Em dev (sem CORS_ORIGIN), libera qualquer porta de
+// localhost/127.0.0.1 — o Vite troca de porta (5173 → 5174 → …) quando a anterior está ocupada.
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/]
+
 server.register(cors, {
-  // Origens do frontend permitidas. Em produção, defina CORS_ORIGIN com o domínio exato.
-  origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()) ?? [
-    'http://localhost:5173',
-    'http://localhost:3000',
-  ],
+  origin: corsOrigin,
   credentials: true,
 })
 // Fallback global amplo (~10/s) só p/ proteção básica contra abuso; os limites

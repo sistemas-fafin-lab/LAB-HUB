@@ -9,12 +9,15 @@
   "scripts": {
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:mobile": "npm run start --workspace=apps/mobile",
-    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:api": "concurrently --names api,ngrok -c cyan,magenta \"npm run dev:api:solo\" \"npm run tunnel\"",
+    "dev:api:solo": "npm run dev --workspace=apps/api",
+    "tunnel": "ngrok http --url=https://scrubbier-songless-connor.ngrok-free.dev 3000 --log=stdout",
     "build": "npm run build --workspace=apps/web",
     "type-check": "npm run type-check --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"
   },
   "devDependencies": {
+    "concurrently": "^9.1.0",
     "metro": "0.83.3",
     "typescript": "^5.5.0"
   },
