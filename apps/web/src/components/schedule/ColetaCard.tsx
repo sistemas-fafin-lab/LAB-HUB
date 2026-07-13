@@ -28,7 +28,7 @@ export function ColetaCard({
   cancelling,
   onOpen,
 }: ColetaCardProps) {
-  const { id, postoNome, dataHora, status } = agendamento
+  const { id, postoNome, dataHora, status, exames } = agendamento
   const isPendente = status === 'pendente'
   const isCancelado = status === 'cancelado'
   const isRealizado = status === 'realizado'
@@ -110,6 +110,12 @@ export function ColetaCard({
             </div>
           ) : (
             <div className="flex items-center gap-3 shrink-0">
+              {exames && exames.length > 0 && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-xs text-gray-500">
+                  <WIcon name="test-tube" className="w-3.5 h-3.5" strokeWidth={2.2} />
+                  {exames.length} {exames.length === 1 ? 'exame' : 'exames'}
+                </span>
+              )}
               {isPendente && onResync && (
                 <button
                   onClick={() => onResync(id)}

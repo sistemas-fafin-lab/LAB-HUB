@@ -29,14 +29,15 @@ const ETAPAS: Etapa[] = [
 
 // Mapeia cada status para a etapa "atual" da linha do tempo (etapas anteriores
 // contam como concluídas). 'confirmado' = reservada, aguardando o dia (etapa 0);
-// 'em_coleta' = check-in feito na recepção (etapa 1); 'realizado' = coleta já
-// concluída, amostra seguindo para o laboratório — logo a etapa atual é "Em
-// análise" (etapa 3) e "Coleta realizada" (etapa 2) fica concluída (verde).
-// 'cancelado' e 'bloqueado' são tratados à parte (banner + destaque).
+// 'em_coleta' = recepção já conferiu e liberou — o check-in (etapa 1) está
+// concluído (verde) e a etapa atual é a "Coleta" (etapa 2); 'realizado' = coleta
+// feita, então "Coleta realizada" (etapa 2) fica concluída e a atual é "Em
+// análise" (etapa 3). 'cancelado' e 'bloqueado' (pendência na recepção, etapa 1)
+// são tratados à parte (banner + destaque).
 const STATUS_ETAPA: Record<AgendamentoStatus, number> = {
   pendente: 0,
   confirmado: 0,
-  em_coleta: 1,
+  em_coleta: 2,
   realizado: 3,
   bloqueado: 1,
   cancelado: 0,
@@ -44,8 +45,22 @@ const STATUS_ETAPA: Record<AgendamentoStatus, number> = {
 
 type EtapaEstado = 'done' | 'current' | 'future'
 
+// Rótulo/descrição de uma etapa. A "Coleta" (índice 2) é a única sensível ao
+// estado: enquanto é a etapa atual (status 'em_coleta') a amostra ainda está
+// sendo coletada no posto; quando concluída (verde), passa a "Coleta realizada".
+function textoEtapa(
+  i: number,
+  estado: EtapaEstado,
+  etapa: Etapa,
+): { label: string; desc: string } {
+  if (i === 2 && estado === 'current') {
+    return { label: 'Coleta', desc: 'Amostra sendo coletada no posto.' }
+  }
+  return { label: etapa.label, desc: etapa.desc }
+}
+
 export function ColetaTimeline({ agendamento, dark, onBack }: ColetaTimelineProps) {
-  const { postoNome, dataHora, status, criadoEm } = agendamento
+  const { postoNome, dataHora, status, criadoEm, exames } = agendamento
   const isCancelado = status === 'cancelado'
   const isBloqueado = status === 'bloqueado'
   const currentIndex = STATUS_ETAPA[status]
@@ -56,11 +71,14 @@ export function ColetaTimeline({ agendamento, dark, onBack }: ColetaTimelineProp
     i < currentIndex ? 'done' : i === currentIndex ? 'current' : 'future'
 
   // Etapa atual exibida no cabeçalho.
+  const etapaAtual = ETAPAS[currentIndex]
   const etapaAtualLabel = isCancelado
     ? 'Cancelado'
     : isBloqueado
       ? 'Pendência'
-      : (ETAPAS[currentIndex]?.label ?? 'Agendada')
+      : etapaAtual
+        ? textoEtapa(currentIndex, 'current', etapaAtual).label
+        : 'Agendada'
 
   // Previsão de liberação: sem esse dado no backend, estimamos o dia seguinte à
   // coleta. Não faz sentido enquanto cancelado ou bloqueado.
@@ -125,6 +143,49 @@ export function ColetaTimeline({ agendamento, dark, onBack }: ColetaTimelineProp
         </div>
       </div>
 
+      {/* Exames coletados — snapshot vindo do FlowLab (só a partir de 'realizado') */}
+      {exames && exames.length > 0 && (
+        <div className={`rounded-2xl border ${cardBase} p-6 shadow-sm mb-5`}>
+          <h2 className={`text-sm font-bold mb-4 ${dark ? 'text-white' : 'text-slate-800'}`}>
+            Exames coletados
+          </h2>
+          <ul className="space-y-2.5">
+            {exames.map((ex, i) => (
+              <li key={`${ex.nome}-${i}`} className="flex items-center gap-3">
+                <div
+                  className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${
+                    ex.isCultura
+                      ? 'bg-purple-50 text-purple-600'
+                      : dark
+                        ? 'bg-gray-800 text-gray-300'
+                        : 'bg-blue-50 text-blue-600'
+                  }`}
+                >
+                  <WIcon
+                    name={ex.isCultura ? 'flask-conical' : 'test-tube'}
+                    className="w-4 h-4"
+                    strokeWidth={2.2}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-sm font-medium ${dark ? 'text-white' : 'text-slate-800'}`}>
+                      {ex.nome}
+                    </span>
+                    {ex.isCultura && (
+                      <span className="inline-flex items-center rounded-full bg-purple-50 text-purple-600 text-[10px] font-bold px-2 py-0.5">
+                        Cultura
+                      </span>
+                    )}
+                  </div>
+                  {ex.material && <p className="text-xs text-gray-500 mt-0.5">{ex.material}</p>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Linha do tempo */}
       <div className={`rounded-2xl border ${cardBase} p-6 shadow-sm`}>
         <h2 className={`text-sm font-bold mb-5 ${dark ? 'text-white' : 'text-slate-800'}`}>
@@ -158,6 +219,7 @@ export function ColetaTimeline({ agendamento, dark, onBack }: ColetaTimelineProp
             const estado = estadoDe(i)
             const isLast = i === ETAPAS.length - 1
             const ts = carimbo(i, estado)
+            const { label, desc } = textoEtapa(i, estado, etapa)
             return (
               <div key={etapa.label} className={`flex gap-4 ${isLast ? '' : 'pb-6'}`}>
                 {/* Trilho: nó + linha conectora */}
@@ -191,7 +253,7 @@ export function ColetaTimeline({ agendamento, dark, onBack }: ColetaTimelineProp
                                 : 'text-slate-800'
                         }`}
                       >
-                        {etapa.label}
+                        {label}
                       </span>
                       {estado === 'current' && !isCancelado && !isBloqueado && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold px-2 py-0.5">
@@ -205,7 +267,7 @@ export function ColetaTimeline({ agendamento, dark, onBack }: ColetaTimelineProp
                         estado === 'future' ? 'text-gray-400' : 'text-gray-500'
                       }`}
                     >
-                      {etapa.desc}
+                      {desc}
                     </p>
                   </div>
                   {ts && <span className="text-xs text-gray-400 whitespace-nowrap shrink-0">{ts}</span>}
