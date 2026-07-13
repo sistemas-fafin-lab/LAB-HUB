@@ -2,7 +2,7 @@
 flowchart TD
 %% Nodes
   n0[Início]
-  n1[Criar conta / Login (opcional)]
+  n1["Criar conta / Login (opcional)"]
   n2[Solicitar agendamento]
   n3[Escolher local/posto e data/hora]
   n4[Confirmar agendamento]
@@ -12,8 +12,8 @@ flowchart TD
   n8{Coleta realizada com sucesso?}
   n9[Registrar motivo de falha]
   n10[Reagendar ou encerrar]
-  n11[Notificar paciente (recoleta)]
-  n12[Relatório de agendamentos / coletas (view)]
+  n11["Notificar paciente (recoleta)"]
+  n12["Relatório de agendamentos / coletas (view)"]
   n13[Relatório de recoletas]
   n14["Registrar coleta<br/>Registrar insumos usados/desperdiçados"]
   n15{Precisa de recoleta?}
