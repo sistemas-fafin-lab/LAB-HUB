@@ -6,7 +6,15 @@
 // Agendamentos
 // ---------------------------------------------------------------------------
 
-export type AgendamentoStatus = 'pendente' | 'confirmado' | 'cancelado' | 'realizado'
+// Fluxo da coleta. 'em_coleta' (check-in feito na recepção) e 'bloqueado' (pendência
+// na recepção) chegam do FlowLab via POST /webhooks/coletas; 'realizado' = coleta feita.
+export type AgendamentoStatus =
+  | 'pendente'
+  | 'confirmado'
+  | 'em_coleta'
+  | 'realizado'
+  | 'bloqueado'
+  | 'cancelado'
 
 export interface Agendamento {
   id: string
