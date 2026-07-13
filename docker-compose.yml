@@ -1,0 +1,43 @@
+# LAB-HUB API + túnel ngrok, para rodar no VPS.
+#
+# Deploy manual (você mesmo sobe, sem CI):
+#   git pull
+#   docker compose up -d --build      # rebuilda a imagem e reinicia
+#   docker compose logs -f api        # acompanha os logs
+#
+# Pré-requisitos no VPS: Docker + Docker Compose, e um arquivo `.env` ao lado
+# deste (ver apps/api/.env.example) com SUPABASE_*, FLOWLAB_*, CORS_ORIGIN e o
+# NGROK_AUTHTOKEN.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lab-hub-api:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3333"
+    expose:
+      - "3333"            # só na rede interna do compose (o ngrok alcança por aqui)
+    # Descomente p/ acessar direto no host do VPS (debug), preso ao loopback:
+    # ports:
+    #   - "127.0.0.1:3333:3333"
+
+  # Túnel público (HTTPS) para o webhook do FlowLab e o frontend alcançarem a API.
+  # Plano free do ngrok = 1 agente online por vez: rodando aqui, pare o ngrok local.
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    command:
+      - http
+      - api:3333          # alvo = a API na rede do compose (NÃO a porta 80)
+      - --url=https://labhub.ngrok.app
+      - --log=stdout

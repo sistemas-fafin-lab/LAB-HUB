@@ -1,0 +1,25 @@
+# Dependências e artefatos de build (reinstalados/recompilados na imagem).
+**/node_modules
+**/dist
+*.tsbuildinfo
+
+# Git / CI
+.git
+.gitignore
+.github
+
+# Segredos e envs locais (NUNCA entram na imagem — vêm via env_file no compose).
+**/.env
+**/.env.*
+
+# Fonte de web/mobile não é usada na imagem da API (só os package.json, p/ o npm ci).
+apps/web/**
+!apps/web/package.json
+apps/mobile/**
+!apps/mobile/package.json
+
+# Misc
+*.log
+.DS_Store
+Dockerfile
+docker-compose.yml
