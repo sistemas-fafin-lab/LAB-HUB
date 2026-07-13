@@ -1,6 +1,7 @@
 import type { Agendamento } from '@lab-hub/shared'
 import { WIcon } from '../primitives/WIcon'
 import { ColetaCard } from './ColetaCard'
+import { ColetasSkeleton } from './ColetasSkeleton'
 
 interface ColetasListProps {
   agendamentos: Agendamento[]
@@ -15,6 +16,8 @@ interface ColetasListProps {
   onCancel: (id: string) => void
   /** Acionado pelo CTA do estado vazio p/ ir à aba "Agendar". */
   onAgendar: () => void
+  /** Abre a linha do tempo (detalhe) de um agendamento. */
+  onOpen: (id: string) => void
 }
 
 // Aba "Minhas coletas": lista os agendamentos do paciente.
@@ -28,9 +31,10 @@ export function ColetasList({
   cancellingId,
   onCancel,
   onAgendar,
+  onOpen,
 }: ColetasListProps) {
   if (loading) {
-    return <div className="text-center text-sm text-gray-400 py-10">Carregando suas coletas…</div>
+    return <ColetasSkeleton dark={dark} />
   }
 
   if (error) {
@@ -68,9 +72,16 @@ export function ColetasList({
     )
   }
 
+  const ativos = ['pendente', 'confirmado']
+  const sorted = [...agendamentos].sort((a, b) => {
+    const aAtivo = ativos.includes(a.status) ? 1 : 0
+    const bAtivo = ativos.includes(b.status) ? 1 : 0
+    return bAtivo - aAtivo
+  })
+
   return (
     <div className="flex flex-col gap-3">
-      {agendamentos.map((ag) => (
+      {sorted.map((ag) => (
         <ColetaCard
           key={ag.id}
           agendamento={ag}
@@ -79,6 +90,7 @@ export function ColetasList({
           resyncing={resyncingId === ag.id}
           onCancel={onCancel}
           cancelling={cancellingId === ag.id}
+          onOpen={onOpen}
         />
       ))}
     </div>

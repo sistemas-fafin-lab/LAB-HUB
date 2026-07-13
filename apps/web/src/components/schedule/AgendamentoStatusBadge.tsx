@@ -18,10 +18,20 @@ const STATUS: Record<AgendamentoStatus, StatusConfig> = {
     icon: 'check-circle',
     classes: 'bg-emerald-100 text-emerald-800',
   },
+  em_coleta: {
+    label: 'Check-in feito',
+    icon: 'clipboard-check',
+    classes: 'bg-indigo-100 text-indigo-800',
+  },
   realizado: {
     label: 'Realizado',
     icon: 'badge-check',
     classes: 'bg-blue-100 text-blue-800',
+  },
+  bloqueado: {
+    label: 'Pendência',
+    icon: 'alert-triangle',
+    classes: 'bg-red-100 text-red-700',
   },
   cancelado: {
     label: 'Cancelado',

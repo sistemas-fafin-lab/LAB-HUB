@@ -6,30 +6,37 @@ import { formatDataHora } from '../../lib/datetime'
 import { UnitSelector } from './UnitSelector'
 import { SlotPicker } from './SlotPicker'
 import { BookingSkeleton } from './BookingSkeleton'
+import { ConfirmBookingModal } from './ConfirmBookingModal'
 
 interface BookingPanelProps {
   dark: boolean
   /** Chamado após confirmar uma coleta, p/ que a lista possa recarregar. */
   onBooked?: () => void
+  /** Força recarregamento da disponibilidade quando o valor muda. */
+  refreshKey?: number
 }
 
 // Aba "Agendar": escolhe a unidade, exibe a disponibilidade e confirma a coleta.
-export function BookingPanel({ dark, onBooked }: BookingPanelProps) {
+export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) {
   const [postos, setPostos] = useState<PostoDisponivel[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState<string | null>(null) // slot ISO em envio
-  const [confirmed, setConfirmed] = useState<{ posto: string; dataHora: string } | null>(null)
+  const [pending, setPending] = useState<string | null>(null) // slot ISO aguardando confirmação
+  const [confirmed, setConfirmed] = useState<
+    { posto: string; dataHora: string } | null
+  >(null)
 
-  useEffect(() => {
+  const fetchData = () => {
     let alive = true
+    setLoading(true)
     api
       .get<PostoDisponivel[]>('/postos/disponibilidade')
       .then((data) => {
         if (!alive) return
         setPostos(data)
-        setSelectedId(data[0]?.id ?? null)
+        setSelectedId((prev) => prev ?? data[0]?.id ?? null)
         setError(null)
       })
       .catch((e: unknown) => {
@@ -41,7 +48,12 @@ export function BookingPanel({ dark, onBooked }: BookingPanelProps) {
     return () => {
       alive = false
     }
-  }, [])
+  }
+
+  useEffect(() => {
+    return fetchData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
 
   const selected = useMemo(
     () => postos.find((p) => p.id === selectedId) ?? null,
@@ -53,6 +65,9 @@ export function BookingPanel({ dark, onBooked }: BookingPanelProps) {
     setSubmitting(dataHora)
     setError(null)
     try {
+      // O POST /agendamentos só aceita posto + data/hora. Os exames não são
+      // escolhidos aqui: o paciente leva o pedido médico e a recepção seleciona
+      // os exames no check-in (FlowLab).
       await api.post<Agendamento>('/agendamentos', {
         postoFlowlabId: selected.id,
         dataHora,
@@ -69,6 +84,7 @@ export function BookingPanel({ dark, onBooked }: BookingPanelProps) {
       setError(e instanceof Error ? e.message : 'Falha ao agendar')
     } finally {
       setSubmitting(null)
+      setPending(null)
     }
   }
 
@@ -79,11 +95,13 @@ export function BookingPanel({ dark, onBooked }: BookingPanelProps) {
   return (
     <div className="flex flex-col gap-5">
       {confirmed && (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-800 p-4 flex items-center gap-3">
-          <WIcon name="check-circle" className="w-5 h-5" strokeWidth={2.2} />
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-800 p-4 flex items-start gap-3">
+          <WIcon name="check-circle" className="w-5 h-5 mt-0.5 shrink-0" strokeWidth={2.2} />
           <div className="text-sm">
-            Coleta confirmada na <strong>{confirmed.posto}</strong> para{' '}
-            <strong>{formatDataHora(confirmed.dataHora)}</strong>.
+            <div>
+              Coleta confirmada na <strong>{confirmed.posto}</strong> para{' '}
+              <strong className="capitalize">{formatDataHora(confirmed.dataHora)}</strong>.
+            </div>
           </div>
         </div>
       )}
@@ -112,11 +130,22 @@ export function BookingPanel({ dark, onBooked }: BookingPanelProps) {
             <SlotPicker
               slots={selected.slots}
               submitting={submitting}
-              onPick={(iso) => void handleConfirm(iso)}
+              onPick={(iso) => setPending(iso)}
               dark={dark}
             />
           )}
         </>
+      )}
+
+      {pending && selected && (
+        <ConfirmBookingModal
+          postoNome={selected.nome}
+          dataHora={pending}
+          submitting={submitting !== null}
+          onConfirm={() => void handleConfirm(pending)}
+          onCancel={() => setPending(null)}
+          dark={dark}
+        />
       )}
     </div>
   )

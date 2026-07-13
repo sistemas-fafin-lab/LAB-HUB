@@ -26,7 +26,9 @@ export function UnitSelector({ postos, selectedId, onSelect, dark }: UnitSelecto
               onClick={() => onSelect(p.id)}
               className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
                 active
-                  ? 'border-blue-500 bg-blue-50/60'
+                  ? dark
+                    ? 'border-blue-500 bg-blue-500/10'
+                    : 'border-blue-500 bg-blue-50/60'
                   : dark
                     ? 'border-gray-800 hover:bg-gray-800/50'
                     : 'border-gray-100 hover:bg-slate-50'
@@ -36,7 +38,7 @@ export function UnitSelector({ postos, selectedId, onSelect, dark }: UnitSelecto
                 <WIcon name="map-pin" className="w-5 h-5" strokeWidth={2.2} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className={`text-sm font-semibold ${dark && !active ? 'text-white' : 'text-slate-800'}`}>
+                <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>
                   {p.nome}
                 </div>
                 <div className="text-xs text-gray-500 truncate">{p.endereco}</div>
