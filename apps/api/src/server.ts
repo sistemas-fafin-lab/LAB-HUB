@@ -14,10 +14,17 @@ const server = Fastify({ logger: { level: 'info' } })
 
 server.register(sensible)
 // Origens do frontend permitidas. Em produção, defina CORS_ORIGIN com o(s) domínio(s)
-// exato(s), separados por vírgula. Em dev (sem CORS_ORIGIN), libera qualquer porta de
-// localhost/127.0.0.1 — o Vite troca de porta (5173 → 5174 → …) quando a anterior está ocupada.
+// separados por vírgula. Uma entrada entre barras (ex.: /^https:\/\/.*\.vercel\.app$/)
+// vira RegExp — útil p/ os previews da Vercel, cujo subdomínio muda a cada deploy.
+// Em dev (sem CORS_ORIGIN), libera qualquer porta de localhost/127.0.0.1 — o Vite troca
+// de porta (5173 → 5174 → …) quando a anterior está ocupada.
 const corsOrigin = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  ? process.env.CORS_ORIGIN.split(',')
+      .map((o) => o.trim())
+      .filter(Boolean)
+      .map((o) =>
+        o.startsWith('/') && o.endsWith('/') ? new RegExp(o.slice(1, -1)) : o,
+      )
   : [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/]
 
 server.register(cors, {
