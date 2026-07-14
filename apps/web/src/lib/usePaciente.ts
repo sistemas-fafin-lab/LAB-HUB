@@ -6,6 +6,9 @@ interface UsePaciente {
   paciente: Paciente | null
   loading: boolean
   error: string | null
+  // Atualiza o paciente em cache (ex.: após salvar o perfil), refletindo em
+  // toda a UI que consome este estado (Topbar, ProfilePage).
+  setPaciente: (p: Paciente) => void
 }
 
 // Busca os dados do paciente autenticado (GET /pacientes/me).
@@ -35,5 +38,5 @@ export function usePaciente(): UsePaciente {
     }
   }, [])
 
-  return { paciente, loading, error }
+  return { paciente, loading, error, setPaciente }
 }

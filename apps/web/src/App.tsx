@@ -57,7 +57,7 @@ interface AuthedAppProps {
 }
 
 function AuthedApp({ onLogout }: AuthedAppProps) {
-  const { paciente } = usePaciente()
+  const { paciente, setPaciente } = usePaciente()
   const [route,    setRoute]    = useState<AppRoute>('home')
   const [openExam, setOpenExam] = useState<Exam | null>(null)
   const [coletaId, setColetaId] = useState<string | null>(null)
@@ -119,9 +119,9 @@ function AuthedApp({ onLogout }: AuthedAppProps) {
   } else if (rotaAtual === 'billing') {
     content = <BillingPage   dark={dark} />
   } else if (rotaAtual === 'settings') {
-    content = <SettingsPage  dark={dark} />
+    content = <SettingsPage  dark={dark} onSetDark={setDark} />
   } else if (rotaAtual === 'profile') {
-    content = <ProfilePage paciente={paciente} dark={dark} onLogout={onLogout} />
+    content = <ProfilePage paciente={paciente} dark={dark} onLogout={onLogout} onSaved={setPaciente} />
   } else {
     content = (
       <HomePage

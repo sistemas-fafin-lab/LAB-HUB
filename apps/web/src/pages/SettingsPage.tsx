@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { WIcon } from '../components/primitives/WIcon'
+import { MOSTRAR_NOVIDADES, MOSTRAR_PRIVACIDADE_EXTRAS } from '../lib/flags'
 
 interface SettingsPageProps {
   dark: boolean
+  onSetDark: (dark: boolean) => void
 }
 
 interface Prefs {
@@ -75,8 +77,35 @@ const INITIAL_PREFS: Prefs = {
   twoFA:        true,
 }
 
-export function SettingsPage({ dark }: SettingsPageProps) {
+// Dispositivo atual, derivado do navegador. Sem backend de sessões, listamos
+// apenas o aparelho em uso (SO + navegador). Ordem dos testes importa: Edge/Opera
+// contêm "Chrome" na UA, e Chrome contém "Safari".
+function dispositivoAtual(): { nome: string; detalhe: string; icon: string } {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua)
+  // Mobile antes de desktop: UA de iOS contém "Mac OS X" e a de Android contém "Linux".
+  const so =
+    /Windows/i.test(ua)              ? 'Windows' :
+    /Android/i.test(ua)              ? 'Android' :
+    /iPhone|iPad|iPod/i.test(ua)     ? 'iOS'     :
+    /Mac OS X|Macintosh/i.test(ua)   ? 'macOS'   :
+    /Linux/i.test(ua)                ? 'Linux'   : 'Sistema desconhecido'
+  const navegador =
+    /Edg\//i.test(ua)                ? 'Edge'    :
+    /OPR\/|Opera/i.test(ua)          ? 'Opera'   :
+    /Chrome\//i.test(ua)             ? 'Chrome'  :
+    /Firefox\//i.test(ua)            ? 'Firefox' :
+    /Safari\//i.test(ua)             ? 'Safari'  : 'Navegador'
+  return {
+    nome:    `${navegador} · ${so}`,
+    detalhe: 'Este dispositivo · sessão atual',
+    icon:    mobile ? 'smartphone' : 'monitor',
+  }
+}
+
+export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
   const [pref, setPref] = useState<Prefs>(INITIAL_PREFS)
+  const dispositivo = dispositivoAtual()
 
   const card = `rounded-2xl border ${dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'} p-5 shadow-sm`
 
@@ -99,7 +128,8 @@ export function SettingsPage({ dark }: SettingsPageProps) {
       <div className="grid grid-cols-12 gap-5">
         {/* Left column */}
         <div className="col-span-12 lg:col-span-8 flex flex-col gap-5">
-          {/* Notifications */}
+          {/* Notifications — "receber novidades" oculto por flag (sem backend) */}
+          {MOSTRAR_NOVIDADES && (
           <div className={card}>
             <h3 className={`text-sm font-semibold mb-2 ${dark ? 'text-white' : 'text-slate-800'}`}>
               Como você quer receber novidades
@@ -112,12 +142,18 @@ export function SettingsPage({ dark }: SettingsPageProps) {
             <Row icon="bell"           title="Notificação push"      sub="No celular e navegador"        k="pushResults"  {...rowProps} />
             <Row icon="megaphone"      title="Novidades e promoções" sub="Comunicações de marketing"     k="marketing"    {...rowProps} />
           </div>
+          )}
 
           {/* Privacy */}
           <div className={card}>
             <h3 className={`text-sm font-semibold mb-2 ${dark ? 'text-white' : 'text-slate-800'}`}>Privacidade</h3>
-            <Row icon="share-2"     title="Compartilhar com médicos"       sub="Permite que profissionais cadastrados acessem seus laudos" k="sharing" {...rowProps} />
-            <Row icon="shield-check" title="Verificação em duas etapas"    sub="Exige código por SMS no login"                             k="twoFA"   {...rowProps} />
+            {/* Toggles sem backend — ocultos por flag; fica só "Excluir minha conta" */}
+            {MOSTRAR_PRIVACIDADE_EXTRAS && (
+              <>
+                <Row icon="share-2"     title="Compartilhar com médicos"       sub="Permite que profissionais cadastrados acessem seus laudos" k="sharing" {...rowProps} />
+                <Row icon="shield-check" title="Verificação em duas etapas"    sub="Exige código por SMS no login"                             k="twoFA"   {...rowProps} />
+              </>
+            )}
             {/* Delete account (no toggle) */}
             <div className="flex items-center gap-3 py-3">
               <div className="h-9 w-9 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
@@ -141,6 +177,7 @@ export function SettingsPage({ dark }: SettingsPageProps) {
               {([{ id: 'light', l: 'Claro', bg: 'bg-white border-gray-200' }, { id: 'dark', l: 'Escuro', bg: 'bg-gray-900 border-gray-700' }] as const).map((o) => (
                 <button
                   key={o.id}
+                  onClick={() => onSetDark(o.id === 'dark')}
                   className={`rounded-xl border-2 p-3 text-left ${
                     dark === (o.id === 'dark')
                       ? 'border-blue-500 ring-2 ring-blue-500/20'
@@ -176,23 +213,21 @@ export function SettingsPage({ dark }: SettingsPageProps) {
             <h3 className={`text-sm font-semibold mb-2 ${dark ? 'text-white' : 'text-slate-800'}`}>
               Dispositivos conectados
             </h3>
-            <p className="text-xs text-gray-400 mb-3">Você está logado nestes aparelhos.</p>
+            <p className="text-xs text-gray-400 mb-3">Você está logado neste dispositivo.</p>
             <div className="flex flex-col gap-2">
-              {[
-                { d: 'iPhone 15',    w: 'Asa Sul · agora',    icon: 'smartphone' },
-                { d: 'MacBook Pro',  w: 'Asa Sul · 2h atrás', icon: 'monitor'    },
-              ].map((s) => (
-                <div key={s.d} className={`flex items-center gap-3 p-2.5 rounded-xl ${dark ? 'bg-gray-800/50' : 'bg-slate-50'}`}>
-                  <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${dark ? 'bg-gray-800 text-gray-300' : 'bg-white text-slate-600 border border-gray-100'}`}>
-                    <WIcon name={s.icon} className="w-4 h-4" strokeWidth={2.2} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>{s.d}</div>
-                    <div className="text-[11px] text-gray-400">{s.w}</div>
-                  </div>
-                  <button className="text-[11px] font-semibold text-rose-600">Sair</button>
+              <div className={`flex items-center gap-3 p-2.5 rounded-xl ${dark ? 'bg-gray-800/50' : 'bg-slate-50'}`}>
+                <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${dark ? 'bg-gray-800 text-gray-300' : 'bg-white text-slate-600 border border-gray-100'}`}>
+                  <WIcon name={dispositivo.icon} className="w-4 h-4" strokeWidth={2.2} />
                 </div>
-              ))}
+                <div className="flex-1 min-w-0">
+                  <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>{dispositivo.nome}</div>
+                  <div className="text-[11px] text-gray-400">{dispositivo.detalhe}</div>
+                </div>
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Ativo
+                </span>
+              </div>
             </div>
           </div>
         </div>

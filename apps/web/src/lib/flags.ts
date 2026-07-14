@@ -16,6 +16,8 @@ export const MOSTRAR_EXAMES_RECENTES = false         // HomePage: lista "Exames 
 export const MOSTRAR_CHATBOT = false                 // SupportDock: chat "Lia"
 export const MOSTRAR_NOTIFICACOES = false            // Topbar: sino / badge de notificações
 export const MOSTRAR_DEPENDENTES = false             // Topbar: seletor de dependentes (D2 adiado)
+export const MOSTRAR_NOVIDADES = false               // Settings: card "receber novidades" (sem backend)
+export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compartilhar/2FA (sem backend)
 
 // Páginas inteiras ocultas do menu E inacessíveis por acesso direto.
 export const MOSTRAR_RESULTADOS = false              // Sidebar/rota: Resultados
