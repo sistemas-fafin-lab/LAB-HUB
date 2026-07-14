@@ -76,6 +76,14 @@ export interface Resultado {
 
 export type Sexo = 'M' | 'F'
 
+// Convênio do paciente. Ambos snapshots de texto: `operadora` é a empresa
+// (ex.: "Unimed") e `plano` o nome do plano (ex.: "Premium"). Opcional pois
+// nem todo paciente tem convênio cadastrado.
+export interface Convenio {
+  operadora: string
+  plano?: string
+}
+
 export interface Paciente {
   id: string
   authUserId: string
@@ -85,6 +93,7 @@ export interface Paciente {
   sexo: Sexo
   dataNascimento: string // ISO date (YYYY-MM-DD)
   telefone?: string
+  convenio?: Convenio
 }
 
 // Entrada do auto-cadastro (POST /api/v1/cadastro): cria o usuário no Auth

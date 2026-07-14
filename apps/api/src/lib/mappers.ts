@@ -79,6 +79,8 @@ interface PacienteRow {
   sexo: string
   data_nascimento: string
   telefone: string | null
+  convenio_operadora: string | null
+  convenio_plano: string | null
 }
 
 export function toPaciente(row: PacienteRow): Paciente {
@@ -91,5 +93,13 @@ export function toPaciente(row: PacienteRow): Paciente {
     sexo: row.sexo as Sexo,
     dataNascimento: row.data_nascimento,
     ...(row.telefone ? { telefone: row.telefone } : {}),
+    ...(row.convenio_operadora
+      ? {
+          convenio: {
+            operadora: row.convenio_operadora,
+            ...(row.convenio_plano ? { plano: row.convenio_plano } : {}),
+          },
+        }
+      : {}),
   }
 }
