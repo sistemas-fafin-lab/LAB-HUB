@@ -10,13 +10,16 @@ import { api } from '../lib/api'
 
 interface SchedulePageProps {
   dark: boolean
+  // Quando vem da Home ("Detalhes" da próxima coleta): abre já na linha do
+  // tempo desse agendamento, na aba "Minhas coletas".
+  initialSelectedId?: string | null
 }
 
 type ColetaTab = 'agendar' | 'minhas'
 
-export function SchedulePage({ dark }: SchedulePageProps) {
-  const [tab, setTab] = useState<ColetaTab>('agendar')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+export function SchedulePage({ dark, initialSelectedId = null }: SchedulePageProps) {
+  const [tab, setTab] = useState<ColetaTab>(initialSelectedId ? 'minhas' : 'agendar')
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId)
   const [resyncingId, setResyncingId] = useState<string | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)

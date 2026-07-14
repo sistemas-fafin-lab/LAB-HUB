@@ -8,16 +8,18 @@ interface ChatMessage {
 
 interface SupportDockProps {
   dark: boolean
+  primeiroNome: string
 }
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  { from: 'agent', text: 'Olá, João! Sou a Lia, sua assistente do Lab Hub. Em que posso ajudar?' },
-]
-
-export function SupportDock({ dark }: SupportDockProps) {
+export function SupportDock({ dark, primeiroNome }: SupportDockProps) {
   const [open, setOpen] = useState(false)
-  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
+
+  // Saudação derivada do nome real; sem nome (ainda carregando), cai no genérico.
+  const saudacao = primeiroNome
+    ? `Olá, ${primeiroNome}! Sou a Lia, sua assistente do Lab Hub. Em que posso ajudar?`
+    : 'Olá! Sou a Lia, sua assistente do Lab Hub. Em que posso ajudar?'
 
   const send = () => {
     if (!draft.trim()) return
@@ -68,6 +70,14 @@ export function SupportDock({ dark }: SupportDockProps) {
               dark ? 'bg-gray-900' : 'bg-slate-50'
             }`}
           >
+            {/* Saudação fixa (reflete sempre o nome atual do paciente) */}
+            <div
+              className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-snug self-start rounded-bl-md ${
+                dark ? 'bg-gray-800 text-gray-100' : 'bg-white text-slate-800 border border-gray-100'
+              }`}
+            >
+              {saudacao}
+            </div>
             {messages.map((m, i) => (
               <div
                 key={i}

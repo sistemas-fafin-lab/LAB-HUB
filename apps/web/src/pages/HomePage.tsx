@@ -4,6 +4,12 @@ import { ExamRow } from '../components/shared/ExamRow'
 import type { Exam } from '../components/shared/WebHero'
 import { useResultados } from '../lib/useResultados'
 import { useAgendamentos } from '../lib/useAgendamentos'
+import {
+  MOSTRAR_ACOMPANHAMENTO,
+  MOSTRAR_PROXIMOS_PASSOS_EXTRAS,
+  MOSTRAR_RESULTADO_HERO,
+  MOSTRAR_EXAMES_RECENTES,
+} from '../lib/flags'
 
 // Próxima coleta: dd/mmm às hh:mm (ex.: "28 jun · 09:30").
 const proximaColetaFmt = new Intl.DateTimeFormat('pt-BR', {
@@ -36,6 +42,7 @@ interface NextStep {
   title: string
   sub: string
   action: string
+  onClick?: () => void
 }
 
 const NEXT_STEPS: NextStep[] = [
@@ -56,9 +63,11 @@ const TONE_CLASSES: Record<Tone, string> = {
 interface HomePageProps {
   dark: boolean
   onOpenExam: (exam: Exam) => void
+  onOpenColeta: (agendamentoId: string) => void
+  onAgendar: () => void
 }
 
-export function HomePage({ dark, onOpenExam }: HomePageProps) {
+export function HomePage({ dark, onOpenExam, onOpenColeta, onAgendar }: HomePageProps) {
   const { exams, loading } = useResultados()
   const { agendamentos } = useAgendamentos()
   const last = exams[0]
@@ -79,14 +88,20 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
         title: 'Próxima coleta agendada',
         sub: `${proximaColetaFmt.format(new Date(proximoAgendamento.dataHora))} · ${proximoAgendamento.postoNome}`,
         action: 'Detalhes',
+        onClick: () => onOpenColeta(proximoAgendamento.id),
       }
     : {
         icon: 'calendar-plus',
         title: 'Agendar nova coleta',
         sub: 'Você não tem coletas agendadas',
         action: 'Agendar',
+        onClick: onAgendar,
       }
-  const steps: NextStep[] = [agendamentoStep, ...NEXT_STEPS.slice(1)]
+  // Só o primeiro passo (agendamento real) é exibido; os extras mockados
+  // (Compartilhar com médico, Baixar todos os laudos) ficam ocultos por flag.
+  const steps: NextStep[] = MOSTRAR_PROXIMOS_PASSOS_EXTRAS
+    ? [agendamentoStep, ...NEXT_STEPS.slice(1)]
+    : [agendamentoStep]
 
   return (
     <div className="grid grid-cols-12 gap-5">
@@ -104,8 +119,9 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
         </p>
       </div>
 
-      {/* Hero */}
-      <div className="col-span-12 lg:col-span-8">
+      {/* Hero — card "Seu último exame" (oculto por flag; dado real da API) */}
+      {MOSTRAR_RESULTADO_HERO && (
+      <div className={`col-span-12 ${MOSTRAR_ACOMPANHAMENTO ? 'lg:col-span-8' : ''}`}>
         {last ? (
           <WebHero exam={last} onOpen={() => onOpenExam(last)} dark={dark} />
         ) : (
@@ -118,8 +134,10 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
           </div>
         )}
       </div>
+      )}
 
-      {/* Acompanhamento */}
+      {/* Acompanhamento (oculto por flag — mock sem fonte de dados real) */}
+      {MOSTRAR_ACOMPANHAMENTO && (
       <div className="col-span-12 lg:col-span-4">
         <div
           className={`rounded-2xl border ${
@@ -152,6 +170,7 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
           </div>
         </div>
       </div>
+      )}
 
       {/* Próximos passos */}
       <div className="col-span-12 lg:col-span-7">
@@ -180,7 +199,10 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
                   </div>
                   <div className="text-[11px] text-gray-400 truncate">{s.sub}</div>
                 </div>
-                <button className="text-xs font-semibold text-blue-600 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 transition">
+                <button
+                  onClick={s.onClick}
+                  className="text-xs font-semibold text-blue-600 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 transition"
+                >
                   {s.action}
                 </button>
               </div>
@@ -189,7 +211,8 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
         </div>
       </div>
 
-      {/* Exames recentes */}
+      {/* Exames recentes (oculto por flag; dado real da API) */}
+      {MOSTRAR_EXAMES_RECENTES && (
       <div className="col-span-12">
         <div
           className={`rounded-2xl border ${
@@ -219,6 +242,7 @@ export function HomePage({ dark, onOpenExam }: HomePageProps) {
           </div>
         </div>
       </div>
+      )}
     </div>
   )
 }

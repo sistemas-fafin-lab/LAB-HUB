@@ -1,10 +1,11 @@
 import { WIcon } from '../components/primitives/WIcon'
-import type { Dependent } from '../components/layout/Topbar'
-import { usePaciente } from '../lib/usePaciente'
+import type { Paciente } from '@lab-hub/shared'
+import { iniciais } from '../lib/paciente'
+import { MOSTRAR_NOTIFICACOES } from '../lib/flags'
 import { formatarCpf, formatarData, formatarTelefone } from '../lib/validators'
 
 interface ProfilePageProps {
-  patient:  Dependent
+  paciente: Paciente | null
   dark:     boolean
   onLogout: () => void | Promise<void>
 }
@@ -14,42 +15,56 @@ interface Field {
   value: string
 }
 
-export function ProfilePage({ patient, dark, onLogout }: ProfilePageProps) {
-  // Dados reais do paciente autenticado; o switcher/avatar (patient) permanece mock (D2).
-  const { paciente } = usePaciente()
+// Gradiente fixo do avatar enquanto não há foto (dependentes adiados, D2).
+const AVATAR_GRADIENT = 'from-blue-500 to-indigo-600'
+
+export function ProfilePage({ paciente, dark, onLogout }: ProfilePageProps) {
+  // "Operadora · Plano" quando há convênio; "Não informado" se o paciente já
+  // carregou sem convênio; "—" enquanto o perfil ainda não chegou.
+  const convenioLabel = paciente?.convenio
+    ? [paciente.convenio.operadora, paciente.convenio.plano].filter(Boolean).join(' · ')
+    : paciente
+      ? 'Não informado'
+      : '—'
+
   const fields: Field[] = [
     { label: 'Nome completo',      value: paciente?.nome ?? '—' },
     { label: 'CPF',                value: paciente ? formatarCpf(paciente.cpf) : '—' },
     { label: 'Data de nascimento', value: paciente ? formatarData(paciente.dataNascimento) : '—' },
     { label: 'Email',              value: paciente?.email ?? '—' },
     { label: 'Telefone',           value: paciente?.telefone ? formatarTelefone(paciente.telefone) : '—' },
-    { label: 'Convênio',           value: 'Unimed · Plano Premium' },
+    { label: 'Convênio',           value: convenioLabel },
   ]
 
   return (
     <div className="max-w-4xl mx-auto">
       {/* Header card */}
       <div className={`rounded-2xl border ${dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'} p-6 shadow-sm mb-5 flex items-center gap-5`}>
-        <div className={`h-20 w-20 rounded-2xl bg-gradient-to-br ${patient.color} text-white text-2xl font-bold flex items-center justify-center shadow-lg shadow-blue-500/25`}>
-          {patient.initials}
+        <div className={`h-20 w-20 rounded-2xl bg-gradient-to-br ${AVATAR_GRADIENT} text-white text-2xl font-bold flex items-center justify-center shadow-lg shadow-blue-500/25`}>
+          {iniciais(paciente?.nome ?? '') || '—'}
         </div>
         <div className="flex-1">
           <h1
             className={`text-2xl font-bold ${dark ? 'text-white' : 'text-slate-900'}`}
             style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
           >
-            {patient.name}
+            {paciente?.nome ?? '—'}
           </h1>
-          <p className="text-sm text-gray-500">{patient.relation} · Plano Premium · Unimed</p>
+          <p className="text-sm text-gray-500">
+            {paciente?.convenio ? convenioLabel : 'Titular da conta'}
+          </p>
           <div className="flex items-center gap-2 mt-2">
             <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 rounded-full px-2.5 py-1 text-[11px] font-semibold">
               <WIcon name="shield-check" className="w-3 h-3" strokeWidth={2.6} />
               Conta verificada
             </span>
-            <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 rounded-full px-2.5 py-1 text-[11px] font-semibold">
-              <WIcon name="bell" className="w-3 h-3" strokeWidth={2.6} />
-              Notificações ativas
-            </span>
+            {/* Badge de notificações — oculto por flag até haver backend */}
+            {MOSTRAR_NOTIFICACOES && (
+              <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 rounded-full px-2.5 py-1 text-[11px] font-semibold">
+                <WIcon name="bell" className="w-3 h-3" strokeWidth={2.6} />
+                Notificações ativas
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">

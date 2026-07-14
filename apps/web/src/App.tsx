@@ -14,28 +14,18 @@ import { SettingsPage }    from './pages/SettingsPage'
 import { ProfilePage }     from './pages/ProfilePage'
 import { AuthGate }        from './pages/AuthGate'
 import { useAuth }         from './lib/AuthContext'
-import type { AppRoute, Dependent } from './components/layout/Topbar'
+import { usePaciente }     from './lib/usePaciente'
+import { iniciais, primeiroNome } from './lib/paciente'
+import { MOSTRAR_CHATBOT, rotaOculta } from './lib/flags'
+import type { AppRoute } from './components/layout/Topbar'
 import type { Exam } from './components/shared/WebHero'
 
 // ---------------------------------------------------------------------------
-// DEPENDENTS — single source of truth for patient switcher
-// (mirrors the DEPENDENTS constant in Topbar.tsx so App.tsx can seed state)
-// ---------------------------------------------------------------------------
-const DEPENDENTS: Dependent[] = [
-  { id: 'p1', name: 'João Madeiro',   relation: 'Você',   initials: 'JM', color: 'from-blue-500 to-indigo-600'   },
-  { id: 'p2', name: 'Marina Madeiro', relation: 'Esposa', initials: 'MM', color: 'from-rose-500 to-pink-600'     },
-  { id: 'p3', name: 'Tomás Madeiro',  relation: 'Filho',  initials: 'TM', color: 'from-emerald-500 to-teal-600' },
-]
-
-// ---------------------------------------------------------------------------
-// App — shell that owns all navigation and theme state
+// App — porta de autenticação. Sem sessão, mostra o login; com sessão, monta
+// o shell autenticado (que já pode buscar o paciente com segurança).
 // ---------------------------------------------------------------------------
 export function App() {
   const { session, loading, signOut } = useAuth()
-  const [route,    setRoute]    = useState<AppRoute>('home')
-  const [openExam, setOpenExam] = useState<Exam | null>(null)
-  const [dark,     setDark]     = useState(false)
-  const [patient,  setPatient]  = useState<Dependent>(DEPENDENTS[0]!)
 
   // Passada única no mount como fallback: cada WIcon já cria o próprio ícone no seu
   // useEffect, então não é preciso re-rodar createIcons a cada render.
@@ -44,9 +34,6 @@ export function App() {
     win.lucide?.createIcons({ attrs: { 'stroke-width': 2 } })
   }, [])
 
-  // ---------------------------------------------------------------------------
-  // Auth gate — sem sessão, mostra o login (hooks acima sempre executam)
-  // ---------------------------------------------------------------------------
   if (loading) {
     return (
       <div className="min-h-screen w-full bg-slate-50 flex items-center justify-center text-sm text-slate-400">
@@ -58,12 +45,28 @@ export function App() {
     return <AuthGate />
   }
 
-  // ---------------------------------------------------------------------------
-  // Navigation helpers
-  // ---------------------------------------------------------------------------
+  return <AuthedApp onLogout={signOut} />
+}
+
+// ---------------------------------------------------------------------------
+// AuthedApp — shell que possui navegação/tema e resolve o paciente real uma
+// única vez (GET /pacientes/me), propagando nome/iniciais para a UI.
+// ---------------------------------------------------------------------------
+interface AuthedAppProps {
+  onLogout: () => void | Promise<void>
+}
+
+function AuthedApp({ onLogout }: AuthedAppProps) {
+  const { paciente } = usePaciente()
+  const [route,    setRoute]    = useState<AppRoute>('home')
+  const [openExam, setOpenExam] = useState<Exam | null>(null)
+  const [coletaId, setColetaId] = useState<string | null>(null)
+  const [dark,     setDark]     = useState(false)
+
   const handleNav = (id: AppRoute) => {
     setRoute(id)
     setOpenExam(null)
+    setColetaId(null) // navegação pelo menu limpa a coleta pré-selecionada
   }
 
   const handleOpenExam = (exam: Exam) => {
@@ -71,17 +74,30 @@ export function App() {
     setRoute('exam')
   }
 
+  // Abre a SchedulePage já na linha do tempo de um agendamento específico.
+  const handleOpenColeta = (agendamentoId: string) => {
+    setColetaId(agendamentoId)
+    setOpenExam(null)
+    setRoute('schedule')
+  }
+
   const handleBack = () => {
     setOpenExam(null)
     setRoute('home')
   }
+
+  const nome = paciente?.nome ?? ''
+
+  // Rotas ocultas por flag não são acessíveis nem por acesso direto: caem na
+  // Visão geral. Mantém o que é exibido coerente com o menu.
+  const rotaAtual: AppRoute = rotaOculta(route) ? 'home' : route
 
   // ---------------------------------------------------------------------------
   // Route → page
   // ---------------------------------------------------------------------------
   let content: React.ReactNode
 
-  if (route === 'laudo' && openExam !== null) {
+  if (rotaAtual === 'laudo' && openExam !== null) {
     content = <LaudoPage exam={openExam} onBack={handleBack} dark={dark} />
   } else if (openExam !== null) {
     content = (
@@ -92,22 +108,29 @@ export function App() {
         onViewLaudo={() => setRoute('laudo')}
       />
     )
-  } else if (route === 'results') {
+  } else if (rotaAtual === 'results') {
     content = <ResultsPage  dark={dark} onOpenExam={handleOpenExam} />
-  } else if (route === 'schedule') {
-    content = <SchedulePage  dark={dark} />
-  } else if (route === 'trends') {
+  } else if (rotaAtual === 'schedule') {
+    content = <SchedulePage  dark={dark} initialSelectedId={coletaId} />
+  } else if (rotaAtual === 'trends') {
     content = <TrendsPage    dark={dark} />
-  } else if (route === 'documents') {
+  } else if (rotaAtual === 'documents') {
     content = <DocumentsPage dark={dark} />
-  } else if (route === 'billing') {
+  } else if (rotaAtual === 'billing') {
     content = <BillingPage   dark={dark} />
-  } else if (route === 'settings') {
+  } else if (rotaAtual === 'settings') {
     content = <SettingsPage  dark={dark} />
-  } else if (route === 'profile') {
-    content = <ProfilePage patient={patient} dark={dark} onLogout={signOut} />
+  } else if (rotaAtual === 'profile') {
+    content = <ProfilePage paciente={paciente} dark={dark} onLogout={onLogout} />
   } else {
-    content = <HomePage dark={dark} onOpenExam={handleOpenExam} />
+    content = (
+      <HomePage
+        dark={dark}
+        onOpenExam={handleOpenExam}
+        onOpenColeta={handleOpenColeta}
+        onAgendar={() => handleNav('schedule')}
+      />
+    )
   }
 
   // ---------------------------------------------------------------------------
@@ -119,22 +142,21 @@ export function App() {
       data-screen-label="01 Lab Hub Web"
     >
       <Topbar
-        patient={patient}
-        onPickPatient={setPatient}
+        nome={nome}
+        iniciais={iniciais(nome)}
         dark={dark}
         onToggleDark={() => setDark((d) => !d)}
-        route={route}
-        onNav={handleNav}
       />
       <div className="flex">
-        <Sidebar route={route} onNav={handleNav} dark={dark} />
+        <Sidebar route={rotaAtual} onNav={handleNav} dark={dark} />
         <main className="flex-1 min-w-0 p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
             {content}
           </div>
         </main>
       </div>
-      <SupportDock dark={dark} />
+      {/* Chatbot "Lia" — oculto por flag; sem backend de suporte ainda. */}
+      {MOSTRAR_CHATBOT && <SupportDock dark={dark} primeiroNome={primeiroNome(nome)} />}
     </div>
   )
 }

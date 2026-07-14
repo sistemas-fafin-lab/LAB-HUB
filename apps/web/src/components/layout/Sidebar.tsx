@@ -1,4 +1,5 @@
 import { WIcon } from '../primitives/WIcon'
+import { rotaOculta } from '../../lib/flags'
 import type { AppRoute } from './Topbar'
 
 interface SidebarProps {
@@ -48,13 +49,17 @@ export function Sidebar({ route, onNav, dark }: SidebarProps) {
       } backdrop-blur-sm sticky top-16 self-start h-[calc(100vh-4rem)] overflow-y-auto`}
     >
       <nav className="p-3 flex flex-col gap-5">
-        {SECTIONS.map((s) => (
+        {SECTIONS.map((s) => {
+          // Remove itens de rotas ocultas por flag; some a seção se esvaziar.
+          const items = s.items.filter((it) => !rotaOculta(it.id))
+          if (items.length === 0) return null
+          return (
           <div key={s.title}>
             <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
               {s.title}
             </div>
             <div className="flex flex-col gap-0.5">
-              {s.items.map((it) => {
+              {items.map((it) => {
                 const active = route === it.id
                 return (
                   <button
@@ -84,7 +89,8 @@ export function Sidebar({ route, onNav, dark }: SidebarProps) {
               })}
             </div>
           </div>
-        ))}
+          )
+        })}
 
         {/* Lab Hub Plus upsell card */}
         <div className="mt-2 mx-1 p-3 rounded-2xl bg-gradient-to-br from-blue-900 via-blue-700 to-indigo-800 text-white relative overflow-hidden">
