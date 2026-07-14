@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { WIcon } from '../primitives/WIcon'
+import { TopbarSearch } from './TopbarSearch'
 import { MOSTRAR_NOTIFICACOES, MOSTRAR_DEPENDENTES } from '../../lib/flags'
+import type { Exam } from '../shared/WebHero'
 
 export type AppRoute =
   | 'home'
@@ -38,9 +40,11 @@ interface TopbarProps {
   iniciais: string
   dark: boolean
   onToggleDark: () => void
+  onOpenExam: (exam: Exam) => void
+  onNav: (route: AppRoute) => void
 }
 
-export function Topbar({ nome, iniciais, dark, onToggleDark }: TopbarProps) {
+export function Topbar({ nome, iniciais, dark, onToggleDark, onOpenExam, onNav }: TopbarProps) {
   const primeiroNome = nome.split(' ')[0] ?? ''
 
   // Estado local do seletor de dependentes (mock, só ativo com a flag).
@@ -70,26 +74,7 @@ export function Topbar({ nome, iniciais, dark, onToggleDark }: TopbarProps) {
         </div>
 
         {/* Search */}
-        <div className="flex-1 max-w-xl relative">
-          <div
-            className={`flex items-center gap-2 ${
-              dark ? 'bg-gray-800 border-gray-700 text-gray-300' : 'bg-slate-50 border-gray-100 text-gray-500'
-            } border rounded-xl px-3 h-10`}
-          >
-            <WIcon name="search" className="w-4 h-4" strokeWidth={2.2} />
-            <input
-              placeholder="Buscar exames, médicos, marcadores…"
-              className="bg-transparent outline-none text-sm flex-1 placeholder:text-gray-400"
-            />
-            <kbd
-              className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                dark ? 'bg-gray-700 text-gray-400' : 'bg-white border border-gray-200 text-gray-400'
-              }`}
-            >
-              ⌘K
-            </kbd>
-          </div>
-        </div>
+        <TopbarSearch dark={dark} onOpenExam={onOpenExam} onNav={onNav} />
 
         <div className="flex items-center gap-2 ml-auto">
           {/* Dark mode toggle */}

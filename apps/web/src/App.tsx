@@ -146,6 +146,8 @@ function AuthedApp({ onLogout }: AuthedAppProps) {
         iniciais={iniciais(nome)}
         dark={dark}
         onToggleDark={() => setDark((d) => !d)}
+        onOpenExam={handleOpenExam}
+        onNav={handleNav}
       />
       <div className="flex">
         <Sidebar route={rotaAtual} onNav={handleNav} dark={dark} />
