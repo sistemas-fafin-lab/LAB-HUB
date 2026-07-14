@@ -96,6 +96,15 @@ export interface Paciente {
   convenio?: Convenio
 }
 
+// Body do PUT /api/v1/pacientes/me — campos editáveis do perfil. Identidade
+// (cpf, dataNascimento, sexo) e e-mail (credencial de login) não são editáveis
+// por aqui. `convenio: null` limpa o convênio.
+export interface AtualizarPacientePayload {
+  nome: string
+  telefone?: string
+  convenio?: Convenio | null
+}
+
 // Entrada do auto-cadastro (POST /api/v1/cadastro): cria o usuário no Auth
 // e a linha de paciente. O CPF pode vir formatado; a API normaliza p/ dígitos.
 export interface CadastroPacientePayload {
