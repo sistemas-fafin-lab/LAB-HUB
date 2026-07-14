@@ -30,6 +30,9 @@ const corsOrigin = process.env.CORS_ORIGIN
 server.register(cors, {
   origin: corsOrigin,
   credentials: true,
+  // O default do @fastify/cors é 'GET,HEAD,POST' — sem isto o preflight barra
+  // PUT/PATCH/DELETE (ex.: PUT /pacientes/me na edição de perfil).
+  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
 })
 // Fallback global amplo (~10/s) só p/ proteção básica contra abuso; os limites
 // estritos ficam por rota (POST /cadastro e POST /agendamentos = 5/min).
