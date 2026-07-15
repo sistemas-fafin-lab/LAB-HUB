@@ -1,12 +1,14 @@
 import type {
   Agendamento,
   AgendamentoStatus,
+  Documento,
   ExameColeta,
   Paciente,
   PainelResultado,
   Resultado,
   ResultadoStatus,
   Sexo,
+  TipoDocumento,
 } from '@lab-hub/shared'
 
 // Converte as linhas snake_case do Postgres nos tipos camelCase de @lab-hub/shared,
@@ -67,6 +69,34 @@ export function toResultado(row: ResultadoRow): Resultado {
     ...(row.declaracao_url ? { declaracaoUrl: row.declaracao_url } : {}),
     ...(row.liberado_em ? { liberadoEm: row.liberado_em } : {}),
     ...(row.flowlab_analise_id ? { flowlabAnaliseId: row.flowlab_analise_id } : {}),
+  }
+}
+
+export interface DocumentoRow {
+  id: string
+  paciente_id: string
+  agendamento_id: string | null
+  tipo: string
+  nome_arquivo: string
+  storage_path: string
+  mime_type: string
+  tamanho_bytes: number
+  criado_em: string
+}
+
+// storage_path fica DE FORA de propósito: é detalhe interno e o cliente lê o
+// arquivo por GET /documentos/:id/url. (toResultado expõe laudo_url/declaracao_url,
+// que são paths — vazamento menor herdado; não replicar aqui.)
+export function toDocumento(row: DocumentoRow): Documento {
+  return {
+    id: row.id,
+    pacienteId: row.paciente_id,
+    ...(row.agendamento_id ? { agendamentoId: row.agendamento_id } : {}),
+    tipo: row.tipo as TipoDocumento,
+    nomeArquivo: row.nome_arquivo,
+    mimeType: row.mime_type,
+    tamanhoBytes: row.tamanho_bytes,
+    criadoEm: row.criado_em,
   }
 }
 

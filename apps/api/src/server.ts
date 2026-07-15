@@ -8,6 +8,8 @@ import { pacientesRoutes } from './routes/pacientes.js'
 import { agendamentosRoutes } from './routes/agendamentos.js'
 import { postosRoutes } from './routes/postos.js'
 import { resultadosRoutes } from './routes/resultados.js'
+import { documentosRoutes } from './routes/documentos.js'
+import { integracaoRoutes } from './routes/integracao.js'
 import { webhooksRoutes } from './routes/webhooks.js'
 
 const server = Fastify({ logger: { level: 'info' } })
@@ -43,6 +45,8 @@ server.register(pacientesRoutes, { prefix: '/api/v1' })
 server.register(agendamentosRoutes, { prefix: '/api/v1' })
 server.register(postosRoutes, { prefix: '/api/v1' })
 server.register(resultadosRoutes, { prefix: '/api/v1' })
+server.register(documentosRoutes, { prefix: '/api/v1' })
+server.register(integracaoRoutes, { prefix: '/api/v1' })
 server.register(webhooksRoutes, { prefix: '/api/v1' })
 
 server.get('/ping', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))

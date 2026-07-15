@@ -71,6 +71,37 @@ export interface Resultado {
 }
 
 // ---------------------------------------------------------------------------
+// Documentos do paciente
+// ---------------------------------------------------------------------------
+
+// Só documentos que o PACIENTE envia para adiantar o check-in. Atestado,
+// declaração e laudo são emitidos pelo laboratório e vivem em `Resultado`.
+export type TipoDocumento = 'identidade' | 'carteirinha' | 'pedido_medico' | 'outro'
+
+// Não expõe o storagePath: o cliente lê o arquivo por GET /documentos/:id/url.
+export interface Documento {
+  id: string
+  pacienteId: string
+  // Ausente = documento perene do paciente (identidade, carteirinha), vale para
+  // toda coleta. Presente = documento daquela coleta (pedido médico).
+  agendamentoId?: string
+  tipo: TipoDocumento
+  nomeArquivo: string // nome original, só exibição
+  mimeType: string // tipo real (magic bytes), não o declarado no upload
+  tamanhoBytes: number
+  criadoEm: string
+}
+
+// O upload é multipart, não JSON: os campos (file, tipo, agendamentoId) estão
+// documentados em apps/api/src/schemas/documento.ts. A resposta é `Documento`.
+
+// GET /documentos/:id/url — signed URL temporária do bucket privado.
+export interface DocumentoUrl {
+  url: string
+  expiraEm: string // ISO — quando a signed URL vence
+}
+
+// ---------------------------------------------------------------------------
 // Pacientes
 // ---------------------------------------------------------------------------
 
@@ -145,6 +176,25 @@ export interface AgendamentoPayloadFlowLab {
 // marca como 'cancelado', liberando o slot.
 export interface CancelamentoPayloadFlowLab {
   labhubId: string
+}
+
+// Item de GET /integracao/agendamentos/:labhubId/documentos, consumido pelo
+// FlowLab no check-in. `url` é signed URL FRESCA gerada sob demanda: os bytes
+// nunca saem do LAB-HUB e nada é copiado para o FlowLab.
+export interface DocumentoFlowLab {
+  id: string
+  tipo: TipoDocumento
+  nomeArquivo: string
+  mimeType: string
+  tamanhoBytes: number
+  criadoEm: string
+  url: string
+  expiraEm: string // ISO — as URLs vencem juntas; o painel precisa refazer a busca
+}
+
+export interface DocumentosAgendamentoFlowLab {
+  agendamentoLabhubId: string
+  documentos: DocumentoFlowLab[]
 }
 
 // Payload recebido do FlowLab via webhook de resultado (D1)
