@@ -56,13 +56,8 @@ export function LoginPage({ onGoToCadastro }: LoginPageProps) {
   return (
     <div className="min-h-screen w-full bg-slate-50 flex items-center justify-center p-6">
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-2 justify-center mb-6">
-          <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-lg shadow-md shadow-blue-500/25">
-            L
-          </div>
-          <div className="font-black text-xl tracking-tight text-slate-900">
-            Lab Hub<span className="text-blue-500">.</span>
-          </div>
+        <div className="flex items-center justify-center mb-6">
+          <img src="/logo.svg" alt="Lab Hub" className="h-9 w-auto" />
         </div>
 
         <form

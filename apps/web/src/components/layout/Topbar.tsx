@@ -58,19 +58,14 @@ export function Topbar({ nome, iniciais, dark, onToggleDark, onOpenExam, onNav }
       } backdrop-blur-md`}
     >
       <div className="px-6 h-16 flex items-center gap-4">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 mr-2">
-          <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-sm shadow-md shadow-blue-500/25">
-            L
-          </div>
-          <div className="leading-tight">
-            <div className={`font-black text-[15px] tracking-tight ${dark ? 'text-white' : 'text-slate-900'}`}>
-              Lab Hub<span className="text-blue-500">.</span>
-            </div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-blue-500/80 -mt-0.5">
-              portal do paciente
-            </div>
-          </div>
+        {/* Logo — versão branca no tema escuro, azul no claro (o wordmark é de cor
+            única, então precisa da variante certa para o fundo do topbar) */}
+        <div className="flex items-center mr-2">
+          <img
+            src={dark ? '/logo-white.svg' : '/logo.svg'}
+            alt="Lab Hub"
+            className="h-8 w-auto shrink-0"
+          />
         </div>
 
         {/* Search */}
