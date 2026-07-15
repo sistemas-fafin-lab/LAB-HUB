@@ -87,7 +87,8 @@ export function ConfirmBookingModal({
             />
             <p className={`text-sm leading-snug ${dark ? 'text-gray-300' : 'text-slate-600'}`}>
               Leve o <strong>pedido médico</strong> no dia da coleta — a recepção confere os
-              exames no check-in.
+              exames no check-in. Depois de confirmar, você poderá{' '}
+              <strong>enviar seus documentos</strong> para adiantar essa conferência.
             </p>
           </div>
         </div>

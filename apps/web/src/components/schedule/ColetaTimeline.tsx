@@ -1,5 +1,9 @@
 import type { Agendamento, AgendamentoStatus } from '@lab-hub/shared'
 import { WIcon } from '../primitives/WIcon'
+import { DocumentUploader } from '../documents/DocumentUploader'
+import { DocumentList } from '../documents/DocumentList'
+import { useDocumentos } from '../../lib/useDocumentos'
+import { TIPOS_DA_COLETA } from '../../lib/documentos'
 import {
   formatDataHoraDetalhe,
   formatDiaRelativo,
@@ -60,10 +64,25 @@ function textoEtapa(
 }
 
 export function ColetaTimeline({ agendamento, dark, onBack }: ColetaTimelineProps) {
-  const { postoNome, dataHora, status, criadoEm, exames } = agendamento
+  const { id, postoNome, dataHora, status, criadoEm, exames } = agendamento
   const isCancelado = status === 'cancelado'
   const isBloqueado = status === 'bloqueado'
   const currentIndex = STATUS_ETAPA[status]
+
+  // Documentos desta coleta (pedido médico). Identidade e carteirinha são perenes
+  // e ficam na página Documentos — sobem uma vez e valem para toda coleta.
+  const {
+    documentos,
+    loading: docsLoading,
+    error: docsError,
+    enviar,
+    remover,
+    enviando,
+  } = useDocumentos(id)
+
+  // Depois da coleta feita não há mais check-in a adiantar: a seção vira
+  // histórico (some o envio, ficam os arquivos já anexados).
+  const podeEnviarDocs = !isCancelado && status !== 'realizado'
 
   const titulo = 'Coleta agendada'
 
@@ -183,6 +202,46 @@ export function ColetaTimeline({ agendamento, dark, onBack }: ColetaTimelineProp
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Documentos desta coleta — adiantam a conferência da recepção. Some numa
+          coleta cancelada que nunca teve anexo. */}
+      {(podeEnviarDocs || documentos.length > 0) && (
+        <div className={`rounded-2xl border ${cardBase} p-6 shadow-sm mb-5`}>
+          <h2 className={`text-sm font-bold ${dark ? 'text-white' : 'text-slate-800'}`}>
+            Documentos desta coleta
+          </h2>
+          <p className="text-xs text-gray-500 mt-1 mb-4">
+            Envie o pedido médico para a recepção conferir antes de você chegar. Identidade e
+            carteirinha ficam em <strong>Documentos</strong> e valem para todas as coletas.
+          </p>
+
+          {docsError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 p-3 text-sm mb-4">
+              {docsError}
+            </div>
+          )}
+
+          {podeEnviarDocs && (
+            <div className="mb-4">
+              <DocumentUploader
+                tipos={TIPOS_DA_COLETA}
+                onEnviar={enviar}
+                enviando={enviando}
+                dark={dark}
+              />
+            </div>
+          )}
+
+          <DocumentList
+            documentos={documentos}
+            loading={docsLoading}
+            dark={dark}
+            colunas={2}
+            {...(podeEnviarDocs ? { onRemover: (docId: string) => void remover(docId) } : {})}
+            vazio="Nenhum documento anexado a esta coleta."
+          />
         </div>
       )}
 

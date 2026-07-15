@@ -10,8 +10,12 @@ import { ConfirmBookingModal } from './ConfirmBookingModal'
 
 interface BookingPanelProps {
   dark: boolean
-  /** Chamado após confirmar uma coleta, p/ que a lista possa recarregar. */
-  onBooked?: () => void
+  /**
+   * Chamado após confirmar uma coleta, p/ que a lista possa recarregar. Recebe o
+   * agendamento criado: é dele que sai o id necessário para abrir a coleta e
+   * anexar documentos a ela.
+   */
+  onBooked?: (agendamento: Agendamento) => void
   /** Força recarregamento da disponibilidade quando o valor muda. */
   refreshKey?: number
 }
@@ -68,7 +72,7 @@ export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) 
       // O POST /agendamentos só aceita posto + data/hora. Os exames não são
       // escolhidos aqui: o paciente leva o pedido médico e a recepção seleciona
       // os exames no check-in (FlowLab).
-      await api.post<Agendamento>('/agendamentos', {
+      const criado = await api.post<Agendamento>('/agendamentos', {
         postoFlowlabId: selected.id,
         dataHora,
       })
@@ -79,7 +83,7 @@ export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) 
           p.id === selected.id ? { ...p, slots: p.slots.filter((s) => s !== dataHora) } : p,
         ),
       )
-      onBooked?.()
+      onBooked?.(criado)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Falha ao agendar')
     } finally {

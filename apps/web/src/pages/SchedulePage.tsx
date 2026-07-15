@@ -104,8 +104,11 @@ export function SchedulePage({ dark, initialSelectedId = null }: SchedulePagePro
         <BookingPanel
           dark={dark}
           refreshKey={refreshKey}
-          onBooked={() => {
+          // Abre a coleta recém-criada: é onde o paciente anexa os documentos,
+          // no momento de maior motivação ("adiante seu check-in").
+          onBooked={(ag) => {
             reload()
+            setSelectedId(ag.id)
             setTab('minhas')
           }}
         />
