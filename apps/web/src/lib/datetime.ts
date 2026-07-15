@@ -69,3 +69,11 @@ export function formatDiaRelativo(iso: string): string {
   const d = new Date(iso)
   return relDia(d) ?? `${dayNumFmt.format(d)} ${cap(formatMesCurto(d))}`
 }
+
+/** Ex.: "hoje" | "amanhã" | "06 Mai" — como formatDiaRelativo, mas em caixa de
+ *  frase: para uso no MEIO de um texto ("até 20:00 de hoje"), onde o "Hoje"
+ *  maiúsculo soaria como título. Datas absolutas mantêm o "06 Mai". */
+export function formatDiaRelativoEmFrase(iso: string): string {
+  const rel = relDia(new Date(iso))
+  return rel ? rel.toLowerCase() : formatDiaRelativo(iso)
+}
