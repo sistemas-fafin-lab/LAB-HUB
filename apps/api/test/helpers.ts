@@ -31,14 +31,61 @@ export interface SupaResult {
 // Roteia cada query pela tabela/operação/filtros, devolvendo o resultado do cenário.
 export type SupaHandler = (call: SupaCall) => SupaResult
 
+// Chamada ao Storage registrada pelo mock (upload/remove/signed URLs).
+export interface StorageCall {
+  bucket: string
+  op: 'upload' | 'remove' | 'createSignedUrl' | 'createSignedUrls'
+  paths: string[]
+  options?: unknown
+}
+export type StorageHandler = (call: StorageCall) => SupaResult
+
 // Mock encadeável do client Supabase: replica o query builder (from/select/insert/
-// update/eq/is/lt/order/single/maybeSingle) e auth.getUser. Cada terminal
-// (single/maybeSingle/await) consulta o `handler` do teste e registra a chamada.
-export function createSupabaseMock(opts: { handler: SupaHandler; getUser?: SupaResult }) {
+// update/eq/is/lt/or/order/single/maybeSingle), o storage (upload/remove/signed
+// URLs) e auth.getUser. Cada terminal (single/maybeSingle/await) consulta o
+// `handler` do teste e registra a chamada.
+export function createSupabaseMock(opts: {
+  handler: SupaHandler
+  getUser?: SupaResult
+  storage?: StorageHandler
+}) {
   const calls: SupaCall[] = []
+  const storageCalls: StorageCall[] = []
   const getUser = vi.fn(async () =>
     opts.getUser ?? { data: { user: { id: 'auth-user-1' } }, error: null },
   )
+
+  // Default: tudo dá certo. Os testes sobrescrevem via opts.storage p/ exercitar
+  // falha de upload, de assinatura, etc.
+  const storageHandler: StorageHandler =
+    opts.storage ??
+    ((call) => {
+      if (call.op === 'createSignedUrl') {
+        return { data: { signedUrl: `https://signed.test/${call.paths[0]}` }, error: null }
+      }
+      if (call.op === 'createSignedUrls') {
+        return {
+          data: call.paths.map((p) => ({ path: p, signedUrl: `https://signed.test/${p}`, error: null })),
+          error: null,
+        }
+      }
+      return { data: { path: call.paths[0] }, error: null }
+    })
+
+  function storageFrom(bucket: string) {
+    const run = (op: StorageCall['op'], paths: string[], options?: unknown) => {
+      const call: StorageCall = { bucket, op, paths, ...(options ? { options } : {}) }
+      storageCalls.push(call)
+      return Promise.resolve(storageHandler(call))
+    }
+    return {
+      upload: (path: string, _body: unknown, options?: unknown) => run('upload', [path], options),
+      remove: (paths: string[]) => run('remove', paths),
+      createSignedUrl: (path: string, _ttl: number, options?: unknown) =>
+        run('createSignedUrl', [path], options),
+      createSignedUrls: (paths: string[], _ttl: number) => run('createSignedUrls', paths),
+    }
+  }
 
   function from(table: string) {
     const state: SupaCall = { table, op: 'select', filters: {} }
@@ -54,6 +101,7 @@ export function createSupabaseMock(opts: { handler: SupaHandler; getUser?: SupaR
       eq: (c: string, v: unknown) => ((state.filters[c] = v), builder),
       is: (c: string, v: unknown) => ((state.filters[c] = v), builder),
       lt: (c: string, v: unknown) => ((state.filters[`${c}__lt`] = v), builder),
+      or: (f: string) => ((state.filters.__or = f), builder),
       order: () => builder,
       limit: () => builder,
       single: () => run(),
@@ -64,5 +112,10 @@ export function createSupabaseMock(opts: { handler: SupaHandler; getUser?: SupaR
     return builder
   }
 
-  return { client: { auth: { getUser }, from: vi.fn(from) }, calls, getUser }
+  return {
+    client: { auth: { getUser }, from: vi.fn(from), storage: { from: vi.fn(storageFrom) } },
+    calls,
+    storageCalls,
+    getUser,
+  }
 }

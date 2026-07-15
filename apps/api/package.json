@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
+    "@fastify/multipart": "^10.1.0",
     "@fastify/rate-limit": "^11.0.0",
     "@fastify/sensible": "^6.0.4",
     "@lab-hub/shared": "*",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "form-data": "^4.0.6",
     "tsx": "^4.19.4",
     "typescript": "^5.5.0",
     "vitest": "^3.2.6"
