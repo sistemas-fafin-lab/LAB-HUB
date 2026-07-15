@@ -22,7 +22,7 @@ export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compar
 // Páginas inteiras ocultas do menu E inacessíveis por acesso direto.
 export const MOSTRAR_RESULTADOS = false              // Sidebar/rota: Resultados
 export const MOSTRAR_TENDENCIAS = false              // Sidebar/rota: Tendências
-export const MOSTRAR_DOCUMENTOS = false              // Sidebar/rota: Documentos
+export const MOSTRAR_DOCUMENTOS = true               // Sidebar/rota: Documentos (backend real: GET/POST /documentos)
 export const MOSTRAR_FATURAMENTO = false             // Sidebar/rota: Faturamento
 
 // ---------------------------------------------------------------------------
