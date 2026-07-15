@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Agendamento } from '@lab-hub/shared'
 import { WIcon } from '../primitives/WIcon'
 import { formatDataHora } from '../../lib/datetime'
+import { preparoAplicavel } from '../../lib/preparo'
 import { AgendamentoStatusBadge } from './AgendamentoStatusBadge'
 import { PreparoColeta } from './PreparoColeta'
 
@@ -79,10 +80,15 @@ export function ColetaCard({
             <span className="text-xs text-gray-500 shrink-0">{formatDataHora(dataHora)}</span>
           </div>
 
-          {/* Controles próprios — não devem abrir o detalhe ao clicar. */}
-          <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-            <PreparoColeta dark={dark} />
-          </div>
+          {/* Controles próprios — não devem abrir o detalhe ao clicar.
+              A <div> inteira é condicional, e não só o filho: ela é irmã num
+              flex gap-4, então uma div vazia ainda consumiria 16px de gap e
+              abriria um rasgo no card de toda coleta encerrada. */}
+          {preparoAplicavel(agendamento) && (
+            <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+              <PreparoColeta dataHora={dataHora} dark={dark} />
+            </div>
+          )}
         </div>
 
         <div className="shrink-0" onClick={(e) => e.stopPropagation()}>

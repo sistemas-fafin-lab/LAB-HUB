@@ -4,6 +4,7 @@ import { DocumentUploader } from '../documents/DocumentUploader'
 import { DocumentList } from '../documents/DocumentList'
 import { useDocumentos } from '../../lib/useDocumentos'
 import { TIPOS_DA_COLETA } from '../../lib/documentos'
+import { JEJUM_LABEL, preparoAplicavel } from '../../lib/preparo'
 import {
   formatDataHoraDetalhe,
   formatDiaRelativo,
@@ -144,7 +145,15 @@ export function ColetaTimeline({ agendamento, dark, onBack }: ColetaTimelineProp
         </p>
 
         <div className={`mt-5 pt-5 border-t ${dark ? 'border-gray-800' : 'border-gray-100'} grid grid-cols-2 sm:grid-cols-4 gap-4`}>
-          <InfoTile icon="hourglass" label="Jejum" value="8 horas" dark={dark} />
+          {/* Mesma fonte do popover do card (lib/preparo) — antes eram duas
+              strings hardcoded que já divergiam ("8h" vs "8 horas"). O '—' segue
+              o precedente do `previsao`: não se aplica a coleta encerrada. */}
+          <InfoTile
+            icon="hourglass"
+            label="Jejum"
+            value={preparoAplicavel(agendamento) ? JEJUM_LABEL : '—'}
+            dark={dark}
+          />
           <InfoTile
             icon="clipboard-list"
             label="Pedido médico"
