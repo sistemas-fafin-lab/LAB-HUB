@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type {
   BuscarPacientesResposta,
@@ -10,7 +11,11 @@ import { supabase } from '../lib/supabase.js'
 import { flowlab } from '../lib/flowlab.js'
 import { sincronizarAgendamento, type AgendamentoSyncRow } from '../lib/agendamentoSync.js'
 import { autenticarFlowlab } from '../middlewares/apiKey.js'
-import { labhubIdParamSchema } from '../schemas/documento.js'
+import { detectarTipoArquivo } from '../lib/fileType.js'
+import {
+  labhubIdParamSchema,
+  uploadDocumentoIntegracaoQuerySchema,
+} from '../schemas/documento.js'
 import {
   buscarPacientesQuerySchema,
   criarAgendamentoRecepcaoSchema,
@@ -30,9 +35,25 @@ const BUCKET = 'documentos'
 // registra a coleta.
 const FLOWLAB_URL_TTL_SEGUNDOS = 900
 
+// Casa com o file_size_limit do bucket e com o teto do upload do paciente
+// (routes/documentos.ts). O corpo binário do upload de integração é limitado a isto.
+const TAMANHO_MAX_BYTES = 10 * 1024 * 1024
+
+// Limite do nome exibido (idêntico ao de routes/documentos.ts). O nome NÃO compõe o
+// path (que é UUID) — vai só para exibição e para o Content-Disposition do download.
+const NOME_MAX_CHARS = 120
+
 // Teto de resultados do typeahead de pacientes: o suficiente p/ o operador
 // reconhecer a pessoa sem transformar a busca num despejo da base.
 const BUSCA_PACIENTES_LIMITE = 8
+
+// Só exibição: corta, remove quebras de linha (que envenenariam o header
+// Content-Disposition) e garante algo não-vazio. Espelha sanitizarNome de
+// routes/documentos.ts — mantido local para não acoplar os dois arquivos de rota.
+function sanitizarNome(original: string | undefined, extensao: string): string {
+  const limpo = (original ?? '').replace(/[\r\n\t]/g, '').trim().slice(0, NOME_MAX_CHARS)
+  return limpo || `documento.${extensao}`
+}
 
 // Mascara o CPF revelando só os 2 últimos dígitos (verificadores) — o operador
 // já digitou/tem o CPF em mãos; isto serve só para ele confirmar que a linha é a
@@ -60,6 +81,17 @@ function toPacienteBuscaItem(row: PacienteBuscaRow): PacienteBuscaItem {
 }
 
 export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
+  // Parser do corpo BINÁRIO do upload de documento (application/octet-stream).
+  // Server-to-server: o FlowLab manda os bytes crus e o `tipo` na query, então
+  // não há multipart aqui (evita depender do registro de @fastify/multipart de
+  // routes/documentos.ts). Escopo encapsulado neste plugin — não afeta as rotas
+  // JSON vizinhas, que seguem no parser padrão por casarem outro content-type.
+  app.addContentTypeParser(
+    'application/octet-stream',
+    { parseAs: 'buffer', bodyLimit: TAMANHO_MAX_BYTES },
+    (_req, body, done) => done(null, body),
+  )
+
   // GET /integracao/pacientes/buscar?q=<nome>
   //
   // Typeahead da recepção do FlowLab: busca pacientes por nome (case/acento-
@@ -323,6 +355,128 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       })
 
       return { agendamentoLabhubId: ag.id as string, documentos }
+    },
+  )
+
+  // POST /integracao/agendamentos/:labhubId/documentos?tipo=<tipo>
+  //
+  // A recepção do FlowLab anexa um documento do paciente (identidade, carteirinha,
+  // pedido médico) ao criar/preparar a coleta. O arquivo chega como corpo binário
+  // cru; o `tipo` vem na query e o nome exibível no header x-nome-arquivo.
+  //
+  // Espelha o POST /documentos do paciente: mesma validação por magic bytes, mesmo
+  // layout de path ({paciente_id}/{uuid}.{ext}) e a MESMA compensação de órfão. A
+  // diferença é a autorização (API key, não JWT) e o paciente ser derivado do
+  // agendamento — o FlowLab nunca escolhe paciente_id, igual ao GET acima.
+  app.post(
+    '/integracao/agendamentos/:labhubId/documentos',
+    {
+      preHandler: autenticarFlowlab, // API key, NÃO JWT de paciente
+      bodyLimit: TAMANHO_MAX_BYTES,
+      config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+    },
+    async (request, reply) => {
+      const paramParsed = labhubIdParamSchema.safeParse(request.params)
+      if (!paramParsed.success) {
+        throw app.httpErrors.badRequest('labhubId inválido')
+      }
+      const queryParsed = uploadDocumentoIntegracaoQuerySchema.safeParse(request.query)
+      if (!queryParsed.success) {
+        throw app.httpErrors.badRequest('tipo inválido')
+      }
+      const { tipo } = queryParsed.data
+
+      const buffer = request.body
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        throw app.httpErrors.badRequest('Arquivo ausente')
+      }
+
+      // Resolve o paciente A PARTIR do agendamento (o FlowLab só conhece o
+      // labhub_id do agendamento). Sem isto, o FlowLab poderia anexar ao paciente
+      // de outro — igual ao cuidado do GET de documentos.
+      const { data: ag, error: agError } = await supabase
+        .from('agendamentos')
+        .select('id, paciente_id')
+        .eq('id', paramParsed.data.labhubId)
+        .maybeSingle()
+      if (agError) {
+        throw app.httpErrors.internalServerError('Falha ao carregar agendamento')
+      }
+      if (!ag) {
+        throw app.httpErrors.notFound('Agendamento não encontrado')
+      }
+
+      // Tipo REAL pelos magic bytes, nunca pelo que o cliente declarou.
+      const formato = detectarTipoArquivo(buffer)
+      if (!formato) {
+        throw app.httpErrors.badRequest('Formato não suportado. Envie JPG, PNG, WEBP ou PDF.')
+      }
+
+      // Id pré-gerado p/ derivar o path antes do insert — deixa UMA janela de
+      // falha (o insert), e ela tem compensação.
+      const documentoId = randomUUID()
+      const storagePath = `${ag.paciente_id as string}/${documentoId}.${formato.extensao}`
+
+      const { error: uploadError } = await supabase.storage
+        .from(BUCKET)
+        .upload(storagePath, buffer, {
+          contentType: formato.mimeType, // o SNIFFADO, nunca o header do cliente
+          upsert: false,
+        })
+      if (uploadError) {
+        request.log.error({ err: uploadError, storagePath }, 'Falha ao enviar arquivo ao Storage')
+        throw app.httpErrors.internalServerError('Falha ao enviar arquivo')
+      }
+
+      const nomeHeader = request.headers['x-nome-arquivo']
+      let nomeOriginal: string | undefined
+      try {
+        // O FlowLab manda o nome URL-encoded (evita caracteres inválidos em header).
+        nomeOriginal = typeof nomeHeader === 'string' ? decodeURIComponent(nomeHeader) : undefined
+      } catch {
+        nomeOriginal = undefined // header malformado → cai no nome-padrão do sanitizador
+      }
+
+      const { data, error } = await supabase
+        .from('documentos')
+        .insert({
+          id: documentoId,
+          paciente_id: ag.paciente_id,
+          agendamento_id: ag.id, // anexa À COLETA (aparece no check-in deste agendamento)
+          tipo,
+          nome_arquivo: sanitizarNome(nomeOriginal, formato.extensao),
+          storage_path: storagePath,
+          mime_type: formato.mimeType,
+          tamanho_bytes: buffer.length,
+        })
+        .select()
+        .single()
+
+      if (error || !data) {
+        // Compensação: o objeto subiu mas a linha não existe — remove p/ não deixar
+        // lixo (e dado pessoal) no bucket. Idêntico ao POST /documentos.
+        const { error: limpezaError } = await supabase.storage.from(BUCKET).remove([storagePath])
+        if (limpezaError) {
+          request.log.error(
+            { err: limpezaError, storagePath },
+            'Objeto órfão no bucket após insert falho',
+          )
+        }
+        throw app.httpErrors.internalServerError('Falha ao registrar documento')
+      }
+
+      // Devolve o metadado do documento (sem URL: a recepção não precisa exibi-lo
+      // agora; o check-in pede signed URLs frescas quando for conferir).
+      const doc = data as DocumentoRow
+      const resposta: Omit<DocumentoFlowLab, 'url' | 'expiraEm'> = {
+        id: doc.id,
+        tipo: doc.tipo as TipoDocumento,
+        nomeArquivo: doc.nome_arquivo,
+        mimeType: doc.mime_type,
+        tamanhoBytes: doc.tamanho_bytes,
+        criadoEm: doc.criado_em,
+      }
+      return reply.code(201).send(resposta)
     },
   )
 }

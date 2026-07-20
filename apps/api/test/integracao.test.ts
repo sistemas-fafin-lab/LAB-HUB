@@ -200,3 +200,186 @@ describe('GET /integracao/agendamentos/:labhubId/documentos', () => {
     expect(documentos[0].url).toContain(DOC_COLETA)
   })
 })
+
+// ── POST (upload da recepção do FlowLab) ────────────────────────────────────────
+
+// Magic bytes REAIS de JPEG (detectarTipoArquivo confere os bytes, não a extensão
+// nem o header). Precisa de ≥12 bytes (BYTES_MINIMOS do lib/fileType.ts).
+const JPEG_BYTES = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(10)])
+// Sem assinatura conhecida → detectarTipoArquivo devolve null (falha fechada).
+const LIXO_BYTES = Buffer.from('isto-nao-e-um-arquivo-suportado')
+
+// Diferente do GET, o upload faz insert().select().single(): o handler devolve UMA
+// linha (não o array) e, por padrão, ecoa o payload para as asserções fazerem sentido.
+function uploadSupaHandler(
+  scenario: { agendamento?: SupaResult; insert?: SupaResult } = {},
+): SupaHandler {
+  return (call) => {
+    if (call.table === 'agendamentos') {
+      return scenario.agendamento ?? { data: { id: AG_ID, paciente_id: 'pac-1' }, error: null }
+    }
+    if (call.table === 'documentos' && call.op === 'insert') {
+      if (scenario.insert) return scenario.insert
+      const p = call.payload as Record<string, unknown>
+      return {
+        data: {
+          ...docRow(p.id as string),
+          agendamento_id: p.agendamento_id,
+          tipo: p.tipo,
+          nome_arquivo: p.nome_arquivo,
+          storage_path: p.storage_path,
+          mime_type: p.mime_type,
+          tamanho_bytes: p.tamanho_bytes,
+        },
+        error: null,
+      }
+    }
+    return { data: null, error: null }
+  }
+}
+
+function setupUpload(
+  scenario: Parameters<typeof uploadSupaHandler>[0] = {},
+  storage?: StorageHandler,
+) {
+  const mock = createSupabaseMock({
+    handler: uploadSupaHandler(scenario),
+    ...(storage ? { storage } : {}),
+  })
+  h.setSb(mock.client)
+  return mock
+}
+
+const OCTET = { ...CHAVE, 'content-type': 'application/octet-stream' }
+
+describe('POST /integracao/agendamentos/:labhubId/documentos', () => {
+  it('401 sem x-api-key', async () => {
+    setupUpload()
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `${URL_DOCS}?tipo=identidade`,
+      headers: { 'content-type': 'application/octet-stream' },
+      payload: JPEG_BYTES,
+    })
+
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('201 sobe o arquivo, grava a linha e devolve o metadado', async () => {
+    const mock = setupUpload()
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `${URL_DOCS}?tipo=identidade`,
+      headers: { ...OCTET, 'x-nome-arquivo': encodeURIComponent('meu rg.jpg') },
+      payload: JPEG_BYTES,
+    })
+
+    expect(res.statusCode).toBe(201)
+    const body = res.json()
+    expect(body.tipo).toBe('identidade')
+    expect(body.mimeType).toBe('image/jpeg')
+    expect(body.nomeArquivo).toBe('meu rg.jpg')
+    // Sem URL: a recepção não exibe o doc agora (o check-in pede signed URL depois).
+    expect(body.url).toBeUndefined()
+
+    // Subiu ao Storage com o mime SNIFFADO e path {paciente_id}/{uuid}.jpg.
+    const up = mock.storageCalls.find((c) => c.op === 'upload')
+    expect(up).toBeDefined()
+    expect(up?.paths[0]).toMatch(/^pac-1\/[0-9a-f-]+\.jpg$/)
+    expect((up?.options as { contentType?: string })?.contentType).toBe('image/jpeg')
+
+    // Gravou a linha anexada AO AGENDAMENTO (aparece no check-in desta coleta).
+    const ins = mock.calls.find((c) => c.table === 'documentos' && c.op === 'insert')
+    expect(ins?.payload).toMatchObject({
+      paciente_id: 'pac-1',
+      agendamento_id: AG_ID,
+      tipo: 'identidade',
+      mime_type: 'image/jpeg',
+    })
+  })
+
+  it('400 em tipo fora do enum', async () => {
+    setupUpload()
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `${URL_DOCS}?tipo=laudo`,
+      headers: OCTET,
+      payload: JPEG_BYTES,
+    })
+
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('400 em labhubId não-uuid', async () => {
+    setupUpload()
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integracao/agendamentos/nao-e-uuid/documentos?tipo=identidade',
+      headers: OCTET,
+      payload: JPEG_BYTES,
+    })
+
+    expect(res.statusCode).toBe(400)
+  })
+
+  // Falha fechada pelos magic bytes: nome/header não enganam — nada sobe nem grava.
+  it('400 em formato não suportado, sem tocar no Storage', async () => {
+    const mock = setupUpload()
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `${URL_DOCS}?tipo=identidade`,
+      headers: { ...OCTET, 'x-nome-arquivo': encodeURIComponent('malicioso.jpg') },
+      payload: LIXO_BYTES,
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(mock.storageCalls).toHaveLength(0)
+    expect(mock.calls.some((c) => c.table === 'documentos' && c.op === 'insert')).toBe(false)
+  })
+
+  it('404 em agendamento inexistente, sem tocar no Storage', async () => {
+    const mock = setupUpload({ agendamento: { data: null, error: null } })
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `${URL_DOCS}?tipo=identidade`,
+      headers: OCTET,
+      payload: JPEG_BYTES,
+    })
+
+    expect(res.statusCode).toBe(404)
+    expect(mock.storageCalls).toHaveLength(0)
+  })
+
+  // Insert falhou depois do upload: remove o objeto órfão (LGPD) e responde 500.
+  it('compensa o órfão no Storage quando o insert falha', async () => {
+    const mock = setupUpload({ insert: { data: null, error: { message: 'boom' } } })
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `${URL_DOCS}?tipo=identidade`,
+      headers: OCTET,
+      payload: JPEG_BYTES,
+    })
+
+    expect(res.statusCode).toBe(500)
+    const up = mock.storageCalls.find((c) => c.op === 'upload')
+    const rm = mock.storageCalls.find((c) => c.op === 'remove')
+    expect(up).toBeDefined()
+    expect(rm).toBeDefined()
+    // Removeu exatamente o path que subiu.
+    expect(rm?.paths[0]).toBe(up?.paths[0])
+  })
+})
