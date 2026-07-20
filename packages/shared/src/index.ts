@@ -197,6 +197,52 @@ export interface DocumentosAgendamentoFlowLab {
   documentos: DocumentoFlowLab[]
 }
 
+// ---------------------------------------------------------------------------
+// Agendamento manual pela recepção (FlowLab → LAB-HUB, canal /integracao)
+// ---------------------------------------------------------------------------
+
+// Item da busca de pacientes usada no typeahead da recepção
+// (GET /integracao/pacientes/buscar). Campos mínimos p/ o operador confirmar a
+// identidade sem expor a linha inteira: o CPF vem MASCARADO (só os últimos
+// dígitos) e não trafega e-mail/telefone/convênio.
+export interface PacienteBuscaItem {
+  id: string
+  nome: string
+  cpfMascarado: string // ex.: "•••.•••.•**-•3" — só os últimos dígitos visíveis
+  dataNascimento: string // ISO date (YYYY-MM-DD)
+}
+
+export interface BuscarPacientesResposta {
+  pacientes: PacienteBuscaItem[]
+}
+
+// Body do POST /integracao/agendamentos (recepção cria um agendamento).
+// Dois modos, resolvidos pelo servidor:
+//   - paciente EXISTENTE: envia `pacienteId` (escolhido no typeahead).
+//   - paciente NOVO: envia `nome` + `cpf` + `dataNascimento`. O servidor faz
+//     find-or-create por CPF; se o CPF já existir (fantasma ou real), reusa a
+//     linha em vez de duplicar.
+export interface CriarAgendamentoRecepcaoPayload {
+  pacienteId?: string
+  nome?: string
+  cpf?: string // pode vir formatado; a API normaliza p/ 11 dígitos
+  dataNascimento?: string // YYYY-MM-DD
+  telefone?: string
+  postoFlowlabId: string
+  dataHora: string // ISO 8601
+}
+
+// Resposta do POST /integracao/agendamentos. `flowlabId` só vem presente quando o
+// sync com o FlowLab foi confirmado na hora; se o FlowLab estiver fora, o
+// agendamento fica 'pendente' no LAB-HUB (sincronizado=false) para reprocesso.
+export interface CriarAgendamentoRecepcaoResposta {
+  agendamentoLabhubId: string
+  flowlabId?: string
+  sincronizado: boolean
+  paciente: PacienteBuscaItem
+  pacienteCriado: boolean // true = fantasma recém-criado; false = reusou existente
+}
+
 // Payload recebido do FlowLab via webhook de resultado (D1)
 export interface ResultadoWebhookPayload {
   agendamentoLabhubId: string
