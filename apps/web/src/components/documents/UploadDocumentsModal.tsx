@@ -3,6 +3,7 @@ import type { TipoDocumento } from '@lab-hub/shared'
 import { WIcon } from '../primitives/WIcon'
 import { WFileInput } from '../primitives/WFileInput'
 import { DOC_META, TONE_CLASSES, formatarTamanho, validarArquivo } from '../../lib/documentos'
+import { track } from '../../lib/analytics'
 
 // Cada estado significa UMA coisa, e é isso que define o botão "Enviar":
 //   pendente → entra no próximo envio (pode carregar o `erro` da tentativa anterior)
@@ -119,6 +120,12 @@ export function UploadDocumentsModal({
     }
 
     setEnviando(false)
+    // Só contagens: nome e tipo de arquivo do paciente ficam fora do evento.
+    track('documento_upload_lote', {
+      total: fila.length,
+      sucessos,
+      falhas: fila.length - sucessos,
+    })
     // Fecha sozinho só quando não sobrou nada a resolver — se alguma linha falhou
     // ou foi recusada, o modal fica aberto mostrando o quê e por quê.
     if (sucessos === fila.length && !temRecusado) onFechar()

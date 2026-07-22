@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { WIcon } from '../components/primitives/WIcon'
 import { supabase } from '../lib/supabase'
 import { validarEmail } from '../lib/validators'
+import { track } from '../lib/analytics'
 
 interface LoginPageProps {
   onGoToCadastro: () => void
@@ -47,9 +48,14 @@ export function LoginPage({ onGoToCadastro }: LoginPageProps) {
     if (Object.values(nextErrors).some(Boolean)) return
 
     setLoading(true)
+    track('login_submit')
     // Sucesso: o onAuthStateChange do AuthProvider troca a tela automaticamente.
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-    if (signInError) setError(signInError.message)
+    if (signInError) {
+      setError(signInError.message)
+      // Só a mensagem do Supabase ("Invalid login credentials"), nunca o e-mail.
+      track('login_erro', { motivo: signInError.message })
+    }
     setLoading(false)
   }
 

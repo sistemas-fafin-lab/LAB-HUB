@@ -5,6 +5,7 @@ import { UploadDocumentsModal } from '../components/documents/UploadDocumentsMod
 import { DocumentList } from '../components/documents/DocumentList'
 import { useDocumentos } from '../lib/useDocumentos'
 import { DOC_META, TIPOS_DOCUMENTO } from '../lib/documentos'
+import { track } from '../lib/analytics'
 
 interface DocumentsPageProps {
   dark: boolean
@@ -28,6 +29,7 @@ export function DocumentsPage({ dark }: DocumentsPageProps) {
   // hook guarda seria um segundo aviso do mesmo problema — e sobreviveria ao
   // fechamento como um banner órfão. Zera nas duas pontas.
   const abrirModal = () => {
+    track('documento_modal_abrir')
     limparErro()
     setEnviarAberto(true)
   }

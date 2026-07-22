@@ -4,6 +4,7 @@ import type { Paciente, AtualizarPacientePayload } from '@lab-hub/shared'
 import { iniciais } from '../lib/paciente'
 import { MOSTRAR_NOTIFICACOES } from '../lib/flags'
 import { api } from '../lib/api'
+import { track } from '../lib/analytics'
 import {
   apenasDigitos,
   formatarCpf,
@@ -91,6 +92,7 @@ export function ProfilePage({ paciente, dark, onLogout, onSaved }: ProfilePagePr
         convenio: operadora ? { operadora, ...(plano ? { plano } : {}) } : null,
       }
       const atualizado = await api.put<Paciente>('/pacientes/me', payload)
+      track('perfil_salvo')
       onSaved(atualizado)
       setEditing(false)
     } catch (e) {
@@ -169,7 +171,10 @@ export function ProfilePage({ paciente, dark, onLogout, onSaved }: ProfilePagePr
                 Editar
               </button>
               <button
-                onClick={() => void onLogout()}
+                onClick={() => {
+                  track('logout')
+                  void onLogout()
+                }}
                 className={`rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 border ${
                   dark ? 'border-gray-700 text-gray-300 hover:bg-gray-800' : 'border-gray-200 text-slate-600 hover:bg-slate-50'
                 }`}

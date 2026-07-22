@@ -3,6 +3,7 @@ import { WIcon } from '../primitives/WIcon'
 import { WStatus } from '../primitives/WStatus'
 import { useResultados } from '../../lib/useResultados'
 import { rotaOculta } from '../../lib/flags'
+import { track } from '../../lib/analytics'
 import type { Exam } from '../shared/WebHero'
 import type { AppRoute } from './Topbar'
 
@@ -97,6 +98,9 @@ export function TopbarSearch({ dark, onOpenExam, onNav }: TopbarSearchProps) {
   ]
 
   const activate = (item: Item) => {
+    // Só o tipo do resultado escolhido. O termo digitado NUNCA é enviado: numa
+    // busca de exames ele é, na prática, dado de saúde do paciente.
+    track('busca_resultado_clique', { tipo: item.kind })
     if (item.kind === 'exam') onOpenExam(item.exam)
     else onNav(item.page.route)
     setQuery('')

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Agendamento, PostoDisponivel } from '@lab-hub/shared'
 import { WIcon } from '../primitives/WIcon'
 import { api } from '../../lib/api'
+import { track } from '../../lib/analytics'
 import { formatDataHora } from '../../lib/datetime'
 import { UnitSelector } from './UnitSelector'
 import { SlotPicker } from './SlotPicker'
@@ -76,6 +77,8 @@ export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) 
         postoFlowlabId: selected.id,
         dataHora,
       })
+      // Nome da unidade é dado do laboratório, não do paciente.
+      track('agendamento_confirmado', { posto: selected.nome })
       setConfirmed({ posto: selected.nome, dataHora })
       // Remove o horário recém-agendado da lista local.
       setPostos((prev) =>
@@ -85,7 +88,9 @@ export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) 
       )
       onBooked?.(criado)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Falha ao agendar')
+      const motivo = e instanceof Error ? e.message : 'Falha ao agendar'
+      setError(motivo)
+      track('agendamento_erro', { motivo })
     } finally {
       setSubmitting(null)
       setPending(null)

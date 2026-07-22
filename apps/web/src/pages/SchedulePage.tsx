@@ -7,6 +7,7 @@ import { ColetasList } from "../components/schedule/ColetasList";
 import { ColetaTimeline } from "../components/schedule/ColetaTimeline";
 import { useAgendamentos } from "../lib/useAgendamentos";
 import { api } from "../lib/api";
+import { track } from "../lib/analytics";
 
 interface SchedulePageProps {
   dark: boolean;
@@ -34,6 +35,7 @@ export function SchedulePage({
 
   // Reenvia ao FlowLab um agendamento que ficou 'pendente' (POST .../sync).
   const handleResync = async (id: string) => {
+    track("agendamento_resync");
     setResyncingId(id);
     try {
       await api.post<Agendamento>(`/agendamentos/${id}/sync`, {});
@@ -47,6 +49,7 @@ export function SchedulePage({
   // Optimistic UI: o item permanece na lista e já exibe o status 'cancelado'; em
   // caso de falha, recarrega do servidor p/ voltar ao estado correto.
   const handleCancel = async (id: string) => {
+    track("agendamento_cancelado");
     setCancellingId(id);
     setStatus(id, "cancelado");
     try {

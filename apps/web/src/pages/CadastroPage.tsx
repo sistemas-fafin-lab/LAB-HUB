@@ -4,6 +4,7 @@ import type { CadastroPacientePayload, Paciente, Sexo } from '@lab-hub/shared'
 import { WIcon } from '../components/primitives/WIcon'
 import { api } from '../lib/api'
 import { supabase } from '../lib/supabase'
+import { track } from '../lib/analytics'
 import {
   apenasDigitos,
   formatarCpf,
@@ -76,6 +77,7 @@ export function CadastroPage({ onGoToLogin }: CadastroPageProps) {
     if (Object.values(nextErrors).some(Boolean)) return
 
     setLoading(true)
+    track('cadastro_submit')
     try {
       const telDigits = apenasDigitos(telefone)
       const payload: CadastroPacientePayload = {
@@ -88,6 +90,7 @@ export function CadastroPage({ onGoToLogin }: CadastroPageProps) {
         ...(telDigits ? { telefone: telDigits } : {}),
       }
       const res = await api.post<CadastroResponse>('/cadastro', payload)
+      track('cadastro_sucesso', { confirmacao_email: res.requiresEmailConfirmation === true })
       if (res.requiresEmailConfirmation) {
         // Produção: precisa confirmar o e-mail antes de entrar.
         setDone(true)
@@ -99,7 +102,9 @@ export function CadastroPage({ onGoToLogin }: CadastroPageProps) {
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Falha ao cadastrar')
+      const motivo = err instanceof Error ? err.message : 'Falha ao cadastrar'
+      setError(motivo)
+      track('cadastro_erro', { motivo })
     } finally {
       setLoading(false)
     }
