@@ -1,5 +1,6 @@
 import { WIcon } from "../primitives/WIcon";
 import { rotaOculta } from "../../lib/flags";
+import { useContagemResultados } from "../../lib/useResultados";
 import type { AppRoute } from "./Topbar";
 
 interface SidebarProps {
@@ -25,7 +26,7 @@ const SECTIONS: NavSection[] = [
     title: "Operações",
     items: [
       { id: "home", label: "Visão geral", icon: "layout-dashboard" },
-      { id: "results", label: "Resultados", icon: "file-text", badge: "12" },
+      { id: "results", label: "Resultados", icon: "file-text" },
       { id: "schedule", label: "Agendas/Coletas", icon: "calendar-plus" },
       { id: "trends", label: "Tendências", icon: "trending-up" },
     ],
@@ -42,6 +43,9 @@ const SECTIONS: NavSection[] = [
 ];
 
 export function Sidebar({ route, onNav, dark }: SidebarProps) {
+  // Total real de exames (FlowLab + LIS); null enquanto nenhuma busca concluiu
+  // — nesse caso o badge simplesmente não aparece.
+  const contagemResultados = useContagemResultados();
   return (
     <aside
       className={`w-60 shrink-0 border-r ${
@@ -61,6 +65,10 @@ export function Sidebar({ route, onNav, dark }: SidebarProps) {
               <div className="flex flex-col gap-0.5">
                 {items.map((it) => {
                   const active = route === it.id;
+                  const badge =
+                    it.id === "results" && contagemResultados !== null
+                      ? String(contagemResultados)
+                      : it.badge;
                   return (
                     <button
                       key={it.id}
@@ -79,7 +87,7 @@ export function Sidebar({ route, onNav, dark }: SidebarProps) {
                         strokeWidth={active ? 2.4 : 2}
                       />
                       <span className="flex-1 text-left">{it.label}</span>
-                      {it.badge !== undefined && (
+                      {badge !== undefined && (
                         <span
                           className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
                             active
@@ -87,7 +95,7 @@ export function Sidebar({ route, onNav, dark }: SidebarProps) {
                               : "bg-blue-100 text-blue-700"
                           }`}
                         >
-                          {it.badge}
+                          {badge}
                         </span>
                       )}
                     </button>

@@ -16,6 +16,69 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800;900&display=swap"
       rel="stylesheet"
     />
+    <style>
+      /* Impressão do laudo (LaudoPage): só a folha .laudo-imprimivel sai no
+         papel — o resto do app (sidebar, topbar, toolbar) fica invisível.
+         visibility (e não display:none) para a folha continuar no fluxo e
+         poder quebrar em várias páginas. */
+      @media print {
+        body * {
+          visibility: hidden;
+        }
+        .laudo-imprimivel,
+        .laudo-imprimivel * {
+          visibility: visible;
+        }
+        .laudo-imprimivel {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 100%;
+          margin: 0;
+          border: none;
+          box-shadow: none;
+          border-radius: 0;
+        }
+        /* Distribuição entre páginas: o que tem .imprime-junto não é cortado
+           ao meio — uma seção de exame sai inteira na mesma página (o título
+           nunca fica órfão no fim da página anterior), e o mesmo vale para
+           cada linha de marcador, observações e bloco de assinatura. Seção
+           maior que uma página inteira o navegador quebra mesmo assim. */
+        .laudo-imprimivel .imprime-junto {
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+        /* Referências multilinha: na tela são um resumo de uma linha com a
+           tabela completa em balão no hover (Referencia.tsx). No papel não
+           existe hover — some o resumo e a tabela completa entra no fluxo
+           normal do documento, sem cara de balão. */
+        .laudo-imprimivel .ref-resumo {
+          display: none;
+        }
+        .laudo-imprimivel .ref-completa {
+          display: block !important;
+          position: static;
+          padding: 0;
+          width: auto;
+        }
+        .laudo-imprimivel .ref-completa > div {
+          max-width: none;
+          border: none;
+          border-radius: 0;
+          box-shadow: none;
+          padding: 0;
+          background: transparent;
+        }
+        /* Mantém os fundos coloridos (badges NORMAL/ATENÇÃO, cabeçalhos). */
+        body {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+      }
+      @page {
+        margin: 12mm;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

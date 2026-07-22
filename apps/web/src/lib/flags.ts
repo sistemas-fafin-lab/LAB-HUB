@@ -17,10 +17,11 @@ export const MOSTRAR_CHATBOT = false                 // SupportDock: chat "Lia"
 export const MOSTRAR_NOTIFICACOES = false            // Topbar: sino / badge de notificações
 export const MOSTRAR_DEPENDENTES = false             // Topbar: seletor de dependentes (D2 adiado)
 export const MOSTRAR_NOVIDADES = false               // Settings: card "receber novidades" (sem backend)
+export const MOSTRAR_ENVIAR_AO_MEDICO = false        // LaudoPage: botão "Enviar ao médico" (sem backend)
 export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compartilhar/2FA (sem backend)
 
 // Páginas inteiras ocultas do menu E inacessíveis por acesso direto.
-export const MOSTRAR_RESULTADOS = false              // Sidebar/rota: Resultados
+export const MOSTRAR_RESULTADOS = true               // Sidebar/rota: Resultados (backend real: GET /resultados + GET /laudos)
 export const MOSTRAR_TENDENCIAS = false              // Sidebar/rota: Tendências
 export const MOSTRAR_DOCUMENTOS = true               // Sidebar/rota: Documentos (backend real: GET/POST /documentos)
 export const MOSTRAR_FATURAMENTO = false             // Sidebar/rota: Faturamento

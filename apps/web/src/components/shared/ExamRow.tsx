@@ -33,13 +33,24 @@ export function ExamRow({ exam, onClick, dark }: ExamRowProps) {
         <div className="text-[11px] text-gray-400 truncate">{exam.category}</div>
       </div>
 
-      <div className={`text-xs ${dark ? 'text-gray-300' : 'text-gray-600'} truncate`}>{exam.doctor}</div>
+      {/* Pedido consolidado não tem médico único — a contagem de exames é mais
+          útil que um travessão, que parecia um resultado vazio. */}
+      <div className={`text-xs ${dark ? 'text-gray-300' : 'text-gray-600'} truncate`}>
+        {exam.doctor === '—' && exam.totalExames
+          ? `${exam.totalExames} ${exam.totalExames === 1 ? 'exame' : 'exames'}`
+          : exam.doctor}
+      </div>
 
       <div className={`text-xs ${dark ? 'text-gray-400' : 'text-gray-500'} truncate`}>
         {exam.unit} · {exam.date}
       </div>
 
-      <WStatus status={exam.status} />
+      {/* Largura fixa: cada linha é um grid independente, então se esta célula
+          fosse `auto` a diferença entre "Liberado" e "Em análise" mudaria a
+          largura das colunas `fr` de linha para linha, desalinhando a lista. */}
+      <div className="w-24 flex justify-end">
+        <WStatus status={exam.status} />
+      </div>
       <WIcon name="chevron-right" className="w-4 h-4 text-gray-300" strokeWidth={2} />
     </button>
   )

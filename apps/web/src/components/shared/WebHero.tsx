@@ -11,6 +11,12 @@ export interface ExamPanel {
   trend: number[]
 }
 
+// Subgrupo de marcadores — hoje só hemograma (Série Branca / Vermelha / Plaquetas).
+export interface ExamGroup {
+  name: string
+  panels: ExamPanel[]
+}
+
 export interface Exam {
   id: string
   name: string
@@ -24,6 +30,21 @@ export interface Exam {
   summary: string
   panels: ExamPanel[]
   declaracaoUrl?: string // path da declaração no bucket privado (signed URL sob demanda)
+  // Data da coleta em ISO (YYYY-MM-DD…): `date` acima já está formatada para
+  // exibição e não serve para comparar — o filtro de período usa esta.
+  coletadoEm?: string
+
+  // Daqui para baixo, só o laudo vindo dos LIS (ApLIS/AOL) preenche — o
+  // resultado do FlowLab não tem esses dados. Por isso são opcionais: as telas
+  // omitem o que estiver ausente em vez de mostrar '—'.
+  origem?: 'flowlab' | 'lis'
+  material?: string // ex.: "Soro", "Sangue Total com EDTA"
+  metodo?: string // ex.: "Hexoquinase"
+  laboratorio?: string // nome do laboratório executor
+  groups?: ExamGroup[]
+  // Quantos exames o pedido consolidado reúne — a lista mostra isto quando o
+  // pedido não tem um médico responsável único.
+  totalExames?: number
 }
 
 interface WebHeroProps {
@@ -85,8 +106,8 @@ export function WebHero({ exam, onOpen, dark: _dark }: WebHeroProps) {
 
         {/* Mini summary */}
         <div className="hidden lg:grid grid-cols-2 gap-2 min-w-[260px]">
-          {exam.panels.slice(0, 4).map((p) => (
-            <div key={p.name} className="bg-white/10 backdrop-blur-sm rounded-xl px-3 py-2 border border-white/10">
+          {exam.panels.slice(0, 4).map((p, i) => (
+            <div key={`${p.name}-${i}`} className="bg-white/10 backdrop-blur-sm rounded-xl px-3 py-2 border border-white/10">
               <div className="text-[10px] font-bold uppercase tracking-wider text-blue-100/80 truncate">{p.name}</div>
               <div className="text-base font-bold tabular-nums">
                 {p.value}<span className="text-[10px] font-medium ml-1 text-blue-100/80">{p.unit}</span>

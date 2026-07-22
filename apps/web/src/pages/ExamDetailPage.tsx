@@ -1,8 +1,11 @@
 import { WIcon } from '../components/primitives/WIcon'
 import { WStatus } from '../components/primitives/WStatus'
 import { Sparkline } from '../components/primitives/Sparkline'
-import type { Exam } from '../components/shared/WebHero'
+import { Referencia } from '../components/shared/Referencia'
+import { LaudoTexto } from '../components/shared/LaudoTexto'
+import type { Exam, ExamPanel } from '../components/shared/WebHero'
 import { api } from '../lib/api'
+import { track } from '../lib/analytics'
 
 interface ExamDetailPageProps {
   exam: Exam
@@ -11,8 +14,62 @@ interface ExamDetailPageProps {
   onViewLaudo: () => void
 }
 
+const PLACEHOLDER = '—'
+
+// O resultado do FlowLab não tem médico/CRM e chega como '—'. Melhor omitir o
+// trecho inteiro do que imprimir "— (—)" ao lado da data.
+function preenchido(valor: string | undefined): boolean {
+  return Boolean(valor) && valor !== PLACEHOLDER
+}
+
+const CELULA = 'grid grid-cols-[2fr_1fr_1fr_auto_1fr] gap-4 px-4'
+
+function PanelRow({ p, dark, last }: { p: ExamPanel; dark: boolean; last: boolean }) {
+  return (
+    <div
+      className={`${CELULA} items-center py-3 ${
+        last ? '' : `border-b ${dark ? 'border-gray-700' : 'border-gray-200'}`
+      }`}
+    >
+      <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>{p.name}</div>
+      <div
+        className={`text-sm font-bold tabular-nums ${
+          p.ok ? (dark ? 'text-white' : 'text-slate-900') : 'text-amber-600'
+        }`}
+      >
+        {p.value} <span className="text-[11px] font-medium text-gray-400">{p.unit}</span>
+      </div>
+      <Referencia texto={p.ref} dark={dark} />
+      <div className="flex items-center gap-1.5">
+        <span className={`h-2 w-2 rounded-full ${p.ok ? 'bg-green-500' : 'bg-amber-500'}`} />
+        <span
+          className={`text-xs font-medium ${
+            p.ok ? (dark ? 'text-emerald-400' : 'text-emerald-700') : 'text-amber-700'
+          }`}
+        >
+          {p.ok ? 'Normal' : 'Atenção'}
+        </span>
+      </div>
+      <Sparkline data={p.trend} ok={p.ok} width={90} height={26} />
+    </div>
+  )
+}
+
+// Laudo descritivo (citologia, biópsia, patologia): o resultado é UM marcador
+// "Laudo" com o texto inteiro. Tabela de marcadores não faz sentido para ele —
+// vira um bloco de texto corrido.
+function laudoDescritivo(exam: Exam): string | null {
+  if (exam.groups?.length) return null
+  const unico = exam.panels.length === 1 ? exam.panels[0] : null
+  return unico?.name === 'Laudo' ? unico.value : null
+}
+
 export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPageProps) {
+  const laudoTexto = laudoDescritivo(exam)
+
   const handleDownload = async () => {
+    // Só a origem do clique — `exam.id`/nome do exame são dados do paciente.
+    track('laudo_download', { origem: 'exame' })
     try {
       const { url } = await api.declaracao(exam.id)
       window.open(url, '_blank', 'noopener')
@@ -29,7 +86,7 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
           dark ? 'text-gray-300 hover:text-white' : 'text-slate-600 hover:text-slate-900'
         }`}
       >
-        <WIcon name="arrow-left" className="w-4 h-4" strokeWidth={2.2} />Voltar para visão geral
+        <WIcon name="arrow-left" className="w-4 h-4" strokeWidth={2.2} />Voltar para resultados
       </button>
 
       {/* Header card */}
@@ -53,7 +110,15 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
               {exam.name}
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              {exam.fullDate} · {exam.unit} · {exam.doctor} ({exam.crm})
+              {[
+                exam.fullDate,
+                preenchido(exam.laboratorio) ? exam.laboratorio : exam.unit,
+                preenchido(exam.doctor)
+                  ? `${exam.doctor}${preenchido(exam.crm) ? ` (${exam.crm})` : ''}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -90,10 +155,40 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
             </div>
           </div>
         )}
+
+        {/* Ficha técnica — só o laudo dos LIS traz material e método. */}
+        {(preenchido(exam.material) || preenchido(exam.metodo)) && (
+          <dl className="flex flex-wrap gap-x-8 gap-y-2 mt-4 px-1">
+            {preenchido(exam.material) && (
+              <div>
+                <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Material</dt>
+                <dd className={`text-sm ${dark ? 'text-gray-200' : 'text-slate-700'}`}>{exam.material}</dd>
+              </div>
+            )}
+            {preenchido(exam.metodo) && (
+              <div>
+                <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Método</dt>
+                <dd className={`text-sm ${dark ? 'text-gray-200' : 'text-slate-700'}`}>{exam.metodo}</dd>
+              </div>
+            )}
+          </dl>
+        )}
       </div>
 
+      {/* Laudo descritivo — texto corrido no lugar da tabela de marcadores */}
+      {laudoTexto && (
+        <div
+          className={`rounded-2xl border ${
+            dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
+          } p-6 shadow-sm`}
+        >
+          <h3 className={`text-sm font-semibold mb-3 ${dark ? 'text-white' : 'text-slate-800'}`}>Laudo</h3>
+          <LaudoTexto texto={laudoTexto} dark={dark} />
+        </div>
+      )}
+
       {/* Panels table */}
-      {exam.panels.length > 0 && (
+      {!laudoTexto && exam.panels.length > 0 && (
         <div
           className={`rounded-2xl border ${
             dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
@@ -106,7 +201,7 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
 
           {/* Column headers */}
           <div
-            className={`grid grid-cols-[2fr_1fr_1fr_auto_1fr] gap-4 px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b ${
+            className={`${CELULA} py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b ${
               dark ? 'border-gray-800' : 'border-gray-100'
             }`}
           >
@@ -117,40 +212,25 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
             <span>Tendência</span>
           </div>
 
-          {exam.panels.map((p, i) => (
-            <div
-              key={p.name}
-              className={`grid grid-cols-[2fr_1fr_1fr_auto_1fr] gap-4 items-center px-4 py-3 ${
-                i !== exam.panels.length - 1
-                  ? `border-b ${dark ? 'border-gray-800' : 'border-gray-50'}`
-                  : ''
-              }`}
-            >
-              <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>{p.name}</div>
-              <div
-                className={`text-sm font-bold tabular-nums ${
-                  p.ok ? (dark ? 'text-white' : 'text-slate-900') : 'text-amber-600'
-                }`}
-              >
-                {p.value}{' '}
-                <span className="text-[11px] font-medium text-gray-400">{p.unit}</span>
-              </div>
-              <div className="text-xs text-gray-500">{p.ref}</div>
-              <div className="flex items-center gap-1.5">
-                <span className={`h-2 w-2 rounded-full ${p.ok ? 'bg-green-500' : 'bg-amber-500'}`} />
-                <span
-                  className={`text-xs font-medium ${
-                    p.ok
-                      ? dark ? 'text-emerald-400' : 'text-emerald-700'
-                      : 'text-amber-700'
-                  }`}
-                >
-                  {p.ok ? 'Normal' : 'Atenção'}
-                </span>
-              </div>
-              <Sparkline data={p.trend} ok={p.ok} width={90} height={26} />
-            </div>
-          ))}
+          {/* Laudo compilado por pedido traz um grupo por exame (e o hemograma,
+              um por série) — sem isso são dezenas de marcadores numa lista só.
+              Exame avulso não tem grupos e cai na lista simples. */}
+          {exam.groups?.length
+            ? exam.groups.map((g, gi) => (
+                <div key={`${g.name}-${gi}`}>
+                  <div className="px-4 pt-4 pb-1 text-[11px] font-bold uppercase tracking-wider text-blue-600">
+                    {g.name}
+                  </div>
+                  {/* key composta com o índice: laudos de OS multiexame repetem
+                      nomes genéricos ("Resultado", "Conclusão"). */}
+                  {g.panels.map((p, i) => (
+                    <PanelRow key={`${p.name}-${i}`} p={p} dark={dark} last={i === g.panels.length - 1} />
+                  ))}
+                </div>
+              ))
+            : exam.panels.map((p, i) => (
+                <PanelRow key={`${p.name}-${i}`} p={p} dark={dark} last={i === exam.panels.length - 1} />
+              ))}
         </div>
       )}
     </div>
