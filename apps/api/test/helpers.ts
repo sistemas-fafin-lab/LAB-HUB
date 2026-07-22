@@ -100,6 +100,7 @@ export function createSupabaseMock(opts: {
       delete: () => ((state.op = 'delete'), builder),
       eq: (c: string, v: unknown) => ((state.filters[c] = v), builder),
       is: (c: string, v: unknown) => ((state.filters[c] = v), builder),
+      not: (c: string, op: string, v: unknown) => ((state.filters[`${c}__not_${op}`] = v), builder),
       lt: (c: string, v: unknown) => ((state.filters[`${c}__lt`] = v), builder),
       or: (f: string) => ((state.filters.__or = f), builder),
       order: () => builder,

@@ -254,3 +254,92 @@ export interface ResultadoWebhookPayload {
   declaracaoUrl?: string
   liberadoEm: string
 }
+
+// ---------------------------------------------------------------------------
+// Laudos vindos dos LIS (ApLIS / AOL)
+// ---------------------------------------------------------------------------
+
+// Segunda fonte de resultado, independente do webhook do FlowLab acima: a API
+// BUSCA o laudo nos sistemas do laboratório (ApLIS e Álvaro Online) e cacheia em
+// `exam_results`. Ver docs/LAUDOS_LIS.md.
+//
+// Os nomes de campo aqui são em inglês e snake_case misturados de propósito —
+// são os do pipeline original (LabHubExam), preservados para que as 11
+// estratégias de mapeamento portadas não precisassem ser reescritas. O resto do
+// pacote segue camelCase em português; esta seção é a exceção conhecida.
+
+export interface LaudoLaboratorio {
+  nome: string
+  cnes: string
+  endereco: string
+}
+
+// Marcador já formatado para exibição. Equivale ao PainelResultado do FlowLab,
+// com os nomes de campo do pipeline LIS.
+export interface LaudoPainel {
+  name: string
+  value: string
+  unit: string
+  ref: string
+  ok: boolean
+  trend: number[]
+}
+
+// Subgrupo de marcadores — hoje só hemograma (Série Branca / Vermelha / Plaquetas).
+export interface LaudoGrupo {
+  name: string
+  panels: LaudoPainel[]
+}
+
+// Linha de resultado crua, preservando null (valor ainda não liberado) — o
+// LaudoPainel correspondente já troca null por '—' para a tela.
+export interface LaudoResultado {
+  name: string
+  value: string | null
+  unit: string
+  reference_value: string | null
+  is_out_of_range: boolean | null
+  status: 'ok' | 'abnormal' | 'pending' | 'error'
+}
+
+export interface Laudo {
+  id: string
+  name: string
+  category: string
+  date: string // "DD Mmm YYYY" — exibição curta no card
+  fullDate: string // "DD de mês de YYYY"
+  data_coleta: string // ISO YYYY-MM-DD
+  data_registro: string // ISO YYYY-MM-DD
+  data_emissao: string // ISO YYYY-MM-DD
+  material: string // ex.: "Soro", "Sangue Total com EDTA"
+  metodo: string // ex.: "Hexoquinase"
+  laboratorio: LaudoLaboratorio
+  unit: string
+  doctor: string
+  crm: string
+  status: 'ready' | 'pending' | 'partial'
+  summary: string
+  panels: LaudoPainel[]
+  results?: LaudoResultado[]
+  groups?: LaudoGrupo[]
+  // Metadados internos — a UI não renderiza, mas servem de chave de deduplicação
+  // e de rastro da origem.
+  exam_type: string
+  codigo_os: string // '' quando o laudo só existe no ApLIS; fundido = lista separada por vírgula
+  codigo_lis: string | null
+  // Data de coleta da REQUISIÇÃO no ApLIS (ISO) — pode diferir de `data_coleta`
+  // quando a OS da AOL é de outra remessa (fezes entregues dias após o sangue).
+  // É a chave que liga uma OS órfã (idOsLis digitado como CPF) de volta ao
+  // pedido; ver fundirPedidosPorColeta.
+  data_coleta_pedido?: string
+  source: 'aol' | 'aplis' | 'merged'
+  partial: boolean // true = faltou uma das fontes; o dado pode mudar
+  cached_at?: string // ISO 8601 — quando este laudo foi cacheado
+}
+
+// GET /api/v1/laudos. `source` diz se veio do cache ou de uma busca ao vivo nos
+// LIS — útil para a tela sinalizar "atualizando…" numa revalidação em background.
+export interface RespostaLaudos {
+  exams: Laudo[]
+  source: 'cached' | 'live'
+}
