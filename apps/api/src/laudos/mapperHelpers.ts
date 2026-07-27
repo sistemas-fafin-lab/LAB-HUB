@@ -53,13 +53,17 @@ export function buildDateStrings(bruta: string | null): { date: string; fullDate
 // Laboratório
 // ---------------------------------------------------------------------------
 
-// Fallback para quando o LIS não informa o laboratório executor. Herdado do
-// pipeline original — confirmar se é o executor certo antes de exibir em laudo
-// impresso.
+// Usado quando o LIS não informa o laboratório executor: VAZIO de propósito.
+//
+// Aqui havia "DASA – Diagnósticos da América" com CNES e endereço, herdado do
+// pipeline original e nunca confirmado. O executor é quem responde tecnicamente
+// pelo exame — nomear um laboratório que talvez não tenha feito a análise é
+// atribuir responsabilidade a terceiro, e o laudo é impresso e levado ao médico.
+// Vazio faz a tela omitir a linha (ver `preenchido` na ExamDetailPage).
 export const DEFAULT_LABORATORIO: LaudoLaboratorio = {
-  nome: 'DASA – Diagnósticos da América',
-  cnes: '2337378',
-  endereco: 'SIA Trecho 3, Lotes 1.110/1.120 – Brasília, DF',
+  nome: '',
+  cnes: '',
+  endereco: '',
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +141,9 @@ export function buildMeta(aol: AolExam, aplis: AplisExam | null): ExamMeta {
     material: normalizeMaterial(aol.material),
     metodo: aol.metodo ?? '',
     laboratorio: DEFAULT_LABORATORIO,
-    unit: 'DASA',
+    // A AOL não diz em que unidade a coleta aconteceu; o 'DASA' que ficava aqui
+    // era chute. Vazio: a tela omite em vez de nomear a unidade errada.
+    unit: '',
     doctor: aol.doctor ?? '',
     crm: aol.crm_documento ?? '',
   }

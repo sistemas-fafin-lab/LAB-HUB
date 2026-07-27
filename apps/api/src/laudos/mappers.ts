@@ -447,7 +447,9 @@ export function mapAplisResult(req: AplisRequisicao): Laudo {
     material: '',
     metodo,
     laboratorio,
-    unit: req.local.nome || 'ApLIS',
+    // Sem o nome do local, vazio — 'ApLIS' era o nome do FORNECEDOR do sistema
+    // aparecendo para o paciente como se fosse a unidade de atendimento.
+    unit: req.local.nome,
     doctor: req.responsavel?.nome ?? '',
     crm: req.responsavel?.crm ?? '',
     status: temResultado ? 'ready' : 'pending',
