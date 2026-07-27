@@ -198,6 +198,13 @@ junto, com resposta de tamanho idêntico, ou seja, o header é ignorado. Manter 
 variável no `.env` sem saber a que serve só confunde: ou o laboratório esclarece,
 ou ela sai.
 
+**Reauditada em 27/07/2026 — segue no `.env`, sem uso.** Varredura das envs
+confirmou que nenhum código do LAB-HUB referencia `AOL_CHAVE`: o caminho AOL
+autentica só por Basic (`AOL_IDAGENTE` + `AOL_SENHA`). Mantida por decisão, para
+não perder o valor enquanto o laboratório não esclarece a que serve — ela é
+inerte, então não muda comportamento nenhum. Quem for mexer aqui: não é ponta
+solta esquecida, é espera deliberada.
+
 **ApLIS — 401.** `{"cmd":"login","msgErro":"Usuário e/ou senha incorreto(s)"}`.
 As credenciais do `.env` não são placeholders, então ou são de outra instância
 (a doc oficial cita `demo.aplis.inf.br`; o `.env` aponta `lab.aplis.inf.br`) ou
@@ -302,6 +309,25 @@ preencheu.
 A saída é não precisar do link: indo pela AOL, o CPF vem no `idOsLis` do
 `orders/status` (e no `<paciente codigo_lis>` do XML), o que basta para achar as
 OS do paciente sem passar pelo ApLIS.
+
+**Onde o `<paciente>` fica (confirmado em 27/07/2026, OS 379779766 de produção).**
+Ele não é filho da `<solicitacao>`: é um CADASTRO, como materiais e exames, e a
+solicitação só o referencia pelo atributo `paciente`.
+
+```xml
+<resultados>
+  <cadastros>
+    <pacientes>
+      <paciente codigo="442086219" codigo_lis="179.532.547-00" datanasc="…" nome="…" sexo="F"/>
+    </pacientes>
+  </cadastros>
+  <solicitacao codigo="379779766" paciente="442086219" dataColeta="2026-05-20 08:20:00">
+```
+
+É esse `codigo_lis` do cadastro — não o da `<solicitacao>` — que a barreira de
+identidade usa para conferir de quem é a OS (`buildPacienteMap` em `aol.ts`,
+política em `laudos/identidade.ts`). Auditoria de 27/07/2026 sobre as linhas
+gravadas: 5/5 conferindo, nenhuma divergência e nenhuma sem identidade.
 
 É o que o serviço faz desde 22/07/2026: na busca ao vivo, além do
 `requisicaoListar` do ApLIS, o `AolService.listOrdersByCpf` varre o
