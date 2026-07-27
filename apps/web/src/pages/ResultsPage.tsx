@@ -80,8 +80,13 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
         >
           Seus resultados
         </h1>
+        {/* Não prometer "histórico completo": a busca nos LIS cobre uma janela
+            de dias (APLIS_PERIODO_DIAS), então exames antigos podem não estar
+            aqui. Dizer o contrário faz o paciente concluir que não fez exame
+            num período em que fez. */}
         <p className={`text-sm mt-1 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-          Histórico completo dos exames realizados nas nossas unidades.
+          Exames realizados nas nossas unidades. Resultados mais antigos podem não aparecer aqui —
+          nesse caso, procure a unidade onde fez a coleta.
         </p>
       </div>
 
@@ -103,7 +108,7 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar por nome ou categoria…"
             className={`bg-transparent outline-none text-sm flex-1 ${
-              dark ? 'text-white placeholder:text-gray-500' : 'text-slate-800 placeholder:text-gray-400'
+              dark ? 'text-white placeholder:text-gray-400' : 'text-slate-800 placeholder:text-gray-500'
             }`}
           />
         </div>
@@ -127,8 +132,9 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
           ))}
         </div>
 
-        {/* Período / Atualizar */}
-        <div className="hidden md:flex items-center gap-1.5 ml-auto">
+        {/* Período / Atualizar — antes `hidden md:flex`, o que deixava quem está
+            no celular sem filtro de período E sem como recarregar a lista. */}
+        <div className="flex items-center gap-1.5 md:ml-auto">
           <div className="relative">
             <button
               onClick={() => setPeriodoAberto((v) => !v)}
@@ -197,8 +203,15 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
         {!loading && !error && filtered.map((e) => (
           <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(e)} dark={dark} />
         ))}
+        {/* "Nenhum exame encontrado" servia aos dois casos, e eles não são o
+            mesmo: sem nenhum exame o paciente pode achar que perdeu resultados;
+            com filtro ativo, que não tem exames. */}
         {!loading && !error && filtered.length === 0 && (
-          <div className="text-center text-sm text-gray-400 py-10">Nenhum exame encontrado.</div>
+          <div className="text-center text-sm text-gray-500 py-10">
+            {exams.length === 0
+              ? 'Nenhum resultado disponível ainda. Assim que o laboratório liberar, ele aparece aqui.'
+              : 'Nenhum exame corresponde à busca ou aos filtros selecionados.'}
+          </div>
         )}
       </div>
     </div>
