@@ -1,13 +1,11 @@
 import type { AgendamentoPayloadFlowLab, CancelamentoPayloadFlowLab, PostoDisponivel } from '@lab-hub/shared'
-import { requireEnv } from './env.js'
+import { numeroEnv, requireEnv } from './env.js'
 
 const BASE = requireEnv('FLOWLAB_EDGE_FUNCTION_URL')
 const API_KEY = requireEnv('FLOWLAB_API_KEY')
 // Timeout das chamadas ao FlowLab: sem ele, uma função lenta/travada segura o
-// POST /agendamentos indefinidamente. Configurável via FLOWLAB_TIMEOUT_MS.
-// Guard: valor vazio/inválido cairia em 0 (aborta na hora) ou NaN — usa 8000.
-const parsedTimeout = Number(process.env.FLOWLAB_TIMEOUT_MS)
-const TIMEOUT_MS = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 8000
+// POST /agendamentos indefinidamente. Mínimo 1 — zero abortaria na hora.
+const TIMEOUT_MS = numeroEnv('FLOWLAB_TIMEOUT_MS', 8000, 1)
 
 // Chamada genérica a uma Edge Function do FlowLab (server-to-server).
 async function call<T>(fn: string, body?: unknown): Promise<T> {
@@ -62,8 +60,8 @@ export interface NotifyDocumentoResposta {
 // cada acesso. O fluxo de criação de agendamento NÃO usa este cache: valida o
 // slot ao vivo via getDisponibilidade(), então o cache nunca causa agendamento
 // duplo — no pior caso, exibe um horário recém-tomado até o TTL expirar.
-const parsedDispTtl = Number(process.env.FLOWLAB_DISPONIBILIDADE_TTL_MS)
-const DISP_TTL_MS = Number.isFinite(parsedDispTtl) && parsedDispTtl >= 0 ? parsedDispTtl : 30_000
+// Mínimo 0: zero é legítimo aqui — desliga o cache sem quebrar nada.
+const DISP_TTL_MS = numeroEnv('FLOWLAB_DISPONIBILIDADE_TTL_MS', 30_000)
 
 let dispCache: { expiraEm: number; data: PostoDisponivel[] } | null = null
 let dispInFlight: Promise<PostoDisponivel[]> | null = null // coalesce de misses concorrentes
