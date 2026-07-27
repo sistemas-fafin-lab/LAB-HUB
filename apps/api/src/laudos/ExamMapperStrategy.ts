@@ -11,7 +11,13 @@ import type { PerfilPaciente } from './mapperHelpers.js'
 //
 // `perfil` (idade/sexo) é opcional e só a estratégia de análises clínicas usa —
 // para reduzir a referência estratificada da AOL à linha do paciente.
+//
+// `map` NÃO recebe o CPF. Recebia, e nenhuma implementação usava (todas o
+// declaravam como `_cpf`): a assinatura prometia uma conferência de identidade
+// que ninguém fazia, o que é pior que não prometer nada num caminho crítico. A
+// conferência real acontece uma vez, na fronteira do serviço, antes de qualquer
+// mapeamento — ver laudos/identidade.ts.
 export interface ExamMapperStrategy {
   canHandle(examType: string): boolean
-  map(aol: AolExam, aplis: AplisExam | null, cpf: string, perfil?: PerfilPaciente): Laudo
+  map(aol: AolExam, aplis: AplisExam | null, perfil?: PerfilPaciente): Laudo
 }

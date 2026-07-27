@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase.js'
 import { DatabaseError } from './errors.js'
+import { conferirCpf, deveBloquear } from './identidade.js'
 import type { ExamResultRow, Laudo } from './types.js'
 
 // Acesso à tabela `exam_results`. Tudo é escopado por `paciente_id`: o CPF serve
@@ -18,8 +19,12 @@ function comoLaudos(result: unknown): Laudo[] {
 }
 
 export interface IExamResultRepository {
-  /** Laudos já resolvidos do paciente (linhas sem resultado ficam de fora). */
-  findByPaciente(pacienteId: string): Promise<Laudo[]>
+  /**
+   * Laudos já resolvidos do paciente (linhas sem resultado ficam de fora).
+   * `cpf` é o do paciente do token: linha cuja coluna `cpf` divirja dele não é
+   * servida (ver a nota de segunda chave na implementação).
+   */
+  findByPaciente(pacienteId: string, cpf: string): Promise<Laudo[]>
   /** Todas as linhas, inclusive as que ainda aguardam resultado. */
   findAllRows(pacienteId: string): Promise<ExamResultRow[]>
   findByCodigoLis(pacienteId: string, codigoLis: string): Promise<ExamResultRow | null>
@@ -39,10 +44,10 @@ export interface IExamResultRepository {
 }
 
 export class ExamResultRepository implements IExamResultRepository {
-  async findByPaciente(pacienteId: string): Promise<Laudo[]> {
+  async findByPaciente(pacienteId: string, cpf: string): Promise<Laudo[]> {
     const { data, error } = await supabase
       .from(TABELA)
-      .select('result, cached_at')
+      .select('cpf, result, cached_at')
       .eq('paciente_id', pacienteId)
       .not('result', 'is', null)
 
@@ -50,10 +55,19 @@ export class ExamResultRepository implements IExamResultRepository {
       throw new DatabaseError('Falha ao buscar laudos do paciente', { pacienteId, cause: error })
     }
 
+    // Segunda chave, de propósito: `paciente_id` já escopa a busca, mas o `cpf`
+    // gravado na linha é o que foi usado para consultar o LIS. Exigir os dois
+    // batendo faz com que uma linha vinculada ao paciente errado ANTES desta
+    // barreira existir pare de ser servida — sem isso o cache continuaria
+    // entregando o vínculo errado para sempre, já que o caminho cacheado nunca
+    // volta ao LIS para reconferir. Comparado por dígitos (e não com `.eq` no
+    // SQL) para sobreviver a uma regravação de `pacientes.cpf` com formatação
+    // diferente: só bloqueia divergência real, não diferença de pontuação.
     // `cached_at` é coluna, não vive dentro do JSON — mas o serviço precisa dele
     // junto do laudo para decidir se o cache venceu, então é injetado aqui.
     // Com `result` sendo lista, a ordenação por data saiu do SQL para cá.
     return (data ?? [])
+      .filter((row) => !deveBloquear(conferirCpf(cpf, row.cpf as string)))
       .flatMap((row) =>
         comoLaudos(row.result).map((l) => ({
           ...l,
@@ -133,10 +147,17 @@ export class ExamResultRepository implements IExamResultRepository {
     })
 
     if (error) {
+      // 23505 = unique_violation. `codigo_lis` é UNIQUE GLOBAL (não por
+      // paciente), então este erro significa que o código já pertence à linha de
+      // OUTRO paciente — não é uma falha transitória de banco. O insert falhar é
+      // o comportamento certo (fail-closed: ninguém vê o laudo do outro), mas
+      // sem marcar o caso ele virava um warn genérico e o paciente legítimo
+      // ficava sem o laudo, para sempre e em silêncio. Ver o log no service.
       throw new DatabaseError('Falha ao registrar requisição pendente', {
         pacienteId,
         codigoLis,
         codigoOs,
+        conflitoDePosse: (error as { code?: string }).code === '23505',
         cause: error,
       })
     }

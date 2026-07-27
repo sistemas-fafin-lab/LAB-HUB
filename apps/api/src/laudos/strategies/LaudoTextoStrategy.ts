@@ -15,7 +15,7 @@ function makeLaudoTextoStrategy(displayName: string, category: string): ExamMapp
     // Quem resolve a estratégia é o registry, por código/nome do exame.
     canHandle: () => false,
 
-    map(aol: AolExam, aplis: AplisExam | null, _cpf: string): Laudo {
+    map(aol: AolExam, aplis: AplisExam | null): Laudo {
       const meta = buildMeta(aol, aplis)
 
       // Nestes exames a AOL devolve o texto do laudo como "analitos" — cada

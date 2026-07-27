@@ -4,12 +4,20 @@ import type { IAplisService } from './aplis.js'
 import type { IExamResultRepository } from './repository.js'
 import type { AolExam, AplisExam, AplisRequisicao, ExamResultRow, Laudo } from './types.js'
 import { consolidaLaudosDaOs, fundirPedidosPorColeta, mapAplisResult, mapExamResult } from './mappers.js'
-import { ValidationError } from './errors.js'
+import { DatabaseError, ValidationError } from './errors.js'
+import { conferirCpf, deveBloquear } from './identidade.js'
 import { cpfValido } from '../lib/cpf.js'
+import { numeroEnv } from '../lib/env.js'
 import { idadeEmAnos, type PerfilPaciente } from './mapperHelpers.js'
 
-const TTL_MS = Number(process.env.EXAM_CACHE_TTL_HOURS ?? 24) * 60 * 60 * 1000
-const PERIODO_DIAS = Number(process.env.APLIS_PERIODO_DIAS ?? 45)
+const TTL_MS = numeroEnv('EXAM_CACHE_TTL_HOURS', 24) * 60 * 60 * 1000
+
+// Janela retroativa da descoberta, para o ApLIS E para a listagem de OS da AOL.
+// O default é 90 e não 45 porque errar para baixo é o lado perigoso: exame mais
+// antigo que a janela e ainda não descoberto nunca entra, e some da tela sem
+// nenhum sinal. Errar para cima só custa tempo de varredura (~47s em 90 dias),
+// que o cache SWR amortiza. Mínimo 1: zero dias não descobriria nada.
+const PERIODO_DIAS = numeroEnv('APLIS_PERIODO_DIAS', 90, 1)
 
 // ---------------------------------------------------------------------------
 // Cache
@@ -64,6 +72,31 @@ export function saoListasIguais(anterior: Laudo[] | null, novos: Laudo[]): boole
 
 export function isCacheStale(cachedAt: string, ttlMs = TTL_MS): boolean {
   return Date.now() - new Date(cachedAt).getTime() > ttlMs
+}
+
+/**
+ * Loga a falha de um `insertAwaiting` separando os dois casos que ela esconde.
+ *
+ * `codigo_lis` é UNIQUE GLOBAL (não por paciente), então uma violação de
+ * unicidade não é ruído de banco: é o código já pertencendo à linha de OUTRO
+ * paciente. O insert falhar está certo (ninguém vê o laudo alheio), mas o efeito
+ * colateral é que o paciente LEGÍTIMO também nunca vê o dele — e como warn
+ * genérico isso some no log. Erro de posse sai em `error` e nomeado, para o
+ * script de auditoria e o operador acharem.
+ */
+function logInsertFalhou(
+  err: unknown,
+  contexto: Record<string, unknown>,
+  log?: FastifyBaseLogger,
+): void {
+  if (err instanceof DatabaseError && err.context.conflitoDePosse) {
+    log?.error(
+      { ...contexto, err },
+      'codigo_lis já pertence à linha de outro paciente — laudo retido para AMBOS até revisão manual',
+    )
+    return
+  }
+  log?.warn({ ...contexto, err }, 'insertAwaiting falhou')
 }
 
 // Converte a requisição do ApLIS no shape achatado que as estratégias esperam.
@@ -121,7 +154,7 @@ export class LaudoService {
     }
 
     if (!forceRefresh) {
-      const cacheados = await this.repo.findByPaciente(pacienteId)
+      const cacheados = await this.repo.findByPaciente(pacienteId, cpf)
       if (cacheados.length > 0) {
         // Um único laudo vencido obriga a revalidar o conjunto: a tela mostra a
         // lista inteira, então não adianta metade estar em dia.
@@ -188,9 +221,7 @@ export class LaudoService {
 
       await this.repo
         .insertAwaiting(pacienteId, cpf, req.cod_requisicao, null)
-        .catch((err) =>
-          log?.warn({ pacienteId, codigoLis: req.cod_requisicao, err }, 'insertAwaiting falhou'),
-        )
+        .catch((err) => logInsertFalhou(err, { pacienteId, codigoLis: req.cod_requisicao }, log))
     }
 
     // FASE 2.5 — descobrir as OS do paciente na AOL, que é onde estão os
@@ -225,7 +256,7 @@ export class LaudoService {
             // insertAwaiting da FASE 2 falhou: registra já com os dois códigos.
             await this.repo
               .insertAwaiting(pacienteId, cpf, chave, orderId)
-              .catch((err) => log?.warn({ pacienteId, orderId, err }, 'insertAwaiting (link) falhou'))
+              .catch((err) => logInsertFalhou(err, { pacienteId, codigoLis: chave, orderId }, log))
           }
           continue
         }
@@ -237,7 +268,7 @@ export class LaudoService {
 
           await this.repo
             .insertAwaiting(pacienteId, cpf, null, orderId)
-            .catch((err) => log?.warn({ pacienteId, orderId, err }, 'insertAwaiting (OS) falhou'))
+            .catch((err) => logInsertFalhou(err, { pacienteId, orderId }, log))
         }
       }
       log?.info({ pacienteId, total: ordens.length, doPaciente }, 'AOL orders/status OK')
@@ -283,7 +314,28 @@ export class LaudoService {
 
     try {
       const resultado = await this.aplis.requisicaoResultado(linha.codigo_lis)
-      return [mapAplisResult(resultado, cpf)]
+
+      // Barreira de identidade: `requisicaoResultado` recebe só o código da
+      // requisição — não há escopo de paciente no protocolo do ApLIS, então o
+      // CPF que volta no payload é a ÚNICA prova de que este resultado é de quem
+      // pediu. Se a linha estiver vinculada ao codigo_lis errado, é aqui que se
+      // descobre.
+      const veredito = conferirCpf(cpf, resultado.paciente?.cpf)
+      if (deveBloquear(veredito)) {
+        log?.error(
+          { pacienteId: linha.paciente_id, codigoLis: linha.codigo_lis },
+          'Identidade divergente no ApLIS — laudo BLOQUEADO (linha vinculada a outro paciente)',
+        )
+        return null
+      }
+      if (veredito === 'indisponivel') {
+        log?.warn(
+          { codigoLis: linha.codigo_lis },
+          'ApLIS não informou o CPF do paciente — identidade não verificada',
+        )
+      }
+
+      return [mapAplisResult(resultado)]
     } catch (err) {
       // Uma requisição que falha não invalida as outras — some desta resposta e
       // volta na próxima revalidação.
@@ -315,10 +367,37 @@ export class LaudoService {
       return null
     }
 
+    // Barreira de identidade. É o ponto mais crítico do pipeline: esta OS foi
+    // atribuída ao paciente por um `idOsLis` DIGITADO À MÃO (ver a FASE 2.5), e
+    // até aqui nada confirmou que ela é mesmo dele. Basta um exame da OS acusar
+    // outro CPF para a OS inteira cair — uma solicitação é de um paciente só.
+    const cpfDaOs = exames.find((e) => e.paciente_cpf)?.paciente_cpf ?? null
+    const veredito = conferirCpf(cpf, cpfDaOs)
+    if (deveBloquear(veredito)) {
+      log?.error(
+        { pacienteId: linha.paciente_id, codigoOs, codigoLis: linha.codigo_lis },
+        'Identidade divergente na AOL — OS BLOQUEADA (idOsLis casou com o paciente errado)',
+      )
+      return null
+    }
+    if (veredito === 'indisponivel') {
+      log?.warn({ codigoOs }, 'AOL não informou o CPF do paciente — identidade não verificada')
+    }
+
     let aplis: AplisRequisicao | null = null
     if (linha.codigo_lis) {
       try {
         aplis = await this.aplis.requisicaoResultado(linha.codigo_lis)
+        // A capa do ApLIS entra no mesmo card: se ela for de outro paciente, o
+        // laudo sairia com nome de exame e datas alheios sobre valores certos.
+        // Descartar só a capa preserva os valores da AOL, já verificados acima.
+        if (deveBloquear(conferirCpf(cpf, aplis.paciente?.cpf))) {
+          log?.error(
+            { pacienteId: linha.paciente_id, codigoOs, codigoLis: linha.codigo_lis },
+            'Identidade divergente na capa do ApLIS — metadados DESCARTADOS, mantidos os valores da AOL',
+          )
+          aplis = null
+        }
       } catch (err) {
         // Sem o ApLIS o laudo sai sem faixas de referência; a estratégia marca
         // `partial` e o cache revalida antes do TTL normal.
@@ -334,7 +413,7 @@ export class LaudoService {
     const aplisExam = aplis ? toAplisExam(aplis) : null
     const porExame = exames.map((exame) => {
       const tipo = exame.codigo_tipo ?? aplis?.tipo_exame ?? exame.nome_exame ?? 'unknown'
-      return mapExamResult(exame, aplisExam, tipo, cpf, perfil)
+      return mapExamResult(exame, aplisExam, tipo, perfil)
     })
     return [consolidaLaudosDaOs(porExame, aplis?.tipo_exame ?? null, aplis?.data_solicitacao ?? null)]
   }

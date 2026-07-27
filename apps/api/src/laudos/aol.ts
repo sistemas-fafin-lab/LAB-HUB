@@ -206,15 +206,59 @@ function mapAnalitos(rawResultados: any[], cadastro: ExameInfo | undefined): Aol
   })
 }
 
+// CPF de um nó <paciente>. O atributo é `codigo_lis` (confirmado em resposta
+// real de produção, OS 379779766 em 27/07/2026); a varredura dos demais
+// atributos é rede de segurança para instalações que nomeiem diferente.
+function cpfDoNoPaciente(p: any): string | null {
+  const direto = String(p?.['@_codigo_lis'] ?? '').replace(/\D/g, '')
+  if (direto.length === 11) return direto
+
+  for (const [chave, valor] of Object.entries(p ?? {})) {
+    if (!chave.startsWith('@_')) continue
+    const digitos = String(valor ?? '').replace(/\D/g, '')
+    if (digitos.length === 11) return digitos
+  }
+  return null
+}
+
+/**
+ * código do paciente → CPF. É o dicionário que a barreira de identidade usa.
+ *
+ * O <paciente> é um CADASTRO (fica em <cadastros><pacientes>), como materiais e
+ * exames — a <solicitacao> só o referencia pelo atributo `paciente`:
+ *
+ *   <cadastros><pacientes>
+ *     <paciente codigo="442086219" codigo_lis="179.532.547-00" nome="..."/>
+ *   </pacientes></cadastros>
+ *   <solicitacao codigo="379779766" paciente="442086219" .../>
+ *
+ * NÃO usar o `<solicitacao codigo_lis>`: ele às vezes traz o codRequisicao do
+ * ApLIS e às vezes o CPF, variando por origem (LAUDOS_LIS.md, "Pendência
+ * conhecida"). Um campo que muda de significado não serve de identidade.
+ */
+export function buildPacienteMap(cadastros: any): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const p of comoArray(cadastros?.pacientes?.paciente)) {
+    const cod = String(p?.['@_codigo'] ?? '')
+    const cpf = cpfDoNoPaciente(p)
+    if (cod && cpf) map.set(cod, cpf)
+  }
+  return map
+}
+
 function parseSolicitacao(
   sol: any,
   exameMap: Map<string, ExameInfo>,
   materialMap: Map<string, string>,
+  pacienteMap: Map<string, string>,
 ): AolExam[] {
   const codigoOs = String(sol?.['@_codigo'] ?? '')
   const dataColeta = sol?.['@_dataColeta'] ?? sol?.['@_data_coleta'] ?? null
   const dataLaudo = sol?.['@_data_laudo'] ?? null
   const amostraMap = buildAmostraMap(sol, materialMap)
+  // null quando o cadastro não trouxer o paciente: vira veredito `indisponivel`
+  // e NÃO bloqueia (ver laudos/identidade.ts).
+  const pacienteCpf = pacienteMap.get(String(sol?.['@_paciente'] ?? '')) ?? null
 
   return comoArray(sol?.exame).map((ex): AolExam => {
     const exCodigo = String(ex?.['@_codigo'] ?? '')
@@ -234,6 +278,7 @@ function parseSolicitacao(
       metodo: ex?.['@_metodo'] ?? null,
       doctor: ex?.['@_responsaveltecnico'] ?? null,
       crm_documento: ex?.['@_responsaveltecnicodocumento'] ?? null,
+      paciente_cpf: pacienteCpf,
       analitos: mapAnalitos(rawResultados, cadastro),
     }
   })
@@ -244,9 +289,10 @@ function parseResultados(xml: string): AolExam[] {
   const resultados: any = root?.resultados ?? root?.Resultados ?? {}
   const materialMap = buildMaterialMap(resultados?.cadastros ?? {})
   const exameMap = buildExameMap(resultados?.cadastros ?? {})
+  const pacienteMap = buildPacienteMap(resultados?.cadastros ?? {})
 
   return comoArray(resultados?.solicitacao).flatMap((sol) =>
-    parseSolicitacao(sol, exameMap, materialMap),
+    parseSolicitacao(sol, exameMap, materialMap, pacienteMap),
   )
 }
 
@@ -305,6 +351,26 @@ export interface IAolService {
 export class AolService implements IAolService {
   /** Busca os exames de uma OS. Uma OS pode render vários AolExam (um por tipo). */
   async fetchExam(codigoOs: string): Promise<AolExam[]> {
+    const xml = await this.fetchXml(codigoOs)
+    try {
+      return parseResultados(xml)
+    } catch (err) {
+      throw new IntegrationError('AOL resultados: falha ao parsear o XML', 'aol', {
+        codigoOs,
+        cause: err,
+      })
+    }
+  }
+
+  /**
+   * A resposta CRUA do PUT /v2/resultados, sem parsear.
+   *
+   * Existe para o `fetchExam` e para `scripts/auditar-vinculos.ts --dump-xml`,
+   * que precisa do XML original para confirmar em qual atributo do nó
+   * <paciente> a AOL manda o CPF (ver extrairCpfPaciente). Fazer o script
+   * remontar a requisição por fora duplicaria credenciais e o corpo XML.
+   */
+  async fetchXml(codigoOs: string): Promise<string> {
     if (!codigoOs) {
       throw new ValidationError('codigoOs é obrigatório', { codigoOs })
     }
@@ -340,15 +406,7 @@ export class AolService implements IAolService {
       })
     }
 
-    const xml = await res.text()
-    try {
-      return parseResultados(xml)
-    } catch (err) {
-      throw new IntegrationError('AOL resultados: falha ao parsear o XML', 'aol', {
-        codigoOs,
-        cause: err,
-      })
-    }
+    return res.text()
   }
 
   /**

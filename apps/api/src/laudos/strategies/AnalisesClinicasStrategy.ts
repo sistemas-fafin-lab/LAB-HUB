@@ -117,7 +117,7 @@ export const analisesClinicasStrategy: ExamMapperStrategy = {
     return /^[A-Z0-9]{1,10}$/.test(t)
   },
 
-  map(aol: AolExam, aplis: AplisExam | null, _cpf: string, perfil?: PerfilPaciente): Laudo {
+  map(aol: AolExam, aplis: AplisExam | null, perfil?: PerfilPaciente): Laudo {
     const meta = buildMeta(aol, aplis)
 
     // A AOL manda nos VALORES — é a fonte precisa. O ApLIS entra só para

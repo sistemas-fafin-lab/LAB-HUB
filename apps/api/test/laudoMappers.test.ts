@@ -37,12 +37,13 @@ const aolBase: AolExam = {
   metodo: 'Hexoquinase',
   doctor: 'Dr. Teste',
   crm_documento: 'CRM 1234',
+  paciente_cpf: '52998224725',
   analitos: [{ nome: 'Glicose', valor: '95', unidade: 'mg/dL', referencia: '70 – 99' }],
 }
 
 describe('analisesClinicasStrategy', () => {
   it('converte analitos da AOL em marcadores', () => {
-    const laudo = analisesClinicasStrategy.map(aolBase, null, 'cpf')
+    const laudo = analisesClinicasStrategy.map(aolBase, null)
 
     expect(laudo.panels).toHaveLength(1)
     expect(laudo.panels[0]!.name).toBe('Glicose')
@@ -50,7 +51,7 @@ describe('analisesClinicasStrategy', () => {
   })
 
   it('marca o laudo como parcial quando não há dado do ApLIS', () => {
-    const laudo = analisesClinicasStrategy.map(aolBase, null, 'cpf')
+    const laudo = analisesClinicasStrategy.map(aolBase, null)
 
     expect(laudo.partial).toBe(true)
     expect(laudo.source).toBe('aol')
@@ -72,7 +73,7 @@ describe('analisesClinicasStrategy', () => {
       analitos: [{ nome: 'Glicose', resultado: '999', unidade: 'mg/dL', valor_referencia: '70 – 99' }],
     }
 
-    const laudo = analisesClinicasStrategy.map(aol, aplis, 'cpf')
+    const laudo = analisesClinicasStrategy.map(aol, aplis)
 
     expect(laudo.source).toBe('merged')
     expect(laudo.partial).toBe(false)
@@ -93,7 +94,7 @@ describe('analisesClinicasStrategy', () => {
       analitos: [{ nome: 'DHT', resultado: '450', unidade: 'pg/mL', valor_referencia: '30 - 85' }],
     }
 
-    const laudo = analisesClinicasStrategy.map(aol, aplis, 'cpf')
+    const laudo = analisesClinicasStrategy.map(aol, aplis)
 
     expect(laudo.panels[0]!.ref).toBe('30 - 85')
     // 450 está fora de 30–85: a referência do ApLIS é o que permite marcar isso.
@@ -109,7 +110,7 @@ describe('analisesClinicasStrategy', () => {
       analitos: [{ nome: 'Creatinina', resultado: '1,0', unidade: 'mg/dL', valor_referencia: '0,7 - 1,3' }],
     }
 
-    const laudo = analisesClinicasStrategy.map(aolBase, aplis, 'cpf')
+    const laudo = analisesClinicasStrategy.map(aolBase, aplis)
 
     expect(laudo.panels).toHaveLength(1)
     expect(laudo.panels[0]!.name).toBe('Glicose')
@@ -125,7 +126,7 @@ describe('analisesClinicasStrategy', () => {
       analitos: [{ nome: 'Glicose', resultado: '95', unidade: 'mg/dL', valor_referencia: '70 – 99' }],
     }
 
-    const laudo = analisesClinicasStrategy.map({ ...aolBase, analitos: [] }, aplis, 'cpf')
+    const laudo = analisesClinicasStrategy.map({ ...aolBase, analitos: [] }, aplis)
 
     expect(laudo.panels).toHaveLength(1)
     expect(laudo.panels[0]!.value).toBe('95')
@@ -142,13 +143,13 @@ describe('analisesClinicasStrategy', () => {
       ],
     }
 
-    const laudo = analisesClinicasStrategy.map(aol, null, 'cpf')
+    const laudo = analisesClinicasStrategy.map(aol, null)
 
     expect(laudo.groups?.map((g) => g.name)).toEqual(['Série Branca', 'Série Vermelha', 'Plaquetas'])
   })
 
   it('deriva a categoria a partir do nome do exame', () => {
-    expect(analisesClinicasStrategy.map(aolBase, null, 'cpf').category).toBe('Bioquímica')
+    expect(analisesClinicasStrategy.map(aolBase, null).category).toBe('Bioquímica')
   })
 })
 
@@ -159,7 +160,7 @@ describe('estratégias de laudo em texto', () => {
       analitos: [{ nome: 'Resultado', valor: 'Negativo', unidade: null, referencia: null }],
     }
 
-    const laudo = citologiaBaseLiquidaStrategy.map(aol, null, 'cpf')
+    const laudo = citologiaBaseLiquidaStrategy.map(aol, null)
 
     expect(laudo.category).toBe('Citologia')
     expect(laudo.panels).toHaveLength(1)
@@ -168,13 +169,13 @@ describe('estratégias de laudo em texto', () => {
   })
 
   it('sem analitos, cai no texto padrão', () => {
-    const laudo = citologiaBaseLiquidaStrategy.map({ ...aolBase, analitos: [] }, null, 'cpf')
+    const laudo = citologiaBaseLiquidaStrategy.map({ ...aolBase, analitos: [] }, null)
 
     expect(laudo.panels[0]!.value).toContain('Resultado disponível')
   })
 
   it('biópsia usa a mesma forma, com a categoria própria', () => {
-    const laudo = biopsiaGeralStrategy.map(aolBase, null, 'cpf')
+    const laudo = biopsiaGeralStrategy.map(aolBase, null)
 
     expect(laudo.category).toBe('Biópsia')
     expect(laudo.panels[0]!.name).toBe('Laudo')
@@ -183,7 +184,7 @@ describe('estratégias de laudo em texto', () => {
 
 describe('genericStrategy', () => {
   it('assume que o mapeamento está incompleto', () => {
-    const laudo = genericStrategy.map(aolBase, null, 'cpf')
+    const laudo = genericStrategy.map(aolBase, null)
 
     expect(laudo.partial).toBe(true)
     expect(laudo.status).toBe('partial')
@@ -205,8 +206,8 @@ describe('resolveStrategy', () => {
   })
 
   it('resolve por palavra-chave no nome do exame', () => {
-    expect(resolveStrategy('Colpocitologia Oncótica').map(aolBase, null, 'c').category).toBe('Citologia')
-    expect(resolveStrategy('Biópsia de pele').map(aolBase, null, 'c').category).toBe('Biópsia')
+    expect(resolveStrategy('Colpocitologia Oncótica').map(aolBase, null).category).toBe('Citologia')
+    expect(resolveStrategy('Biópsia de pele').map(aolBase, null).category).toBe('Biópsia')
   })
 
   it('sigla curta é análise clínica', () => {
@@ -459,7 +460,6 @@ describe('mapAplisResult', () => {
         procedimentos: [{ codigo: '1', nome: 'PCR', resultado: null, unidade: null, valor_referencia: null }],
         local: { nome: 'CLAF', endereco: null, numero: null },
       },
-      '52998224725',
     )
 
     expect(laudo.status).toBe('pending')
@@ -483,7 +483,6 @@ describe('mapAplisResult', () => {
         ],
         local: { nome: 'CLAF', endereco: null, numero: null },
       },
-      '52998224725',
     )
 
     expect(laudo.status).toBe('ready')
@@ -521,7 +520,6 @@ describe('mapAplisResult', () => {
         ],
         responsavel: { nome: 'Paulo Vitor', crm: 'CRBM 18530' },
       },
-      '52998224725',
     )
 
     expect(laudo.status).toBe('ready')
@@ -552,7 +550,6 @@ describe('mapAplisResult', () => {
         laudo_texto: texto,
         responsavel: { nome: 'Décio Fausto Gorini', crm: 'CRM-DF 1768 RQE 925 DF' },
       },
-      '52998224725',
     )
 
     expect(laudo.status).toBe('ready')

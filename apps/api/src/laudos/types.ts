@@ -20,6 +20,10 @@ export interface AolExam {
   metodo: string | null // método analítico (ex.: "Hexoquinase")
   doctor: string | null // responsável técnico
   crm_documento: string | null // documento do responsável (CRM / CRF)
+  // CPF do dono da OS, lido do nó <paciente> da solicitação. É o que a barreira
+  // de identidade confere contra o paciente do token (ver laudos/identidade.ts).
+  // null = a OS não trouxe identidade utilizável — não bloqueia, só não confirma.
+  paciente_cpf: string | null
   analitos: AolAnalito[]
 }
 

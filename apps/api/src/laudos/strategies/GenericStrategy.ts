@@ -10,7 +10,7 @@ import { buildMeta } from '../mapperHelpers.js'
 export const genericStrategy: ExamMapperStrategy = {
   canHandle: () => true,
 
-  map(aol: AolExam, aplis: AplisExam | null, _cpf: string): Laudo {
+  map(aol: AolExam, aplis: AplisExam | null): Laudo {
     const meta = buildMeta(aol, aplis)
     const laudoTexto =
       aol.analitos.length > 0

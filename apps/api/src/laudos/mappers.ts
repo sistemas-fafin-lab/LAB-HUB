@@ -16,15 +16,18 @@ export { resolveStrategy, STRATEGIES } from './registry.js'
  * Mapeia AOL (+ ApLIS, quando existe) para o Laudo canônico, delegando à
  * estratégia do tipo de exame. `perfil` (idade/sexo) reduz a referência
  * estratificada da AOL à linha do paciente.
+ *
+ * Não recebe CPF: quando o dado chega aqui a identidade já foi conferida na
+ * fronteira do serviço (laudos/identidade.ts). Mapeador não decide de quem é o
+ * laudo.
  */
 export function mapExamResult(
   aol: AolExam,
   aplis: AplisExam | null,
   examType: string,
-  cpf: string,
   perfil?: PerfilPaciente,
 ): Laudo {
-  return resolveStrategy(examType).map(aol, aplis, cpf, perfil)
+  return resolveStrategy(examType).map(aol, aplis, perfil)
 }
 
 // Médico, material e método variam por exame — só sobrevivem no cabeçalho se
@@ -329,7 +332,7 @@ function montaConteudoAplis(req: AplisRequisicao): ConteudoAplis {
  * resolver, e os formatos do ApLIS são uniformes por módulo (ver
  * montaConteudoAplis).
  */
-export function mapAplisResult(req: AplisRequisicao, _cpf: string): Laudo {
+export function mapAplisResult(req: AplisRequisicao): Laudo {
   const coleta = buildDateStrings(req.data_solicitacao)
   const emissao = buildDateStrings(req.data_liberacao)
   const exibicao = emissao.iso ? emissao : coleta
