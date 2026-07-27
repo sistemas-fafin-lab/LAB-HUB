@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { writeFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 import { AplisService } from '../src/laudos/aplis.js'
 
@@ -161,20 +162,20 @@ async function main(): Promise<void> {
 
     console.log('📋 CPFs encontrados (com laudos no ApLIS):')
     for (let i = 0; i < cpfs.length; i++) {
-      const [cpf, info] = cpfs[i]
+      const [cpf, info] = cpfs[i]!
       const exames = info.exames.slice(0, 3).join(', ')
       console.log(`   ${i + 1}. ${cpf} — ${info.nome} (${exames})`)
     }
 
     // Se so houver um, usa ele
     if (cpfs.length === 1) {
-      cpfEscolhido = cpfs[0][0]
-      nomePaciente = cpfs[0][1].nome
+      cpfEscolhido = cpfs[0]![0]
+      nomePaciente = cpfs[0]![1].nome
       console.log(`\n✅ CPF unico selecionado automaticamente: ${cpfEscolhido}`)
     } else {
-      console.log(`\n💡 Use --cpf ${cpfs[0][0]} para escolher um diretamente.`)
-      cpfEscolhido = cpfs[0][0]
-      nomePaciente = cpfs[0][1].nome
+      console.log(`\n💡 Use --cpf ${cpfs[0]![0]} para escolher um diretamente.`)
+      cpfEscolhido = cpfs[0]![0]
+      nomePaciente = cpfs[0]![1].nome
       console.log(`   (Usando o primeiro por padrao: ${cpfEscolhido})`)
     }
   }
@@ -350,7 +351,7 @@ async function main(): Promise<void> {
     process.exit(1)
   }
   const token = loginData.session.access_token
-  console.log(`✅ Login OK — token obtido`); fs.writeFileSync("/tmp/last_token.txt", token)
+  console.log(`✅ Login OK — token obtido`); writeFileSync("/tmp/last_token.txt", token)
 
   // -------------------------------------------------------------------------
   // 5. Chamar GET /laudos na API local

@@ -118,7 +118,9 @@ async function main(): Promise<void> {
       }
     }
 
-    const dat = jsonListar.dat ?? {}
+    // Partial<>: sem isso o `?? {}` alarga o tipo para `{}` e nenhum campo
+    // abaixo existe para o compilador.
+    const dat: Partial<NonNullable<typeof jsonListar.dat>> = jsonListar.dat ?? {}
     if (dat.sucesso === 0) {
       console.error(`❌ requisicaoListar erro logico: ${dat.msgErro ?? 'desconhecido'} (codErro=${dat.codErro ?? '?'})`)
       process.exit(1)
