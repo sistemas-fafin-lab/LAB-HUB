@@ -21,6 +21,34 @@ const longDate = new Intl.DateTimeFormat('pt-BR', {
   year: 'numeric',
 })
 
+const MESES = [
+  'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+]
+
+/**
+ * "2026-07-24" → "24 de julho de 2026".
+ *
+ * Lê os pedaços da string em vez de passar por `new Date`: uma data SEM hora
+ * vira meia-noite UTC, e formatá-la no fuso de Brasília (UTC-3) devolveria o
+ * dia anterior. Num laudo isso seria uma data de coleta errada por um dia.
+ */
+function dataPorExtenso(iso: string | undefined): string | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '')
+  if (!m) return undefined
+  const mes = MESES[Number(m[2]) - 1]
+  return mes ? `${m[3]} de ${mes} de ${m[1]}` : undefined
+}
+
+/** "2026-07-24" → "24 Jul 2026". Mesmo cuidado com fuso do dataPorExtenso. */
+function dataCurta(iso: string | undefined): string | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '')
+  if (!m) return undefined
+  const mes = MESES[Number(m[2]) - 1]
+  if (!mes) return undefined
+  return `${m[3]} ${mes.slice(0, 3).replace(/^./, (c) => c.toUpperCase())} ${m[1]}`
+}
+
 export function resultadoToExam(r: Resultado): Exam {
   const liberado = r.liberadoEm ? new Date(r.liberadoEm) : null
 
@@ -46,6 +74,9 @@ export function resultadoToExam(r: Resultado): Exam {
     ...(r.declaracaoUrl ? { declaracaoUrl: r.declaracaoUrl } : {}),
     // FlowLab não informa coleta — a liberação faz as vezes no filtro de período.
     ...(r.liberadoEm ? { coletadoEm: r.liberadoEm } : {}),
+    // Sem `dataColeta` de propósito: o FlowLab só manda a liberação, e o campo
+    // "Coleta" do laudo fica '—' em vez de repetir a data de liberação.
+    ...(liberado ? { dataEmissao: longDate.format(liberado) } : {}),
     origem: 'flowlab',
   }
 }
@@ -89,6 +120,14 @@ export function laudoToExam(l: Laudo): Exam {
     })),
     origem: 'lis',
     ...(l.data_coleta || l.data_emissao ? { coletadoEm: l.data_coleta || l.data_emissao } : {}),
+    // As duas datas vêm em ISO e separadas do LIS — só o `date`/`fullDate` é que
+    // colapsa as duas numa só para o card.
+    ...(dataPorExtenso(l.data_coleta) ? { dataColeta: dataPorExtenso(l.data_coleta)! } : {}),
+    ...(dataPorExtenso(l.data_emissao) ? { dataEmissao: dataPorExtenso(l.data_emissao)! } : {}),
+    ...(dataCurta(l.data_coleta) ? { dataColetaCurta: dataCurta(l.data_coleta)! } : {}),
+    // `codigo_lis` é a requisição no LIS; a OS da AOL entra quando o laudo só
+    // existe lá (em laudo fundido vem como lista separada por vírgula).
+    ...(l.codigo_lis || l.codigo_os ? { numeroLaudo: l.codigo_lis || l.codigo_os } : {}),
     ...(l.material ? { material: l.material } : {}),
     ...(l.metodo ? { metodo: l.metodo } : {}),
     ...(l.laboratorio?.nome ? { laboratorio: l.laboratorio.nome } : {}),

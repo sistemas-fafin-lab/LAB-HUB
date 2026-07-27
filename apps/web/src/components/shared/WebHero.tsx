@@ -34,6 +34,22 @@ export interface Exam {
   // exibição e não serve para comparar — o filtro de período usa esta.
   coletadoEm?: string
 
+  // Coleta e emissão POR EXTENSO, separadas. `fullDate` é a data de exibição do
+  // card (a emissão quando existe) e serve para um rótulo genérico; não serve
+  // para preencher um campo rotulado "Coleta", que é uma afirmação sobre quando
+  // o paciente foi coletado. Ausente = a fonte não informou; a tela mostra '—'
+  // em vez de repetir a outra data.
+  dataColeta?: string // ex.: "24 de julho de 2026"
+  dataEmissao?: string // ex.: "28 de julho de 2026"
+  // Forma curta da coleta, para a lista. `date` é a data de EXIBIÇÃO do card
+  // (a emissão quando existe), mas a lista é ordenada por coleta — mostrar uma
+  // e ordenar pela outra faz as linhas parecerem fora de ordem cronológica.
+  dataColetaCurta?: string // ex.: "24 Jul 2026"
+  // Identificador do laudo NO LABORATÓRIO (codigo_lis, ou a OS da AOL). É o
+  // número pelo qual o lab acha o exame — diferente de `id`, que é um UUID
+  // sorteado a cada mapeamento e muda entre uma impressão e outra.
+  numeroLaudo?: string
+
   // Daqui para baixo, só o laudo vindo dos LIS (ApLIS/AOL) preenche — o
   // resultado do FlowLab não tem esses dados. Por isso são opcionais: as telas
   // omitem o que estiver ausente em vez de mostrar '—'.
@@ -83,8 +99,14 @@ export function WebHero({ exam, onOpen, dark: _dark }: WebHeroProps) {
           >
             <span style={{ color: 'rgb(255, 255, 255)' }}>Seu último exame está pronto</span>
           </h2>
+          {/* "coletado em" só com a data de coleta de verdade; com a emissão a
+              frase afirmaria a data errada (ver dataColeta em Exam). */}
           <p className="text-blue-100 text-sm mb-5 leading-snug max-w-md">
-            {exam.name} — coletado em {exam.fullDate}, na {exam.unit}.
+            {exam.name} —{' '}
+            {exam.dataColeta
+              ? `coletado em ${exam.dataColeta}`
+              : `liberado em ${exam.dataEmissao ?? exam.fullDate}`}
+            {exam.unit && exam.unit !== '—' ? `, na ${exam.unit}` : ''}.
           </p>
           <div className="flex items-center gap-3">
             <button
