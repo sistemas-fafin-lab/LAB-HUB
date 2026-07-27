@@ -2,17 +2,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import FormData from 'form-data'
 
-// Proxy hoisted p/ o singleton supabase.
+// Proxies hoisted p/ os singletons supabase e flowlab.
 const h = vi.hoisted(() => {
   let sb: Record<string, unknown> | null = null
+  let fl: Record<string, unknown> | null = null
   return {
     sbProxy: new Proxy({}, { get: (_t, p: string) => sb?.[p] }),
+    flProxy: new Proxy({}, { get: (_t, p: string) => fl?.[p] }),
     setSb: (x: Record<string, unknown>) => {
       sb = x
+    },
+    setFl: (x: Record<string, unknown>) => {
+      fl = x
     },
   }
 })
 vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
+vi.mock('../src/lib/flowlab.js', () => ({ flowlab: h.flProxy }))
 
 import { documentosRoutes } from '../src/routes/documentos.js'
 import {
@@ -68,12 +74,17 @@ function supaHandler(scenario: {
   }
 }
 
+// Spy de notifyDocumento compartilhado por teste (recriado no setup).
+let notifyDocumentoSpy: ReturnType<typeof vi.fn>
+
 function setup(scenario: Parameters<typeof supaHandler>[0] = {}, storage?: StorageHandler) {
   const mock = createSupabaseMock({
     handler: supaHandler(scenario),
     ...(storage ? { storage } : {}),
   })
   h.setSb(mock.client)
+  notifyDocumentoSpy = vi.fn(async () => ({ ok: true }))
+  h.setFl({ notifyDocumento: notifyDocumentoSpy })
   return mock
 }
 
@@ -176,6 +187,73 @@ describe('POST /documentos', () => {
       /^pac-1\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$/,
     )
     expect(upload?.bucket).toBe('documentos')
+  })
+
+  it('avisa o FlowLab quando o pedido médico é anexado a um agendamento', async () => {
+    setup({ insert: { data: docRow({ tipo: 'pedido_medico', agendamento_id: AG_ID }), error: null } })
+    app = await buildApp(documentosRoutes)
+
+    const { payload, headers } = multipart({
+      buffer: PDF,
+      filename: 'pedido.pdf',
+      contentType: 'application/pdf',
+      tipo: 'pedido_medico',
+      agendamentoId: AG_ID,
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/documentos',
+      payload,
+      headers: { ...headers, ...AUTH },
+    })
+
+    expect(res.statusCode).toBe(201)
+    expect(notifyDocumentoSpy).toHaveBeenCalledWith({ labhubId: AG_ID, tipo: 'pedido_medico' })
+  })
+
+  it('não avisa o FlowLab para outros tipos de documento', async () => {
+    setup()
+    app = await buildApp(documentosRoutes)
+
+    const { payload, headers } = multipart({
+      buffer: JPEG,
+      filename: 'rg.jpg',
+      contentType: 'image/jpeg',
+      tipo: 'identidade',
+      agendamentoId: AG_ID,
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/documentos',
+      payload,
+      headers: { ...headers, ...AUTH },
+    })
+
+    expect(res.statusCode).toBe(201)
+    expect(notifyDocumentoSpy).not.toHaveBeenCalled()
+  })
+
+  it('não deixa uma falha ao notificar o FlowLab derrubar o upload', async () => {
+    setup({ insert: { data: docRow({ tipo: 'pedido_medico', agendamento_id: AG_ID }), error: null } })
+    notifyDocumentoSpy.mockRejectedValueOnce(new Error('flowlab fora do ar'))
+    app = await buildApp(documentosRoutes)
+
+    const { payload, headers } = multipart({
+      buffer: PDF,
+      filename: 'pedido.pdf',
+      contentType: 'application/pdf',
+      tipo: 'pedido_medico',
+      agendamentoId: AG_ID,
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/documentos',
+      payload,
+      headers: { ...headers, ...AUTH },
+    })
+
+    // O documento já está persistido; a notificação é best-effort.
+    expect(res.statusCode).toBe(201)
   })
 
   it('compensa o insert falho removendo o objeto órfão', async () => {

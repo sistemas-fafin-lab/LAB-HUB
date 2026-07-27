@@ -46,6 +46,16 @@ export interface ReceiveCancelamentoResposta {
   idempotency?: string
 }
 
+export interface NotifyDocumentoPayload {
+  labhubId: string // id do agendamento no LAB-HUB (= ac_agendamentos.labhub_id no FlowLab)
+  tipo: string // tipo do documento (o FlowLab só age no pedido médico)
+}
+
+export interface NotifyDocumentoResposta {
+  ok?: boolean
+  ignored?: string // 'agendamento_nao_sincronizado' quando o FlowLab ainda não tem o agendamento
+}
+
 // Cache em memória da disponibilidade, com TTL curto (configurável via
 // FLOWLAB_DISPONIBILIDADE_TTL_MS; default 30s). Serve só à LEITURA de exibição
 // (GET /postos/disponibilidade), para evitar o cold start da Edge Function a
@@ -93,4 +103,9 @@ export const flowlab = {
   // Propaga o cancelamento ao FlowLab (libera o slot). Idempotente do lado de lá.
   receiveCancelamento: (payload: CancelamentoPayloadFlowLab) =>
     call<ReceiveCancelamentoResposta>('receive-cancelamento', payload),
+
+  // Avisa que um pedido médico foi anexado — o FlowLab enfileira a requisição ao
+  // apoio (Álvaro) automaticamente. Idempotente do lado de lá.
+  notifyDocumento: (payload: NotifyDocumentoPayload) =>
+    call<NotifyDocumentoResposta>('receive-documento', payload),
 }

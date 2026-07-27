@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import multipart from '@fastify/multipart'
 import type { FastifyInstance } from 'fastify'
 import { supabase } from '../lib/supabase.js'
+import { flowlab } from '../lib/flowlab.js'
 import { authenticate } from '../middlewares/auth.js'
 import { detectarTipoArquivo } from '../lib/fileType.js'
 import { toDocumento, type DocumentoRow } from '../lib/mappers.js'
@@ -155,6 +156,20 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
           )
         }
         throw app.httpErrors.internalServerError('Falha ao registrar documento')
+      }
+
+      // Avisa o FlowLab que o pedido médico chegou, para o enfileiramento
+      // automático ao apoio (Álvaro). Só o pedido médico interessa ao OCR — os
+      // outros tipos (identidade, carteirinha) não disparam nada. Best-effort e
+      // NÃO-bloqueante: a resposta ao paciente não pode depender do FlowLab, e uma
+      // falha aqui não invalida o documento já persistido (o FlowLab reconcilia
+      // pelo gatilho de receive-agendamento e pelo "Processar pendentes").
+      if (agendamentoId && tipo === 'pedido_medico') {
+        void flowlab
+          .notifyDocumento({ labhubId: agendamentoId, tipo })
+          .catch((err: unknown) => {
+            request.log.error({ err, agendamentoId }, 'Falha ao notificar FlowLab do pedido médico')
+          })
       }
 
       return reply.code(201).send(toDocumento(data as DocumentoRow))
