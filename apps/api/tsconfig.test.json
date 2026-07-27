@@ -1,0 +1,13 @@
+// tsconfig.json compila o build e por isso só enxerga `src/**`. Testes e
+// scripts ficavam FORA do type-check — e foi assim que uma chamada de
+// estratégia continuou passando o CPF depois de o parâmetro virar `perfil`:
+// argumento errado, suíte verde. Este config é o superset usado pelo
+// `type-check`; o build segue com o outro.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "test/**/*", "scripts/**/*"]
+}

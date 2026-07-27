@@ -628,7 +628,7 @@ describe('parsers de patologia do ApLIS', () => {
 })
 
 // Fixture mínimo de Laudo para os testes de consolidação por pedido.
-function laudoDeExame(overrides: Partial<Laudo>): Laudo {
+function laudoDeExame(overrides: Partial<Laudo> = {}): Laudo {
   return {
     id: 'fixo',
     name: 'GLICOSE',
