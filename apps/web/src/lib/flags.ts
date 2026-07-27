@@ -18,6 +18,13 @@ export const MOSTRAR_NOTIFICACOES = false            // Topbar: sino / badge de 
 export const MOSTRAR_DEPENDENTES = false             // Topbar: seletor de dependentes (D2 adiado)
 export const MOSTRAR_NOVIDADES = false               // Settings: card "receber novidades" (sem backend)
 export const MOSTRAR_ENVIAR_AO_MEDICO = false        // LaudoPage: botão "Enviar ao médico" (sem backend)
+// LaudoPage: assinatura do responsável técnico, QR de verificação e horários de
+// coleta/liberação. Diferente dos outros itens desta lista, o mock aqui não é
+// só um placeholder feio: o laudo é um documento que o paciente imprime e leva
+// ao médico, e esses campos afirmavam fatos — que uma bioquímica nomeada
+// assinou, que há verificação online, que a coleta foi às 07:42. Só reexibir
+// quando vier do LIS (a AOL manda `responsaveltecnico` e `dataresultado`).
+export const MOSTRAR_LAUDO_ASSINATURA_MOCK = false
 export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compartilhar/2FA (sem backend)
 
 // Páginas inteiras ocultas do menu E inacessíveis por acesso direto.

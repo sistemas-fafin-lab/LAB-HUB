@@ -4,7 +4,7 @@ import { LaudoTexto } from '../components/shared/LaudoTexto'
 import type { Exam, ExamPanel } from '../components/shared/WebHero'
 import { api } from '../lib/api'
 import { track } from '../lib/analytics'
-import { MOSTRAR_ENVIAR_AO_MEDICO } from '../lib/flags'
+import { MOSTRAR_ENVIAR_AO_MEDICO, MOSTRAR_LAUDO_ASSINATURA_MOCK } from '../lib/flags'
 import { usePaciente } from '../lib/usePaciente'
 import { formatarCpf, formatarData } from '../lib/validators'
 
@@ -88,9 +88,11 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
           <div className="text-right">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Laudo nº</div>
             <div className="text-base font-bold tabular-nums text-slate-900">#{exam.id.toUpperCase()}</div>
-            <div className="text-[10px] text-gray-500 mt-2 inline-flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Assinado digitalmente
-            </div>
+            {MOSTRAR_LAUDO_ASSINATURA_MOCK && (
+              <div className="text-[10px] text-gray-500 mt-2 inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Assinado digitalmente
+              </div>
+            )}
           </div>
         </div>
 
@@ -111,12 +113,18 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
           </div>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Coleta</div>
-            <div className="text-sm font-medium text-slate-900">{exam.fullDate} · 07:42</div>
+            {/* O horário era fixo no código; sem ele o laudo mostra só a data,
+                que essa sim vem do LIS. */}
+            <div className="text-sm font-medium text-slate-900">
+              {exam.fullDate}{MOSTRAR_LAUDO_ASSINATURA_MOCK && ' · 07:42'}
+            </div>
             <div className="text-xs text-gray-600">{exam.laboratorio ?? exam.unit}</div>
           </div>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Liberação</div>
-            <div className="text-sm font-medium text-slate-900">{exam.fullDate} · 14:08</div>
+            <div className="text-sm font-medium text-slate-900">
+              {exam.fullDate}{MOSTRAR_LAUDO_ASSINATURA_MOCK && ' · 14:08'}
+            </div>
             {/* Material e método vêm do laudo dos LIS. O resultado do FlowLab não
                 os tem — e num laudo impresso é melhor omitir a linha do que
                 afirmar um material errado. */}
@@ -188,7 +196,9 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
           </div>
         )}
 
-        {/* Signature + QR */}
+        {/* Signature + QR — mock: a bioquímica nomeada abaixo não assinou nada e
+            o QR não leva a lugar nenhum. Ver MOSTRAR_LAUDO_ASSINATURA_MOCK. */}
+        {MOSTRAR_LAUDO_ASSINATURA_MOCK && (
         <div className="imprime-junto px-10 py-8 border-t border-gray-100 grid grid-cols-2 gap-10 items-end">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Responsável técnico</div>
@@ -209,6 +219,7 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
             <div className="text-[10px] text-gray-500 mt-1">Verifique em labhub.com.br/v</div>
           </div>
         </div>
+        )}
 
         {/* Footer */}
         <div className="px-10 py-4 bg-slate-50 border-t border-gray-100 rounded-b-2xl text-[10px] text-gray-500 flex items-center justify-between">
