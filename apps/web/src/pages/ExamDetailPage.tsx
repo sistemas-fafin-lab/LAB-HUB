@@ -55,13 +55,23 @@ function PanelRow({ p, dark, last }: { p: ExamPanel; dark: boolean; last: boolea
   )
 }
 
-// Laudo descritivo (citologia, biópsia, patologia): o resultado é UM marcador
-// "Laudo" com o texto inteiro. Tabela de marcadores não faz sentido para ele —
-// vira um bloco de texto corrido.
+// Laudo descritivo (citologia, biópsia, patologia): o resultado é texto corrido
+// em vez de marcadores numéricos. Pode vir como um único panel "Laudo" (legado)
+// ou como groups com seções (novo formato do ApLIS).
 function laudoDescritivo(exam: Exam): string | null {
-  if (exam.groups?.length) return null
+  // Formato legado: um único panel "Laudo"
   const unico = exam.panels.length === 1 ? exam.panels[0] : null
-  return unico?.name === 'Laudo' ? unico.value : null
+  if (unico?.name === 'Laudo') return unico.value
+
+  // Novo formato: groups onde cada panel tem name === '' (conteúdo corrido).
+  // Reconstrói o texto a partir das seções para o LaudoTexto fazer o parse.
+  if (exam.groups?.length && exam.groups.every((g) => g.panels.every((p) => p.name === ''))) {
+    return exam.groups
+      .map((g) => (g.name ? `${g.name}:\n${g.panels.map((p) => p.value).join('\n')}` : g.panels.map((p) => p.value).join('\n')))
+      .join('\n\n')
+  }
+
+  return null
 }
 
 export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPageProps) {
@@ -175,15 +185,56 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
         )}
       </div>
 
-      {/* Laudo descritivo — texto corrido no lugar da tabela de marcadores */}
+      {/* Laudo descritivo — renderiza groups/seções diretamente */}
       {laudoTexto && (
         <div
           className={`rounded-2xl border ${
             dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
           } p-6 shadow-sm`}
         >
-          <h3 className={`text-sm font-semibold mb-3 ${dark ? 'text-white' : 'text-slate-800'}`}>Laudo</h3>
-          <LaudoTexto texto={laudoTexto} dark={dark} />
+          {exam.groups?.length && exam.groups.every((g) => g.panels.every((p) => p.name === '')) ? (
+            // Novo formato: groups com seções identificadas (name === '')
+            // Renderiza cada group como um bloco com título.
+            <>
+              {exam.groups.map((g, gi) => {
+                const isConclusao = /^conclus[ãa]o$/i.test(g.name)
+                return (
+                  <div key={`${g.name}-${gi}`} className={gi > 0 ? 'mt-5' : ''}>
+                    {g.name && (
+                      <div
+                        className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 ${
+                          isConclusao ? 'text-blue-600' : dark ? 'text-blue-400' : 'text-blue-600'
+                        }`}
+                      >
+                        {g.name}
+                      </div>
+                    )}
+                    <div
+                      className={`${
+                        isConclusao
+                          ? `rounded-xl border p-4 ${dark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-100'}`
+                          : ''
+                      }`}
+                    >
+                      {g.panels.map((p, pi) => (
+                        // whitespace-pre-line: o valor traz \n entre as linhas
+                        // da seção e o HTML colapsaria tudo num parágrafo só.
+                        <div key={pi} className={`text-sm leading-relaxed whitespace-pre-line ${dark ? 'text-gray-200' : 'text-slate-700'} ${pi > 0 ? 'mt-1' : ''}`}>
+                          {p.value}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </>
+          ) : (
+            // Formato legado: texto corrido
+            <>
+              <h3 className={`text-sm font-semibold mb-3 ${dark ? 'text-white' : 'text-slate-800'}`}>Laudo</h3>
+              <LaudoTexto texto={laudoTexto} dark={dark} />
+            </>
+          )}
         </div>
       )}
 

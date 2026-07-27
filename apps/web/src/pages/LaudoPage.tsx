@@ -148,9 +148,40 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
         </div>
 
         {/* Laudo descritivo (citologia/patologia): texto corrido, sem tabela */}
-        {exam.panels.length === 1 && exam.panels[0]?.name === 'Laudo' && !exam.groups?.length ? (
+        {/* Detecta tanto o formato legado (panel único "Laudo") quanto o novo
+            formato em groups com seções (panels com name === ''). */}
+        {(exam.panels.length === 1 && exam.panels[0]?.name === 'Laudo' && !exam.groups?.length) ||
+        (exam.groups?.length && exam.groups.every((g) => g.panels.every((p) => p.name === ''))) ? (
           <div className="px-10 py-6">
-            <LaudoTexto texto={exam.panels[0].value} />
+            {exam.groups?.length && exam.groups.every((g) => g.panels.every((p) => p.name === '')) ? (
+              // Novo formato: renderiza groups como seções
+              <div className="text-sm leading-relaxed text-slate-700">
+                {exam.groups.map((g, gi) => {
+                  const isConclusao = /^conclus[ãa]o$/i.test(g.name)
+                  return (
+                    <div key={`${g.name}-${gi}`} className={gi > 0 ? 'mt-5' : ''}>
+                      {g.name && (
+                        <div className="text-[11px] font-bold uppercase tracking-wider mb-1.5 text-blue-600">
+                          {g.name}
+                        </div>
+                      )}
+                      <div className={isConclusao ? 'rounded-xl border p-4 bg-blue-50 border-blue-100' : ''}>
+                        {g.panels.map((p, pi) => (
+                          // whitespace-pre-line: o valor traz \n entre as linhas
+                          // da seção e o HTML colapsaria tudo num parágrafo só.
+                          <div key={pi} className={`whitespace-pre-line ${pi > 0 ? 'mt-1' : ''}`}>
+                            {p.value}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              // Formato legado: texto corrido
+              <LaudoTexto texto={exam.panels[0]?.value || ''} />
+            )}
           </div>
         ) : (
         <>
