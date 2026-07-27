@@ -3,6 +3,7 @@ import { WStatus } from '../components/primitives/WStatus'
 import { Sparkline } from '../components/primitives/Sparkline'
 import { Referencia } from '../components/shared/Referencia'
 import { LaudoTexto } from '../components/shared/LaudoTexto'
+import { LaudoSecoes, isLaudoEmSecoes } from '../components/shared/LaudoSecoes'
 import type { Exam, ExamPanel } from '../components/shared/WebHero'
 import { api } from '../lib/api'
 import { track } from '../lib/analytics'
@@ -22,12 +23,30 @@ function preenchido(valor: string | undefined): boolean {
   return Boolean(valor) && valor !== PLACEHOLDER
 }
 
-const CELULA = 'grid grid-cols-[2fr_1fr_1fr_auto_1fr] gap-4 px-4'
+// A coluna "Tendência" só existe quando há série histórica para desenhar. Hoje
+// o laudo dos LIS traz UM valor por marcador (toTrend devolve no máximo um
+// ponto) e o Sparkline precisa de dois — o cabeçalho ficava sobre uma coluna
+// vazia em todas as linhas. Com histórico real ela volta sozinha.
+const CELULA = 'grid gap-4 px-4'
+const COLUNAS = 'grid-cols-[2fr_1fr_1fr_auto]'
+const COLUNAS_COM_TENDENCIA = 'grid-cols-[2fr_1fr_1fr_auto_1fr]'
 
-function PanelRow({ p, dark, last }: { p: ExamPanel; dark: boolean; last: boolean }) {
+const temSerie = (p: ExamPanel): boolean => p.trend.length >= 2
+
+function PanelRow({
+  p,
+  dark,
+  last,
+  comTendencia,
+}: {
+  p: ExamPanel
+  dark: boolean
+  last: boolean
+  comTendencia: boolean
+}) {
   return (
     <div
-      className={`${CELULA} items-center py-3 ${
+      className={`${CELULA} ${comTendencia ? COLUNAS_COM_TENDENCIA : COLUNAS} items-center py-3 ${
         last ? '' : `border-b ${dark ? 'border-gray-700' : 'border-gray-200'}`
       }`}
     >
@@ -37,7 +56,7 @@ function PanelRow({ p, dark, last }: { p: ExamPanel; dark: boolean; last: boolea
           p.ok ? (dark ? 'text-white' : 'text-slate-900') : 'text-amber-600'
         }`}
       >
-        {p.value} <span className="text-[11px] font-medium text-gray-400">{p.unit}</span>
+        {p.value} <span className={`text-[11px] font-medium ${dark ? 'text-gray-400' : 'text-gray-500'}`}>{p.unit}</span>
       </div>
       <Referencia texto={p.ref} dark={dark} />
       <div className="flex items-center gap-1.5">
@@ -50,32 +69,27 @@ function PanelRow({ p, dark, last }: { p: ExamPanel; dark: boolean; last: boolea
           {p.ok ? 'Normal' : 'Atenção'}
         </span>
       </div>
-      <Sparkline data={p.trend} ok={p.ok} width={90} height={26} />
+      {comTendencia && <Sparkline data={p.trend} ok={p.ok} width={90} height={26} />}
     </div>
   )
 }
 
 // Laudo descritivo (citologia, biópsia, patologia): o resultado é texto corrido
-// em vez de marcadores numéricos. Pode vir como um único panel "Laudo" (legado)
-// ou como groups com seções (novo formato do ApLIS).
+// em vez de marcadores numéricos. Formato legado: um único panel "Laudo".
+// O formato novo do ApLIS — groups com seções — é detectado pelo
+// isLaudoEmSecoes e renderizado pelo LaudoSecoes.
 function laudoDescritivo(exam: Exam): string | null {
-  // Formato legado: um único panel "Laudo"
   const unico = exam.panels.length === 1 ? exam.panels[0] : null
-  if (unico?.name === 'Laudo') return unico.value
-
-  // Novo formato: groups onde cada panel tem name === '' (conteúdo corrido).
-  // Reconstrói o texto a partir das seções para o LaudoTexto fazer o parse.
-  if (exam.groups?.length && exam.groups.every((g) => g.panels.every((p) => p.name === ''))) {
-    return exam.groups
-      .map((g) => (g.name ? `${g.name}:\n${g.panels.map((p) => p.value).join('\n')}` : g.panels.map((p) => p.value).join('\n')))
-      .join('\n\n')
-  }
-
-  return null
+  return unico?.name === 'Laudo' ? unico.value : null
 }
 
 export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPageProps) {
   const laudoTexto = laudoDescritivo(exam)
+  const emSecoes = isLaudoEmSecoes(exam)
+  const descritivo = emSecoes || laudoTexto !== null
+  // Uma coluna a mais só se ALGUM marcador tiver série — misturar linhas com e
+  // sem sparkline desalinharia o grid.
+  const comTendencia = (exam.groups?.flatMap((g) => g.panels) ?? exam.panels).some(temSerie)
 
   const handleDownload = async () => {
     // Só a origem do clique — `exam.id`/nome do exame são dados do paciente.
@@ -109,9 +123,15 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-2">
               <WStatus status={exam.status} />
-              <span className="text-xs text-gray-400">#{exam.id.toUpperCase()}</span>
-              <span className="text-xs text-gray-400">·</span>
-              <span className="text-xs text-gray-400">{exam.category}</span>
+              {/* O número do laboratório, quando existe — `exam.id` é UUID
+                  interno e não serve de referência para o paciente citar. */}
+              {exam.numeroLaudo && (
+                <>
+                  <span className="text-xs text-gray-500">#{exam.numeroLaudo}</span>
+                  <span className="text-xs text-gray-400">·</span>
+                </>
+              )}
+              <span className="text-xs text-gray-500">{exam.category}</span>
             </div>
             <h1
               className={`text-2xl font-bold ${dark ? 'text-white' : 'text-slate-900'}`}
@@ -185,61 +205,26 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
         )}
       </div>
 
-      {/* Laudo descritivo — renderiza groups/seções diretamente */}
-      {laudoTexto && (
+      {/* Laudo descritivo — seções no formato novo, texto corrido no legado */}
+      {descritivo && (
         <div
           className={`rounded-2xl border ${
             dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
           } p-6 shadow-sm`}
         >
-          {exam.groups?.length && exam.groups.every((g) => g.panels.every((p) => p.name === '')) ? (
-            // Novo formato: groups com seções identificadas (name === '')
-            // Renderiza cada group como um bloco com título.
-            <>
-              {exam.groups.map((g, gi) => {
-                const isConclusao = /^conclus[ãa]o$/i.test(g.name)
-                return (
-                  <div key={`${g.name}-${gi}`} className={gi > 0 ? 'mt-5' : ''}>
-                    {g.name && (
-                      <div
-                        className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 ${
-                          isConclusao ? 'text-blue-600' : dark ? 'text-blue-400' : 'text-blue-600'
-                        }`}
-                      >
-                        {g.name}
-                      </div>
-                    )}
-                    <div
-                      className={`${
-                        isConclusao
-                          ? `rounded-xl border p-4 ${dark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-100'}`
-                          : ''
-                      }`}
-                    >
-                      {g.panels.map((p, pi) => (
-                        // whitespace-pre-line: o valor traz \n entre as linhas
-                        // da seção e o HTML colapsaria tudo num parágrafo só.
-                        <div key={pi} className={`text-sm leading-relaxed whitespace-pre-line ${dark ? 'text-gray-200' : 'text-slate-700'} ${pi > 0 ? 'mt-1' : ''}`}>
-                          {p.value}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </>
+          {emSecoes ? (
+            <LaudoSecoes groups={exam.groups!} dark={dark} />
           ) : (
-            // Formato legado: texto corrido
             <>
               <h3 className={`text-sm font-semibold mb-3 ${dark ? 'text-white' : 'text-slate-800'}`}>Laudo</h3>
-              <LaudoTexto texto={laudoTexto} dark={dark} />
+              <LaudoTexto texto={laudoTexto!} dark={dark} />
             </>
           )}
         </div>
       )}
 
       {/* Panels table */}
-      {!laudoTexto && exam.panels.length > 0 && (
+      {!descritivo && exam.panels.length > 0 && (
         <div
           className={`rounded-2xl border ${
             dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
@@ -247,12 +232,12 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
         >
           <div className="flex items-center justify-between mb-3">
             <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>Marcadores</h3>
-            <span className="text-xs text-gray-400">{exam.panels.length} marcadores</span>
+            <span className="text-xs text-gray-500">{exam.panels.length} marcadores</span>
           </div>
 
           {/* Column headers */}
           <div
-            className={`${CELULA} py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b ${
+            className={`${CELULA} ${comTendencia ? COLUNAS_COM_TENDENCIA : COLUNAS} py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b ${
               dark ? 'border-gray-800' : 'border-gray-100'
             }`}
           >
@@ -260,7 +245,7 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
             <span>Resultado</span>
             <span>Referência</span>
             <span>Status</span>
-            <span>Tendência</span>
+            {comTendencia && <span>Tendência</span>}
           </div>
 
           {/* Laudo compilado por pedido traz um grupo por exame (e o hemograma,
@@ -275,12 +260,24 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
                   {/* key composta com o índice: laudos de OS multiexame repetem
                       nomes genéricos ("Resultado", "Conclusão"). */}
                   {g.panels.map((p, i) => (
-                    <PanelRow key={`${p.name}-${i}`} p={p} dark={dark} last={i === g.panels.length - 1} />
+                    <PanelRow
+                      key={`${p.name}-${i}`}
+                      p={p}
+                      dark={dark}
+                      last={i === g.panels.length - 1}
+                      comTendencia={comTendencia}
+                    />
                   ))}
                 </div>
               ))
             : exam.panels.map((p, i) => (
-                <PanelRow key={`${p.name}-${i}`} p={p} dark={dark} last={i === exam.panels.length - 1} />
+                <PanelRow
+                  key={`${p.name}-${i}`}
+                  p={p}
+                  dark={dark}
+                  last={i === exam.panels.length - 1}
+                  comTendencia={comTendencia}
+                />
               ))}
         </div>
       )}
