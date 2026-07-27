@@ -533,7 +533,7 @@ describe('mapAplisResult', () => {
     expect(laudo.summary).toContain('fora da referência')
   })
 
-  it('patologia: o laudo descritivo vira o marcador "Laudo" e a conclusão vira o resumo', () => {
+  it('patologia: o laudo descritivo vira seções (groups) e a conclusão vira o resumo', () => {
     const texto =
       'MACROSCOPIA:\nUm frasco contendo 5 ml de líquido.\n\nDIAGNÓSTICO DESCRITIVO: Células escamosas.\n\nCONCLUSÃO\nNEGATIVO PARA LESÃO INTRAEPITELIAL OU MALIGNIDADE NESTA AMOSTRA:\nInflamação moderada.'
     const laudo = mapAplisResult(
@@ -553,9 +553,13 @@ describe('mapAplisResult', () => {
     )
 
     expect(laudo.status).toBe('ready')
-    expect(laudo.panels).toHaveLength(1)
-    expect(laudo.panels[0]!.name).toBe('Laudo')
-    expect(laudo.panels[0]!.value).toBe(texto)
+    // Cada seção vira um group com UM panel sem nome, com o texto da seção.
+    expect(laudo.groups?.map((g) => g.name)).toEqual(['MACROSCOPIA', 'DIAGNÓSTICO DESCRITIVO', 'CONCLUSÃO'])
+    expect(laudo.groups?.every((g) => g.panels.length === 1 && g.panels[0]!.name === '')).toBe(true)
+    // Panels aplanado para compatibilidade.
+    expect(laudo.panels).toHaveLength(3)
+    expect(laudo.panels.every((p) => p.name === '')).toBe(true)
+    expect(laudo.panels[0]!.value).toBe('Um frasco contendo 5 ml de líquido.')
     expect(laudo.summary).toContain('NEGATIVO PARA LESÃO INTRAEPITELIAL')
     expect(laudo.doctor).toBe('Décio Fausto Gorini')
   })

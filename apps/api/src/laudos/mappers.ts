@@ -208,6 +208,66 @@ function resumoDoLaudoTexto(texto: string): string {
   return texto.slice(0, 200)
 }
 
+// Quebra um laudo descritivo em seções identificáveis. Cada seção é um título
+// (ex.: "MACROSCOPIA", "CONCLUSÃO") seguido de linhas de conteúdo.
+// O padrão do ApLIS é: rótulos em negrito (convertidos para CAIXA ALTA) ou
+// linhas que terminam em dois-pontos seguido de conteúdo.
+interface SecaoLaudo {
+  titulo: string
+  destaque: boolean // CONCLUSÃO
+  linhas: string[]
+}
+
+function parseLaudoEmSecoes(texto: string): SecaoLaudo[] {
+  const secoes: SecaoLaudo[] = []
+  let atual: SecaoLaudo = { titulo: '', destaque: false, linhas: [] }
+
+  const abre = (titulo: string) => {
+    if (atual.titulo || atual.linhas.length > 0) secoes.push(atual)
+    const limpo = titulo.replace(/:$/, '').trim()
+    atual = {
+      titulo: limpo,
+      destaque: /^conclus[ãa]o$/i.test(limpo),
+      linhas: [],
+    }
+  }
+
+  for (const bruta of texto.split('\n')) {
+    const linha = bruta.trim()
+    if (!linha) continue
+
+    // Padrão "TÍTULO: conteúdo" — abre seção e já coloca o conteúdo.
+    // SEM flag /i: com ela qualquer frase comum com dois-pontos ("Nota: ...")
+    // viraria título de seção. Título de laudo é sempre CAIXA ALTA.
+    const rotuloConteudo = /^([A-ZÀ-Ü][A-ZÀ-Ü0-9 ()\/-]{2,40}):\s*(.+)$/.exec(linha)
+    if (rotuloConteudo) {
+      abre(rotuloConteudo[1]!)
+      if (rotuloConteudo[2]) atual.linhas.push(rotuloConteudo[2]!.trim())
+      continue
+    }
+
+    // Padrão "TÍTULO EM CAIXA ALTA" sozinho numa linha — título de seção
+    if (/^[A-ZÀ-Ü][A-ZÀ-Ü0-9 ()\/-]{2,40}$/.test(linha)) {
+      abre(linha)
+      continue
+    }
+
+    // Linha começando com algo em caixa alta seguido de dois-pontos
+    // mas o conteúdo está na próxima linha (ex.: "CONCLUSÃO\nNEGATIVO...")
+    const rotuloSolo = /^([A-ZÀ-Ü][A-ZÀ-Ü0-9 ()\/-]{2,40}):?$/.exec(linha)
+    if (rotuloSolo) {
+      abre(rotuloSolo[1]!)
+      continue
+    }
+
+    // Conteúdo normal — vai para a seção atual
+    atual.linhas.push(linha)
+  }
+
+  if (atual.titulo || atual.linhas.length > 0) secoes.push(atual)
+  return secoes
+}
+
 interface ConteudoAplis {
   panels: Laudo['panels']
   groups?: Laudo['groups']
@@ -266,11 +326,39 @@ function montaConteudoAplis(req: AplisRequisicao): ConteudoAplis {
     }
   }
 
-  // 2) Patologia/citologia: o texto inteiro vira o marcador "Laudo" — a mesma
-  //    convenção das estratégias de laudo em texto da AOL.
+  // 2) Patologia/citologia: o texto descritivo é quebrado em SEÇÕES que viram
+  //    GROUPS na tela — cada seção (Macroscopia, Diagnóstico, Conclusão...) vira
+  //    um bloco com título próprio, em vez de um único texto corrido.
+  //    Cada group tem UM panel com o texto completo da seção (preservando quebras
+  //    de linha), o que permite ao frontend renderizar como bloco de texto.
   if (req.laudo_texto) {
+    const secoes = parseLaudoEmSecoes(req.laudo_texto)
+
+    // Cada seção vira um group com UM panel contendo o texto completo da seção.
+    // Isso evita que o frontend tente renderizar cada linha como um "marcador"
+    // numa tabela.
+    const groups = secoes
+      .filter((sec) => sec.linhas.length > 0)
+      .map((sec) => ({
+        name: sec.titulo || 'Laudo',
+        panels: [
+          {
+            name: '',
+            value: sec.linhas.join('\n'),
+            unit: '',
+            ref: '',
+            ok: true,
+            trend: [],
+          },
+        ],
+      }))
+
+    // Panels aplanado para compatibilidade com consumers que não usam groups
+    const panels = groups.flatMap((g) => g.panels)
+
     return {
-      panels: [{ name: 'Laudo', value: req.laudo_texto, unit: '', ref: '', ok: true, trend: [] }],
+      panels,
+      groups,
       results: [
         {
           name: 'Laudo',
