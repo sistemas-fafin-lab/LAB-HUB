@@ -25,6 +25,12 @@ export const MOSTRAR_ENVIAR_AO_MEDICO = false        // LaudoPage: botão "Envia
 // assinou, que há verificação online, que a coleta foi às 07:42. Só reexibir
 // quando vier do LIS (a AOL manda `responsaveltecnico` e `dataresultado`).
 export const MOSTRAR_LAUDO_ASSINATURA_MOCK = false
+// LaudoPage: CNPJ, endereço e telefone no cabeçalho/rodapé do laudo impresso.
+// Os valores no código são placeholders herdados do mockup (CNPJ
+// 12.345.678/0001-90, SGAS 915, 0800 123 4567) — são os campos que identificam
+// QUEM RESPONDE pelo exame, e um número inventado ali é pior que campo ausente.
+// Reexibir quando vierem da configuração real do laboratório.
+export const MOSTRAR_LAUDO_DADOS_INSTITUICAO = false
 export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compartilhar/2FA (sem backend)
 
 // Páginas inteiras ocultas do menu E inacessíveis por acesso direto.
