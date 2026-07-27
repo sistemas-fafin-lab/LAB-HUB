@@ -57,10 +57,10 @@ export function Topbar({ nome, iniciais, dark, onToggleDark, onOpenExam, onNav }
         dark ? 'bg-gray-900/85 border-gray-800' : 'bg-white/85 border-gray-100'
       } backdrop-blur-md`}
     >
-      <div className="px-6 h-16 flex items-center gap-4">
+      <div className="px-3 md:px-6 h-16 flex items-center gap-2 md:gap-4">
         {/* Logo — versão branca no tema escuro, azul no claro (o wordmark é de cor
             única, então precisa da variante certa para o fundo do topbar) */}
-        <div className="flex items-center mr-2">
+        <div className="flex items-center md:mr-2 shrink-0">
           <img
             src={dark ? '/logo-white.svg' : '/logo.svg'}
             alt="Lab Hub"
@@ -71,7 +71,7 @@ export function Topbar({ nome, iniciais, dark, onToggleDark, onOpenExam, onNav }
         {/* Search */}
         <TopbarSearch dark={dark} onOpenExam={onOpenExam} onNav={onNav} />
 
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex items-center gap-2 ml-auto shrink-0">
           {/* Dark mode toggle */}
           <button
             onClick={onToggleDark}
@@ -171,7 +171,7 @@ export function Topbar({ nome, iniciais, dark, onToggleDark, onOpenExam, onNav }
           ) : (
             /* Paciente autenticado (real) */
             <div
-              className={`flex items-center gap-2 pl-1 pr-2 h-10 rounded-xl border ${
+              className={`flex items-center gap-2 pl-1 pr-1 sm:pr-2 h-10 rounded-xl border ${
                 dark ? 'border-gray-700 bg-gray-800' : 'border-gray-100 bg-white'
               }`}
             >
@@ -180,11 +180,13 @@ export function Topbar({ nome, iniciais, dark, onToggleDark, onOpenExam, onNav }
               >
                 {iniciais || '—'}
               </div>
-              <div className="text-left leading-tight pr-1">
+              {/* Nome some no celular: o avatar já identifica a conta e a
+                  barra precisa da largura para a busca. */}
+              <div className="hidden sm:block text-left leading-tight pr-1">
                 <div className={`text-[13px] font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>
                   {primeiroNome || 'Paciente'}
                 </div>
-                <div className="text-[10px] text-gray-400">Titular</div>
+                <div className="text-[10px] text-gray-500">Titular</div>
               </div>
             </div>
           )}
