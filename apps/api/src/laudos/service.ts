@@ -7,7 +7,7 @@ import { consolidaLaudosDaOs, fundirPedidosPorColeta, mapAplisResult, mapExamRes
 import { DatabaseError, ValidationError } from './errors.js'
 import { conferirCpf, deveBloquear } from './identidade.js'
 import { cpfValido } from '../lib/cpf.js'
-import { numeroEnv } from '../lib/env.js'
+import { booleanEnv, numeroEnv } from '../lib/env.js'
 import { idadeEmAnos, type PerfilPaciente } from './mapperHelpers.js'
 
 const TTL_MS = numeroEnv('EXAM_CACHE_TTL_HOURS', 24) * 60 * 60 * 1000
@@ -72,6 +72,40 @@ export function saoListasIguais(anterior: Laudo[] | null, novos: Laudo[]): boole
 
 export function isCacheStale(cachedAt: string, ttlMs = TTL_MS): boolean {
   return Date.now() - new Date(cachedAt).getTime() > ttlMs
+}
+
+// ---------------------------------------------------------------------------
+// Corte de fonte
+// ---------------------------------------------------------------------------
+
+// Fontes cujo laudo carrega valor MEDIDO no Álvaro Online. 'merged' entra
+// porque os valores são do Álvaro — o ApLIS só empresta a capa (nome do exame,
+// faixas de referência, responsável). 'aplis' fica de fora: é a requisição sem
+// OS no Álvaro, ou seja, não há resultado dele para mostrar.
+const FONTES_ALVARO: ReadonlySet<Laudo['source']> = new Set(['aol', 'merged'])
+
+/**
+ * Aplica o corte de fonte decidido pela operação: por ora o portal exibe só o
+ * que foi medido no Álvaro Online.
+ *
+ * O corte é de EXIBIÇÃO e fica só aqui, na saída. Nada a montante muda:
+ *
+ *  - o ApLIS continua sendo consultado, e tem que continuar — é a listagem dele
+ *    que descobre as requisições do paciente, e é o `cod_requisicao` que liga a
+ *    OS do Álvaro a ele na FASE 2.5. Sem isso, só as OS digitadas com o CPF
+ *    seriam achadas e a maior parte dos laudos do Álvaro sumiria junto;
+ *  - o laudo ApLIS-only continua sendo buscado, mapeado e GRAVADO no cache.
+ *
+ * Ou seja: desligar a flag devolve os laudos na hora, do próprio cache, sem
+ * refazer busca nos LIS.
+ *
+ * A env é lida a cada chamada (e não uma vez no módulo) para os testes
+ * exercitarem os dois lados sem recarregar o módulo; o custo é uma leitura de
+ * `process.env` por requisição.
+ */
+export function filtraPorFonte(laudos: Laudo[]): Laudo[] {
+  if (!booleanEnv('LAUDOS_SOMENTE_ALVARO', true)) return laudos
+  return laudos.filter((l) => FONTES_ALVARO.has(l.source))
 }
 
 /**
@@ -163,12 +197,19 @@ export class LaudoService {
         // A fusão roda ao SERVIR (não ao gravar): a linha do banco continua uma
         // por OS — unidade natural do cache — e o card do pedido com as suas
         // remessas órfãs é montado aqui, nos dois caminhos.
-        return { exams: fundirPedidosPorColeta(cacheados), source: 'cached' }
+        //
+        // O corte de fonte vem DEPOIS da fusão, e o `length > 0` acima olha a
+        // lista inteira de propósito: paciente que só tem laudo ApLIS tem cache
+        // (é só que nada nele é exibível hoje), e cair no caminho ao vivo o
+        // faria varrer os LIS a cada requisição para chegar na mesma lista vazia.
+        return { exams: filtraPorFonte(fundirPedidosPorColeta(cacheados)), source: 'cached' }
       }
     }
 
     return {
-      exams: fundirPedidosPorColeta(await this.#buscarAoVivo(pacienteId, cpf, perfil, log)),
+      exams: filtraPorFonte(
+        fundirPedidosPorColeta(await this.#buscarAoVivo(pacienteId, cpf, perfil, log)),
+      ),
       source: 'live',
     }
   }

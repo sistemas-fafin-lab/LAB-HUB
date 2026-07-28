@@ -176,6 +176,7 @@ afterEach(async () => {
   await app?.close()
   app = null
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   vi.restoreAllMocks()
 })
 
@@ -265,6 +266,10 @@ describe('GET /laudos — barreira de identidade', () => {
   it('deixa passar quando o LIS não informa o CPF — indisponível não é divergente', async () => {
     // A instalação de teste do ApLIS não preenche o paciente; bloquear aqui
     // esvaziaria a tela de todo mundo em vez de proteger alguém.
+    //
+    // O laudo produzido é ApLIS puro, que o corte de fonte esconderia; a flag
+    // sai do caminho para a asserção falar da barreira de identidade e não dele.
+    vi.stubEnv('LAUDOS_SOMENTE_ALVARO', 'false')
     const semPaciente = { ...datAplis(CPF), paciente: {} }
     vi.stubGlobal(
       'fetch',
@@ -284,6 +289,12 @@ describe('GET /laudos — barreira de identidade', () => {
   it('OS vinculada ao paciente errado não entrega os valores alheios', async () => {
     // Cenário da colisão de idOsLis: a linha do paciente ficou ligada a uma OS de
     // terceiro. A AOL devolve os valores DELE; a requisição do ApLIS é legítima.
+    //
+    // A degradação testada aqui TERMINA num laudo ApLIS puro, que o corte de
+    // fonte esconderia — em produção, com a flag ligada, o exame some em vez de
+    // degradar (mais restritivo, e igualmente sem valor alheio). A flag sai do
+    // caminho para o teste continuar provando que a OS alheia é descartada.
+    vi.stubEnv('LAUDOS_SOMENTE_ALVARO', 'false')
     vi.stubGlobal(
       'fetch',
       fetchLis({
@@ -312,9 +323,12 @@ describe('GET /laudos — barreira de identidade', () => {
     vi.stubGlobal('fetch', fetchSpy)
     const fresco = new Date().toISOString()
     const server = await build({
+      // `source: 'merged'` (valores do Álvaro) para os dois: o que se testa aqui
+      // é o CPF gravado na linha, e um laudo ApLIS-only sairia da resposta pelo
+      // corte de fonte — o teste passaria sem provar nada sobre a barreira.
       cacheadas: [
-        { cpf: CPF, result: [{ name: 'Hemograma', panels: [] }], cached_at: fresco },
-        { cpf: OUTRO_CPF, result: [{ name: 'Laudo de outro', panels: [] }], cached_at: fresco },
+        { cpf: CPF, result: [{ name: 'Hemograma', source: 'merged', panels: [] }], cached_at: fresco },
+        { cpf: OUTRO_CPF, result: [{ name: 'Laudo de outro', source: 'merged', panels: [] }], cached_at: fresco },
       ],
     })
 

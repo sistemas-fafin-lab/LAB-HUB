@@ -102,6 +102,43 @@ uma navegação comum já faz várias chamadas por minuto.
 Se o volume incomodar, o passo seguinte é uma varredura compartilhada — uma
 listagem alimenta todos os pacientes — e não aumentar a concorrência por paciente.
 
+## Corte de exibição: só o Álvaro (desde 28/07/2026)
+
+Decisão de **operação**, não técnica: por ora o portal exibe apenas laudo com
+valor medido no Álvaro Online. A requisição que existe só no ApLIS, sem OS no
+Álvaro, não aparece na lista nem sai por `GET /laudos/:id`.
+
+O corte é pelo campo `source` do laudo, na **saída**:
+
+| `source` | Quem produz | Exibido |
+|---|---|---|
+| `aol` | estratégia AOL sem capa do ApLIS | sim — valores do Álvaro |
+| `merged` | estratégia AOL + capa do ApLIS | sim — os valores continuam sendo do Álvaro; o ApLIS só empresta nome do exame, referência e responsável |
+| `aplis` | `mapAplisResult` — requisição sem OS no Álvaro | **não** |
+
+Ligado por padrão; `LAUDOS_SOMENTE_ALVARO=false` volta a mostrar as duas fontes.
+
+**O que o corte NÃO faz** — e é o ponto que evita quebrar tudo:
+
+- **não desliga o ApLIS.** Ele continua sendo consultado, e precisa continuar: é
+  a listagem dele que descobre as requisições do paciente, e é o
+  `cod_requisicao` que liga a OS do Álvaro a ele na FASE 2.5. Desligar o ApLIS
+  deixaria só as OS digitadas com o CPF, e a maior parte dos laudos do **Álvaro**
+  sumiria junto;
+- **não para de cachear.** O laudo ApLIS-only continua sendo buscado, mapeado e
+  gravado em `exam_results`. Voltar a flag para `false` devolve os laudos na
+  hora, do cache, sem refazer busca nos LIS.
+
+Paciente que só tem laudo ApLIS recebe lista vazia — e continua servido pelo
+caminho *cacheado*, de propósito: o `cacheados.length > 0` olha a lista antes do
+corte, senão cada requisição dele varreria os LIS para chegar na mesma lista
+vazia.
+
+Um efeito colateral vale registrar: quando a barreira de identidade descarta uma
+OS alheia, o laudo **degrada para a capa do ApLIS** (`source: 'aplis'`) — e com o
+corte ligado isso agora significa que o exame some da tela em vez de aparecer sem
+marcadores. É mais restritivo, e igualmente livre de dado alheio.
+
 ## Quem manda em cada campo
 
 A **AOL é a fonte precisa** dos resultados; o **ApLIS complementa**. Verificado
@@ -387,6 +424,6 @@ Duas ressalvas da fatia de teste:
 Variáveis em `apps/api/.env` — ver `.env.example` para a lista comentada:
 `APLIS_BASE_URL`, `APLIS_USUARIO`, `APLIS_SENHA`, `APLIS_PERIODO_DIAS`,
 `AOL_BASE_URL`, `AOL_IDAGENTE`, `AOL_SENHA`, `AOL_ENTIDADE`,
-`EXAM_CACHE_TTL_HOURS`.
+`EXAM_CACHE_TTL_HOURS`, `LAUDOS_SOMENTE_ALVARO` (ver "Corte de exibição").
 
 Migration: `supabase/migrations/20260721120000_exam_results_lis.sql`.

@@ -20,6 +20,11 @@ const LAUDO_ID = '44444444-4444-4444-4444-444444444444'
 const CPF = '52998224725' // CPF válido pelos dígitos verificadores
 
 // Laudo mínimo no formato gravado em exam_results.result.
+//
+// `source: 'merged'` (valores do Álvaro + capa do ApLIS) é o padrão porque o
+// portal só exibe laudo com valor do Álvaro — ver LAUDOS_SOMENTE_ALVARO. Um
+// fixture 'aplis' seria filtrado, e os testes que não são sobre esse corte
+// falhariam por um motivo que não é o deles.
 function laudo(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: LAUDO_ID,
@@ -40,9 +45,9 @@ function laudo(over: Record<string, unknown> = {}): Record<string, unknown> {
     summary: 'Todos os analitos dentro dos valores de referência.',
     panels: [],
     exam_type: 'Hemograma',
-    codigo_os: '',
+    codigo_os: '458213',
     codigo_lis: '0200058505001',
-    source: 'aplis',
+    source: 'merged',
     partial: false,
     ...over,
   }
@@ -81,6 +86,7 @@ afterEach(async () => {
   await app?.close()
   app = null
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   vi.restoreAllMocks()
 })
 
@@ -128,6 +134,11 @@ describe('GET /laudos', () => {
   })
 
   it('não deixa uma requisição quebrada derrubar as demais', async () => {
+    // Este teste é sobre a RESILIÊNCIA do pipeline, não sobre o corte de fonte:
+    // o laudo que ele produz é ApLIS puro (requisição sem OS no Álvaro), que o
+    // padrão esconderia. Desligar a flag mantém o teste medindo o que ele mede.
+    vi.stubEnv('LAUDOS_SOMENTE_ALVARO', 'false')
+
     // requisicaoListar devolve duas requisições; a segunda falha no detalhe.
     const fetchSpy = vi.fn().mockImplementation((_url: string, init: { body: string }) => {
       const { cmd, dat } = JSON.parse(init.body) as { cmd: string; dat: Record<string, string> }
@@ -193,6 +204,96 @@ describe('GET /laudos', () => {
     const body = res.json() as { exams: Array<{ codigo_lis: string }> }
     expect(body.exams).toHaveLength(1)
     expect(body.exams[0]?.codigo_lis).toBe('REQ-1')
+  })
+})
+
+// Decisão de operação: por ora o portal exibe só laudo com valor medido no
+// Álvaro Online. O corte é de EXIBIÇÃO — o ApLIS continua sendo consultado e o
+// laudo ApLIS-only continua no cache, esperando a flag voltar.
+describe('corte de fonte (LAUDOS_SOMENTE_ALVARO)', () => {
+  const frescos = (...laudos: Array<Record<string, unknown>>): SupaResult => ({
+    data: laudos.map((l) => ({ result: [l], cached_at: new Date().toISOString() })),
+    error: null,
+  })
+
+  it('esconde da lista o laudo que só existe no ApLIS', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const server = await build(
+      supaHandler({
+        examResults: frescos(
+          laudo({ name: 'Só no ApLIS', source: 'aplis', codigo_os: '' }),
+          laudo({ name: 'Veio do Álvaro', source: 'merged' }),
+        ),
+      }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: '/laudos', headers: auth })
+
+    expect(res.statusCode).toBe(200)
+    const nomes = (res.json() as { exams: Array<{ name: string }> }).exams.map((e) => e.name)
+    expect(nomes).toEqual(['Veio do Álvaro'])
+  })
+
+  it("mantém o laudo 'aol' puro, sem capa do ApLIS", async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const server = await build(
+      supaHandler({
+        examResults: frescos(laudo({ name: 'Só no Álvaro', source: 'aol', codigo_lis: null })),
+      }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: '/laudos', headers: auth })
+
+    const nomes = (res.json() as { exams: Array<{ name: string }> }).exams.map((e) => e.name)
+    expect(nomes).toEqual(['Só no Álvaro'])
+  })
+
+  it('devolve lista vazia — e não erro — para quem só tem laudo do ApLIS', async () => {
+    // O cache EXISTE, só não tem nada exibível. Não pode cair no caminho ao
+    // vivo: seria varrer os LIS a cada requisição para chegar na mesma lista.
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const server = await build(
+      supaHandler({ examResults: frescos(laudo({ source: 'aplis', codigo_os: '' })) }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: '/laudos', headers: auth })
+
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { source: string; exams: unknown[] }
+    expect(body.exams).toEqual([])
+    expect(body.source).toBe('cached')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('volta a mostrar as duas fontes com a flag desligada', async () => {
+    vi.stubEnv('LAUDOS_SOMENTE_ALVARO', 'false')
+    vi.stubGlobal('fetch', vi.fn())
+    const server = await build(
+      supaHandler({
+        examResults: frescos(
+          laudo({ name: 'Só no ApLIS', source: 'aplis', codigo_os: '' }),
+          laudo({ name: 'Veio do Álvaro', source: 'merged' }),
+        ),
+      }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: '/laudos', headers: auth })
+
+    const nomes = (res.json() as { exams: Array<{ name: string }> }).exams.map((e) => e.name)
+    expect(nomes).toEqual(['Só no ApLIS', 'Veio do Álvaro'])
+  })
+
+  it('404 no GET /laudos/:id de uma linha só-ApLIS — senão ela sairia por aqui', async () => {
+    const server = await build(
+      supaHandler({
+        examResults: { data: { result: [laudo({ source: 'aplis', codigo_os: '' })] }, error: null },
+      }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: `/laudos/${LAUDO_ID}`, headers: auth })
+
+    expect(res.statusCode).toBe(404)
   })
 })
 

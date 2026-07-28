@@ -34,3 +34,24 @@ export function numeroEnv(name: string, padrao: number, minimo = 0): number {
   console.warn(`[env] ${name}="${bruto}" é inválido (mínimo ${minimo}); usando ${padrao}`)
   return padrao
 }
+
+/**
+ * Lê uma env BOOLEANA opcional. Só 'true' e 'false' (em qualquer caixa) contam;
+ * ausente ou vazia cai no padrão.
+ *
+ * O aviso no valor não reconhecido é o ponto: o atalho `=== 'true'` transforma
+ * um `LAUDOS_SOMENTE_ALVARO=False` em `false` sem reclamar, e uma flag que
+ * decide o que o paciente VÊ não pode mudar de lado por causa de digitação.
+ * Aqui o valor estranho não é obedecido nem engolido — mantém o padrão e diz.
+ */
+export function booleanEnv(name: string, padrao: boolean): boolean {
+  const bruto = process.env[name]
+  if (bruto === undefined || bruto.trim() === '') return padrao
+
+  const valor = bruto.trim().toLowerCase()
+  if (valor === 'true') return true
+  if (valor === 'false') return false
+
+  console.warn(`[env] ${name}="${bruto}" não é 'true' nem 'false'; usando ${padrao}`)
+  return padrao
+}

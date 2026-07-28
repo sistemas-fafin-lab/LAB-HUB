@@ -3,6 +3,7 @@ import type { Laudo } from '@lab-hub/shared'
 import { supabase } from '../lib/supabase.js'
 import { authenticate } from '../middlewares/auth.js'
 import { laudoService } from '../laudos/index.js'
+import { filtraPorFonte } from '../laudos/service.js'
 import { DatabaseError, IntegrationError, ValidationError } from '../laudos/errors.js'
 
 // Laudos buscados nos LIS (ApLIS / AOL). Fonte independente da tabela
@@ -107,6 +108,15 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
       throw app.httpErrors.notFound('Laudo não encontrado')
     }
     // Linha anterior à mudança de granularidade guardava objeto único.
-    return (Array.isArray(data.result) ? data.result : [data.result]) as Laudo[]
+    const laudos = (Array.isArray(data.result) ? data.result : [data.result]) as Laudo[]
+
+    // O mesmo corte de fonte do GET /laudos — senão esta rota seria o buraco
+    // por onde o laudo escondido da lista continuaria saindo. Linha que sobra
+    // vazia é 404: para o cliente, ela não está disponível.
+    const visiveis = filtraPorFonte(laudos)
+    if (visiveis.length === 0) {
+      throw app.httpErrors.notFound('Laudo não encontrado')
+    }
+    return visiveis
   })
 }

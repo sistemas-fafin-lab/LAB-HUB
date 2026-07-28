@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { numeroEnv, requireEnv } from '../src/lib/env.js'
+import { booleanEnv, numeroEnv, requireEnv } from '../src/lib/env.js'
 
 // Config quebrada não pode virar comportamento estranho. Os dois modos de falha
 // abaixo são reais e aconteciam antes do guard:
@@ -63,6 +63,35 @@ describe('numeroEnv', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     process.env[VAR] = '-30'
     expect(numeroEnv(VAR, 90, 1)).toBe(90)
+  })
+})
+
+describe('booleanEnv', () => {
+  it('lê os dois valores reconhecidos, em qualquer caixa', () => {
+    process.env[VAR] = 'false'
+    expect(booleanEnv(VAR, true)).toBe(false)
+    process.env[VAR] = 'TRUE'
+    expect(booleanEnv(VAR, false)).toBe(true)
+    process.env[VAR] = ' False '
+    expect(booleanEnv(VAR, true)).toBe(false)
+  })
+
+  it('cai no padrão quando a variável não existe ou está vazia', () => {
+    expect(booleanEnv(VAR, true)).toBe(true)
+    process.env[VAR] = '   '
+    expect(booleanEnv(VAR, true)).toBe(true)
+  })
+
+  it('não obedece valor não reconhecido — o padrão manda, com aviso', () => {
+    // O ponto do helper: `=== 'true'` leria 'sim' e '1' como false em silêncio,
+    // e a flag que decide o que o paciente VÊ mudaria de lado por digitação.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    for (const bruto of ['sim', '1', 'yes', 'off']) {
+      process.env[VAR] = bruto
+      expect(booleanEnv(VAR, true)).toBe(true)
+      expect(booleanEnv(VAR, false)).toBe(false)
+    }
+    expect(warn).toHaveBeenCalled()
   })
 })
 
