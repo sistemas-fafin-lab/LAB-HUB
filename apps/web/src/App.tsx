@@ -18,6 +18,7 @@ import { usePaciente }     from './lib/usePaciente'
 import { iniciais, primeiroNome } from './lib/paciente'
 import { MOSTRAR_CHATBOT, rotaOculta } from './lib/flags'
 import { track, trackPageview } from './lib/analytics'
+import { lerTema, salvarTema } from './lib/tema'
 import type { AppRoute } from './components/layout/Topbar'
 import type { Exam } from './components/shared/WebHero'
 
@@ -35,9 +36,11 @@ export function App() {
     win.lucide?.createIcons({ attrs: { 'stroke-width': 2 } })
   }, [])
 
+  // Segue o tema salvo (a classe `dark` já foi aplicada em main.tsx) para quem
+  // usa o modo escuro não tomar um flash branco enquanto a sessão carrega.
   if (loading) {
     return (
-      <div className="min-h-screen w-full bg-slate-50 flex items-center justify-center text-sm text-slate-400">
+      <div className="min-h-screen w-full bg-slate-50 dark:bg-gray-950 flex items-center justify-center text-sm text-slate-400 dark:text-gray-500">
         Carregando…
       </div>
     )
@@ -62,7 +65,7 @@ function AuthedApp({ onLogout }: AuthedAppProps) {
   const [route,    setRoute]    = useState<AppRoute>('home')
   const [openExam, setOpenExam] = useState<Exam | null>(null)
   const [coletaId, setColetaId] = useState<string | null>(null)
-  const [dark,     setDark]     = useState(false)
+  const [dark,     setDark]     = useState(lerTema)
 
   const handleNav = (id: AppRoute) => {
     setRoute(id)
@@ -94,6 +97,7 @@ function AuthedApp({ onLogout }: AuthedAppProps) {
   // em <StrictMode> o updater roda duas vezes e duplicaria o evento.
   const handleSetDark = (next: boolean) => {
     track('tema_alternado', { modo: next ? 'dark' : 'light' })
+    salvarTema(next) // sobrevive ao reload e vale também para as telas de auth
     setDark(next)
   }
 

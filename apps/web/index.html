@@ -7,6 +7,21 @@
     <title>Lab Hub</title>
     <!-- Tailwind CSS (CDN for prototype; swap for PostCSS build in production) -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // darkMode 'class': as telas de autenticação usam variantes `dark:`, que
+      // seguem a classe `dark` no <html> (gerenciada por src/lib/tema.ts). O
+      // resto do app continua recebendo `dark` por prop.
+      // fontFamily.display: libera a utility `font-display` (Plus Jakarta Sans,
+      // já carregado do Google Fonts abaixo e até então sem uso).
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: { display: ['Plus Jakarta Sans', 'Inter', 'sans-serif'] },
+          },
+        },
+      }
+    </script>
     <!-- Lucide icons (CDN — consumed via WIcon wrapper) -->
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <!-- Google Fonts -->
