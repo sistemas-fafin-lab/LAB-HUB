@@ -1,26 +1,39 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { WIcon } from '../components/primitives/WIcon'
+import { AuthField } from '../components/auth/AuthField'
+import { BotaoOlho } from '../components/auth/BotaoOlho'
 import { supabase } from '../lib/supabase'
 import { validarEmail } from '../lib/validators'
 import { track } from '../lib/analytics'
-
-interface LoginPageProps {
-  onGoToCadastro: () => void
-}
-
-const inputBase = 'w-full border rounded-xl px-3 h-11 text-sm outline-none'
-const inputClass = `${inputBase} border-gray-200 focus:border-blue-400`
-const labelClass = 'block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1'
 
 type FieldErrors = {
   email?: string | undefined
   password?: string | undefined
 }
 
-export function LoginPage({ onGoToCadastro }: LoginPageProps) {
+// O Supabase responde em inglês. Traduz o que o paciente lê; o track() continua
+// enviando a mensagem crua para não quebrar a série histórica no Umami.
+function mensagemErroLogin(original: string): string {
+  const m = original.toLowerCase()
+  if (m.includes('invalid login credentials')) return 'E-mail ou senha incorretos.'
+  if (m.includes('email not confirmed')) {
+    return 'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.'
+  }
+  if (m.includes('rate limit') || m.includes('for security purposes')) {
+    return 'Muitas tentativas seguidas. Aguarde um instante e tente de novo.'
+  }
+  return 'Não foi possível entrar agora. Tente novamente em instantes.'
+}
+
+// ---------------------------------------------------------------------------
+// LoginPage — corpo do formulário de entrada. A moldura (painel da marca,
+// card, abas) vem do AuthShell/AuthGate.
+// ---------------------------------------------------------------------------
+export function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [mostrarSenha, setMostrarSenha] = useState(false)
   const [errors, setErrors] = useState<FieldErrors>({})
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -32,9 +45,6 @@ export function LoginPage({ onGoToCadastro }: LoginPageProps) {
 
   const setFieldError = (field: keyof FieldErrors, msg: string | null) =>
     setErrors((prev) => ({ ...prev, [field]: msg ?? undefined }))
-
-  const fieldClass = (field: keyof FieldErrors) =>
-    errors[field] ? `${inputBase} border-red-300 focus:border-red-400` : inputClass
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -52,7 +62,7 @@ export function LoginPage({ onGoToCadastro }: LoginPageProps) {
     // Sucesso: o onAuthStateChange do AuthProvider troca a tela automaticamente.
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
     if (signInError) {
-      setError(signInError.message)
+      setError(mensagemErroLogin(signInError.message))
       // Só a mensagem do Supabase ("Invalid login credentials"), nunca o e-mail.
       track('login_erro', { motivo: signInError.message })
     }
@@ -60,70 +70,60 @@ export function LoginPage({ onGoToCadastro }: LoginPageProps) {
   }
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 flex items-center justify-center p-6">
-      <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center mb-6">
-          <img src="/logo.svg" alt="Lab Hub" className="h-9 w-auto" />
-        </div>
+    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-3">
+      <AuthField id="login-email" label="E-mail" icon="mail" error={errors.email}>
+        {(c) => (
+          <input
+            {...c}
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onBlur={() => setFieldError('email', validarEmail(email))}
+            placeholder="voce@email.com"
+            autoComplete="username"
+          />
+        )}
+      </AuthField>
 
-        <form
-          onSubmit={handleSubmit}
-          noValidate
-          className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+      <AuthField
+        id="login-senha"
+        label="Senha"
+        icon="lock"
+        error={errors.password}
+        slotDireito={
+          <BotaoOlho visivel={mostrarSenha} onToggle={() => setMostrarSenha((v) => !v)} />
+        }
+      >
+        {(c) => (
+          <input
+            {...c}
+            type={mostrarSenha ? 'text' : 'password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onBlur={() => setFieldError('password', validarSenhaLogin(password))}
+            placeholder="Senha"
+            autoComplete="current-password"
+          />
+        )}
+      </AuthField>
+
+      {error !== null && (
+        <div
+          role="alert"
+          className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/30 rounded-lg px-3 py-2"
         >
-          <h1 className="text-lg font-bold text-slate-900 mb-1">Entrar</h1>
-          <p className="text-sm text-gray-500 mb-5">Acesse o portal do paciente.</p>
+          {error}
+        </div>
+      )}
 
-          <div className="mb-4">
-            <label className={labelClass}>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onBlur={() => setFieldError('email', validarEmail(email))}
-              placeholder="voce@email.com"
-              className={fieldClass('email')}
-            />
-            {errors.email && <p className="text-xs text-red-600 mt-1">{errors.email}</p>}
-          </div>
-
-          <div className="mb-4">
-            <label className={labelClass}>Senha</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onBlur={() => setFieldError('password', validarSenhaLogin(password))}
-              placeholder="••••••••"
-              className={fieldClass('password')}
-            />
-            {errors.password && <p className="text-xs text-red-600 mt-1">{errors.password}</p>}
-          </div>
-
-          {error && (
-            <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white rounded-xl h-11 font-semibold text-sm inline-flex items-center justify-center gap-2 hover:bg-blue-700 transition disabled:opacity-60"
-          >
-            {loading ? 'Entrando…' : 'Entrar'}
-            {!loading && <WIcon name="arrow-right" className="w-4 h-4" strokeWidth={2.4} />}
-          </button>
-
-          <button
-            type="button"
-            onClick={onGoToCadastro}
-            className="w-full text-center text-sm text-slate-500 mt-4 hover:text-slate-700"
-          >
-            Não tem conta? <span className="font-semibold text-blue-600">Criar conta</span>
-          </button>
-        </form>
-      </div>
-    </div>
+      <button
+        type="submit"
+        disabled={loading}
+        className="mt-2 w-full py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold text-sm inline-flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 transition-all hover:from-blue-600 hover:to-blue-700 hover:shadow-xl active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100"
+      >
+        {loading ? 'Entrando…' : 'Entrar'}
+        {!loading && <WIcon name="arrow-right" className="w-4 h-4" strokeWidth={2.4} />}
+      </button>
+    </form>
   )
 }
