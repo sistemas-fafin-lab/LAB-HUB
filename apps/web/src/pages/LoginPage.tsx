@@ -46,6 +46,12 @@ export function LoginPage() {
   const setFieldError = (field: keyof FieldErrors, msg: string | null) =>
     setErrors((prev) => ({ ...prev, [field]: msg ?? undefined }))
 
+  // No blur só valida se o usuário digitou algo: focar e sair de um campo vazio
+  // não deve marcá-lo como erro — os obrigatórios vazios são pegos no submit.
+  const handleBlur = (field: keyof FieldErrors, valor: string, validar: (v: string) => string | null) => {
+    if (valor) setFieldError(field, validar(valor))
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -78,7 +84,7 @@ export function LoginPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            onBlur={() => setFieldError('email', validarEmail(email))}
+            onBlur={() => handleBlur('email', email, validarEmail)}
             placeholder="voce@email.com"
             autoComplete="username"
           />
@@ -100,7 +106,7 @@ export function LoginPage() {
             type={mostrarSenha ? 'text' : 'password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            onBlur={() => setFieldError('password', validarSenhaLogin(password))}
+            onBlur={() => handleBlur('password', password, validarSenhaLogin)}
             placeholder="Senha"
             autoComplete="current-password"
           />

@@ -66,6 +66,12 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
   const setFieldError = (field: keyof FieldErrors, msg: string | null) =>
     setErrors((prev) => ({ ...prev, [field]: msg ?? undefined }))
 
+  // No blur só valida se o usuário digitou algo: focar e sair de um campo vazio
+  // não deve marcá-lo como erro — os obrigatórios vazios são pegos no submit.
+  const handleBlur = (field: keyof FieldErrors, valor: string, validar: (v: string) => string | null) => {
+    if (valor) setFieldError(field, validar(valor))
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -123,7 +129,7 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
             {...c}
             value={nome}
             onChange={(e) => setNome(e.target.value)}
-            onBlur={() => setFieldError('nome', validarNome(nome))}
+            onBlur={() => handleBlur('nome', nome, validarNome)}
             placeholder="Nome completo"
             autoComplete="name"
           />
@@ -137,7 +143,7 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            onBlur={() => setFieldError('email', validarEmail(email))}
+            onBlur={() => handleBlur('email', email, validarEmail)}
             placeholder="voce@email.com"
             autoComplete="email"
           />
@@ -159,7 +165,7 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
             type={mostrarSenha ? 'text' : 'password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            onBlur={() => setFieldError('password', validarSenha(password))}
+            onBlur={() => handleBlur('password', password, validarSenha)}
             placeholder="Senha (mínimo 8 caracteres)"
             autoComplete="new-password"
           />
@@ -173,7 +179,7 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
             inputMode="numeric"
             value={cpf}
             onChange={(e) => setCpf(formatarCpf(e.target.value))}
-            onBlur={() => setFieldError('cpf', validarCpf(cpf))}
+            onBlur={() => handleBlur('cpf', cpf, validarCpf)}
             placeholder="000.000.000-00"
           />
         )}
@@ -206,7 +212,7 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
               type="date"
               value={dataNascimento}
               onChange={(e) => setDataNascimento(e.target.value)}
-              onBlur={() => setFieldError('dataNascimento', validarDataNascimento(dataNascimento))}
+              onBlur={() => handleBlur('dataNascimento', dataNascimento, validarDataNascimento)}
               autoComplete="bday"
             />
           )}
@@ -220,7 +226,7 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
             inputMode="numeric"
             value={telefone}
             onChange={(e) => setTelefone(formatarTelefone(e.target.value))}
-            onBlur={() => setFieldError('telefone', validarTelefone(telefone))}
+            onBlur={() => handleBlur('telefone', telefone, validarTelefone)}
             placeholder="Telefone (opcional)"
             autoComplete="tel"
           />
