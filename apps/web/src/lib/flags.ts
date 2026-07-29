@@ -18,20 +18,13 @@ export const MOSTRAR_NOTIFICACOES = false            // Topbar: sino / badge de 
 export const MOSTRAR_DEPENDENTES = false             // Topbar: seletor de dependentes (D2 adiado)
 export const MOSTRAR_NOVIDADES = false               // Settings: card "receber novidades" (sem backend)
 export const MOSTRAR_ENVIAR_AO_MEDICO = false        // LaudoPage: botão "Enviar ao médico" (sem backend)
-// LaudoPage: assinatura do responsável técnico, QR de verificação e horários de
-// coleta/liberação. Diferente dos outros itens desta lista, o mock aqui não é
-// só um placeholder feio: o laudo é um documento que o paciente imprime e leva
-// ao médico, e esses campos afirmavam fatos — que uma bioquímica nomeada
-// assinou, que há verificação online, que a coleta foi às 07:42. Só reexibir
-// quando vier do LIS (a AOL manda `responsaveltecnico` e `dataresultado`).
-export const MOSTRAR_LAUDO_ASSINATURA_MOCK = false
-// LaudoPage: CNPJ, endereço e telefone no cabeçalho/rodapé do laudo impresso.
-// Os valores no código são placeholders herdados do mockup (CNPJ
-// 12.345.678/0001-90, SGAS 915, 0800 123 4567) — são os campos que identificam
-// QUEM RESPONDE pelo exame, e um número inventado ali é pior que campo ausente.
-// Reexibir quando vierem da configuração real do laboratório.
-export const MOSTRAR_LAUDO_DADOS_INSTITUICAO = false
 export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compartilhar/2FA (sem backend)
+// MOSTRAR_LAUDO_ASSINATURA_MOCK e MOSTRAR_LAUDO_DADOS_INSTITUICAO saíram daqui:
+// o laudo foi refeito em folhas A4 (components/laudo/) e o novo documento não
+// tem nenhum campo de mockup para esconder. Assinatura do responsável técnico,
+// QR de validação, CNPJ, endereço e telefone só voltam quando vierem do LIS ou
+// da configuração do laboratório — como CAMPOS DO MODELO (modelo.ts), que a
+// folha omite enquanto estiverem ausentes, e não como texto fixo no componente.
 
 // Páginas inteiras ocultas do menu E inacessíveis por acesso direto.
 export const MOSTRAR_RESULTADOS = true               // Sidebar/rota: Resultados (backend real: GET /resultados + GET /laudos)

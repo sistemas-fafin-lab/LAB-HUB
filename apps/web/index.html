@@ -107,66 +107,567 @@
         }
       }
 
-      /* Impressão do laudo (LaudoPage): só a folha .laudo-imprimivel sai no
-         papel — o resto do app (sidebar, topbar, toolbar) fica invisível.
-         visibility (e não display:none) para a folha continuar no fluxo e
-         poder quebrar em várias páginas. */
+      /* ===================================================================
+         Laudo em folhas A4 (components/laudo/LaudoDocumento.tsx)
+
+         O laudo não é uma tela: é um documento de 210x297mm que o paciente
+         imprime e leva ao médico. Por isso as medidas aqui são em mm e em
+         px absolutos, e não nas utilities do Tailwind — a folha precisa sair
+         igual na tela e no papel. A paginação (cabeçalho repetido, "Pág. X de
+         Y", tabela que continua na folha seguinte) é feita em JavaScript, que
+         MEDE estas alturas; mexer nos paddings/gaps abaixo muda o cálculo.
+
+         Tudo fica sob .laudo-folhas para não colidir com as utilities do
+         Tailwind no resto do app.
+         =================================================================== */
+      .laudo-caixa {
+        width: 100%;
+      }
+      .laudo-folhas {
+        --pad: 15mm;
+        --ink: #0f172a;
+        --ink2: #1e293b;
+        --muted: #64748b;
+        --faint: #94a3b8;
+        --line: #e6ebf2;
+        --line2: #f0f4f9;
+        --tint: #f7f9fc;
+        --brand-600: #2563eb;
+        --brand-900: #1e3a8a;
+        --indigo: #4338ca;
+        --lo: #2563eb;
+        --lo-bg: #eff4ff;
+        --hi: #dc2626;
+        --hi-bg: #fef2f2;
+        --ok: #059669;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 22px;
+        font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+        color: var(--ink);
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .laudo-folhas *,
+      .laudo-folhas *::before,
+      .laudo-folhas *::after {
+        box-sizing: border-box;
+      }
+      .laudo-folhas .sheet {
+        width: 210mm;
+        height: 297mm;
+        background: #fff;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: 6px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 22px 50px -24px rgba(15, 23, 42, 0.35);
+      }
+      .laudo-folhas .pg-head {
+        padding: var(--pad) var(--pad) 0;
+      }
+      .laudo-folhas .pg-main {
+        flex: 1 1 auto;
+        min-height: 0;
+        padding: 8px var(--pad);
+        overflow: hidden;
+      }
+      .laudo-folhas .flow {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .laudo-folhas .pg-foot {
+        padding: 0 var(--pad) calc(var(--pad) - 3mm);
+      }
+      /* Camada que só existe para medir: fora da tela, nunca impressa. */
+      .laudo-medicao {
+        position: absolute;
+        left: -10000px;
+        top: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      /* ---------- marca e cabeçalho ---------- */
+      .laudo-folhas .brand-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      .laudo-folhas .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+      }
+      .laudo-folhas .mark {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 17px;
+        background: linear-gradient(135deg, #3b82f6, #4338ca);
+        box-shadow: 0 8px 18px -8px rgba(59, 130, 246, 0.7);
+      }
+      .laudo-folhas .name {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-weight: 800;
+        font-size: 18px;
+        letter-spacing: -0.02em;
+        color: var(--brand-900);
+        line-height: 1;
+      }
+      .laudo-folhas .name b {
+        color: var(--brand-600);
+      }
+      .laudo-folhas .desc {
+        font-size: 7.5px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-top: 3px;
+      }
+      .laudo-folhas .brand-row .c {
+        text-align: right;
+      }
+      .laudo-folhas .brand-row .c .l {
+        font-size: 7px;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .laudo-folhas .brand-row .c .v {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--ink2);
+        font-variant-numeric: tabular-nums;
+      }
+      .laudo-folhas .hair {
+        height: 3px;
+        border-radius: 3px;
+        margin-top: 11px;
+        background: linear-gradient(90deg, var(--brand-900), var(--brand-600) 45%, var(--indigo));
+      }
+      /* Cabeçalho enxuto das folhas 2..N: quem recebe uma página solta ainda
+         sabe de quem é o laudo e a que requisição pertence. */
+      .laudo-folhas .run {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        font-size: 9px;
+        color: var(--muted);
+      }
+      .laudo-folhas .run b {
+        color: var(--ink2);
+      }
+      .laudo-folhas .run .mark {
+        width: 26px;
+        height: 26px;
+        font-size: 13px;
+        border-radius: 8px;
+      }
+      .laudo-folhas .run .name {
+        font-size: 14px;
+      }
+
+      /* ---------- paciente ---------- */
+      .laudo-folhas .patient {
+        margin-top: 11px;
+      }
+      .laudo-folhas .patient .top {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .laudo-folhas .patient h1 {
+        margin: 0;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 21px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: var(--ink);
+      }
+      .laudo-folhas .tag {
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--brand-600);
+        background: var(--lo-bg);
+        border: 1px solid #dbe4ff;
+        padding: 4px 10px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+      .laudo-folhas .meta {
+        margin-top: 9px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .laudo-folhas .meta .f {
+        padding: 8px 14px;
+        border-right: 1px solid var(--line2);
+        border-top: 1px solid var(--line2);
+      }
+      .laudo-folhas .meta .f:nth-child(-n + 3) {
+        border-top: none;
+      }
+      .laudo-folhas .meta .f:nth-child(3n) {
+        border-right: none;
+      }
+      .laudo-folhas .meta .k {
+        font-size: 7.5px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .laudo-folhas .meta .v {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--ink2);
+        margin-top: 2px;
+      }
+
+      /* ---------- contadores + legenda ---------- */
+      .laudo-folhas .summ {
+        margin-top: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .laudo-folhas .chips {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .laudo-folhas .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 9px;
+        font-weight: 600;
+        padding: 5px 11px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink2);
+      }
+      .laudo-folhas .chip .n {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-weight: 800;
+        font-size: 11px;
+      }
+      .laudo-folhas .chip.ok .n {
+        color: var(--ok);
+      }
+      .laudo-folhas .chip.alt .n {
+        color: var(--hi);
+      }
+      .laudo-folhas .chip.tot .n {
+        color: var(--brand-600);
+      }
+      .laudo-folhas .legend {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        font-size: 8px;
+        color: var(--muted);
+      }
+      .laudo-folhas .legend .it {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .laudo-folhas .legend .mk {
+        font-size: 9px;
+        line-height: 1;
+      }
+      .laudo-folhas .legend .mk.lo {
+        color: var(--lo);
+      }
+      .laudo-folhas .legend .mk.hi {
+        color: var(--hi);
+      }
+
+      /* ---------- título do exame ---------- */
+      .laudo-folhas .exam-title {
+        display: flex;
+        align-items: stretch;
+        gap: 9px;
+      }
+      .laudo-folhas .exam-title .bar {
+        width: 4px;
+        min-height: 17px;
+        border-radius: 3px;
+        background: linear-gradient(180deg, var(--brand-600), var(--indigo));
+      }
+      .laudo-folhas .exam-title h2 {
+        margin: 0;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 15px;
+        font-weight: 800;
+        color: var(--brand-900);
+        letter-spacing: -0.015em;
+      }
+
+      /* ---------- grupos e tabela de analitos ---------- */
+      .laudo-folhas .cap {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 0 2px 6px;
+      }
+      .laudo-folhas .cap .nm {
+        font-size: 10.5px;
+        font-weight: 700;
+        color: var(--ink);
+      }
+      /* Tabela que transbordou para a folha seguinte reabre com o mesmo
+         cabeçalho: sem a marca, a continuação parece um segundo exame. */
+      .laudo-folhas .grp.cont .cap .nm::after {
+        content: ' (continuação)';
+        color: var(--faint);
+        font-weight: 600;
+      }
+      .laudo-folhas table.rt {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+      .laudo-folhas table.rt th.an,
+      .laudo-folhas table.rt td.an {
+        width: 42%;
+      }
+      .laudo-folhas table.rt thead th {
+        font-size: 7.5px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--faint);
+        text-align: right;
+        padding: 0 12px 6px;
+        border-bottom: 1.5px solid var(--line);
+      }
+      .laudo-folhas table.rt thead th.an {
+        text-align: left;
+      }
+      .laudo-folhas table.rt tbody td {
+        padding: 6.5px 12px;
+        border-bottom: 1px solid var(--line2);
+        font-size: 11px;
+        text-align: right;
+        vertical-align: baseline;
+      }
+      .laudo-folhas table.rt tbody td.an {
+        text-align: left;
+        color: var(--ink2);
+        font-weight: 500;
+      }
+      .laudo-folhas table.rt tbody tr:last-child td {
+        border-bottom: none;
+      }
+      /* Referência multilinha (tabela por idade/sexo da AOL) sai inteira: no
+         papel não existe o balão de hover que a tela usa para resumir. */
+      .laudo-folhas .ref {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        font-size: 10px;
+        white-space: pre-line;
+      }
+      .laudo-folhas .res {
+        font-weight: 700;
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
+      }
+      .laudo-folhas .res.lo {
+        color: var(--lo);
+      }
+      .laudo-folhas .res.hi,
+      .laudo-folhas .res.ind {
+        color: var(--hi);
+      }
+      .laudo-folhas .unit {
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 8.5px;
+        margin-left: 3px;
+      }
+      .laudo-folhas .car {
+        font-size: 8px;
+        margin-left: 3px;
+        vertical-align: 1px;
+      }
+      .laudo-folhas .car.lo {
+        color: var(--lo);
+      }
+      .laudo-folhas .car.hi,
+      .laudo-folhas .car.ind {
+        color: var(--hi);
+      }
+      .laudo-folhas tr.alt.lo {
+        background: linear-gradient(90deg, var(--lo-bg), transparent 80%);
+      }
+      .laudo-folhas tr.alt.hi,
+      .laudo-folhas tr.alt.ind {
+        background: linear-gradient(90deg, var(--hi-bg), transparent 80%);
+      }
+      .laudo-folhas tr.alt td.an {
+        position: relative;
+        padding-left: 16px;
+      }
+      .laudo-folhas tr.alt td.an::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 5px;
+        bottom: 5px;
+        width: 3px;
+        border-radius: 3px;
+      }
+      .laudo-folhas tr.alt.lo td.an::before {
+        background: var(--lo);
+      }
+      .laudo-folhas tr.alt.hi td.an::before,
+      .laudo-folhas tr.alt.ind td.an::before {
+        background: var(--hi);
+      }
+
+      /* ---------- laudo descritivo (citologia/patologia) ---------- */
+      .laudo-folhas .sec p {
+        margin: 0;
+        font-size: 10.5px;
+        line-height: 1.6;
+        color: var(--ink2);
+      }
+      .laudo-folhas .sec p.forte {
+        font-weight: 700;
+        color: var(--ink);
+      }
+      .laudo-folhas .sec.destaque {
+        background: var(--lo-bg);
+        border: 1px solid #dbe4ff;
+        border-radius: 10px;
+        padding: 10px 13px;
+      }
+
+      /* ---------- material/método, observações e rodapé ---------- */
+      .laudo-folhas .meta-line {
+        font-size: 8.5px;
+        color: var(--faint);
+        padding: 0 2px;
+      }
+      .laudo-folhas .meta-line span {
+        margin-right: 16px;
+      }
+      .laudo-folhas .meta-line b {
+        color: var(--muted);
+      }
+      .laudo-folhas .exnote {
+        font-size: 9.5px;
+        color: var(--ink2);
+        background: var(--tint);
+        border: 1px solid var(--line2);
+        border-radius: 8px;
+        padding: 9px 12px;
+      }
+      .laudo-folhas .exnote .k {
+        font-size: 7.5px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--faint);
+        margin-bottom: 3px;
+      }
+      .laudo-folhas .exnote p {
+        margin: 0;
+        line-height: 1.55;
+      }
+      .laudo-folhas .disc {
+        font-size: 8px;
+        color: var(--muted);
+        line-height: 1.55;
+        padding-top: 8px;
+        border-top: 1px solid var(--line);
+      }
+      .laudo-folhas .pg-num {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 8px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        margin-top: 6px;
+      }
+      .laudo-folhas .pg-num b {
+        color: var(--ink2);
+      }
+
+      /* ---------- impressão ----------
+         Só as folhas saem no papel; o resto do app (sidebar, topbar, barra de
+         ações) fica invisível. visibility e não display:none para as folhas
+         continuarem no fluxo e poderem quebrar em várias páginas.
+
+         Cada .sheet já TEM exatamente uma página A4, então a margem do @page é
+         zero: a margem do documento é o padding da própria folha. */
       @media print {
+        @page {
+          size: A4;
+          margin: 0;
+        }
         body * {
           visibility: hidden;
         }
-        .laudo-imprimivel,
-        .laudo-imprimivel * {
+        .laudo-folhas,
+        .laudo-folhas * {
           visibility: visible;
         }
-        .laudo-imprimivel {
+        .laudo-medicao {
+          display: none !important;
+        }
+        .laudo-caixa {
           position: absolute;
           left: 0;
           top: 0;
-          width: 100%;
-          margin: 0;
-          border: none;
-          box-shadow: none;
-          border-radius: 0;
+          width: 210mm;
         }
-        /* Distribuição entre páginas: o que tem .imprime-junto não é cortado
-           ao meio — uma seção de exame sai inteira na mesma página (o título
-           nunca fica órfão no fim da página anterior), e o mesmo vale para
-           cada linha de marcador, observações e bloco de assinatura. Seção
-           maior que uma página inteira o navegador quebra mesmo assim. */
-        .laudo-imprimivel .imprime-junto {
+        .laudo-folhas {
+          display: block;
+          gap: 0;
+          /* Na tela a folha encolhe para caber no celular; no papel, nunca. */
+          zoom: 1 !important;
+        }
+        .laudo-folhas .sheet {
+          border-radius: 0;
+          box-shadow: none;
           break-inside: avoid;
-          page-break-inside: avoid;
+          break-after: page;
+          page-break-after: always;
         }
-        /* Referências multilinha: na tela são um resumo de uma linha com a
-           tabela completa em balão no hover (Referencia.tsx). No papel não
-           existe hover — some o resumo e a tabela completa entra no fluxo
-           normal do documento, sem cara de balão. */
-        .laudo-imprimivel .ref-resumo {
-          display: none;
+        .laudo-folhas .sheet:last-child {
+          break-after: auto;
+          page-break-after: auto;
         }
-        .laudo-imprimivel .ref-completa {
-          display: block !important;
-          position: static;
-          padding: 0;
-          width: auto;
-        }
-        .laudo-imprimivel .ref-completa > div {
-          max-width: none;
-          border: none;
-          border-radius: 0;
-          box-shadow: none;
-          padding: 0;
-          background: transparent;
-        }
-        /* Mantém os fundos coloridos (badges NORMAL/ATENÇÃO, cabeçalhos). */
+        /* Mantém os fundos coloridos (faixa da marca, linhas alteradas). */
         body {
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
-      }
-      @page {
-        margin: 12mm;
       }
     </style>
   </head>

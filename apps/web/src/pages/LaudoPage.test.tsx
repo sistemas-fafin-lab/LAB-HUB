@@ -69,11 +69,15 @@ function laudoComMarcadores(over: Partial<Laudo> = {}): Laudo {
   return { ...base(), panels: [painel()], ...over } as Laudo
 }
 
-/** Renderiza e devolve o texto da folha que sai na impressora. */
-function papel(l: Laudo): string {
+function folhas(l: Laudo): HTMLElement {
   const { container } = render(<LaudoPage exam={laudoToExam(l)} onBack={() => {}} dark={false} />)
-  return container.querySelector('.laudo-imprimivel')!.textContent ?? ''
+  // `.laudo-medicao` é a cópia escondida que só existe para medir alturas; o
+  // que o paciente imprime são as folhas de verdade.
+  return container.querySelector<HTMLElement>('.laudo-folhas:not(.laudo-medicao)')!
 }
+
+/** Renderiza e devolve o texto das folhas que saem na impressora. */
+const papel = (l: Laudo): string => folhas(l).textContent ?? ''
 
 describe('datas de coleta e liberação', () => {
   it('mostra a data de COLETA no campo Coleta, não a da liberação', () => {
@@ -87,10 +91,11 @@ describe('datas de coleta e liberação', () => {
 
   it('não inventa data de coleta quando a fonte não informa', () => {
     // Resultado do FlowLab chega só com a liberação. Repetir a emissão no campo
-    // "Coleta" afirmaria um dia de coleta que ninguém registrou.
+    // "Coleta" afirmaria um dia de coleta que ninguém registrou — e o campo
+    // some inteiro em vez de imprimir um travessão.
     const texto = papel(laudo({ data_coleta: '', data_emissao: '2026-07-28' }))
 
-    expect(texto).toContain('Coleta—')
+    expect(texto).not.toContain('Coleta')
     expect(texto).toContain('Liberação28 de julho de 2026')
   })
 
@@ -104,24 +109,57 @@ describe('datas de coleta e liberação', () => {
   })
 })
 
-describe('subtítulo do exame', () => {
-  it('não chama laudo descritivo de "análise quantitativa"', () => {
-    // Citologia/biópsia não têm marcador numérico nem faixa de referência.
-    const texto = papel(laudo())
+describe('formato do corpo do laudo', () => {
+  it('laudo descritivo sai como texto, sem tabela de analitos', () => {
+    // Citologia/biópsia não têm marcador numérico nem faixa de referência: uma
+    // tabela "Analito / Resultado / Intervalo de referência" prometeria colunas
+    // que este exame não tem.
+    const folha = folhas(laudo())
 
-    expect(texto).not.toContain('Análise quantitativa')
+    expect(folha.querySelector('table')).toBeNull()
+    expect(folha.textContent).toContain('NEGATIVO PARA LESÃO.')
   })
 
-  it('mantém o subtítulo no laudo de marcadores', () => {
-    const texto = papel(laudoComMarcadores())
+  it('laudo de marcadores sai na tabela de analitos', () => {
+    const folha = folhas(laudoComMarcadores())
 
-    expect(texto).toContain('Análise quantitativa dos principais marcadores')
+    expect(folha.querySelector('table')).not.toBeNull()
+    expect(folha.textContent).toContain('Intervalo de referência')
+    expect(folha.textContent).toContain('Glicose')
   })
 
   it('não atribui as faixas de referência à SBAC', () => {
     // As faixas vêm do <valorreferencia> da AOL; citar uma diretriz seria
     // afirmar uma origem que o dado não tem.
     expect(papel(laudoComMarcadores())).not.toContain('SBAC')
+  })
+})
+
+describe('contadores do cabeçalho', () => {
+  it('conta como "dentro da referência" só o analito que TEM referência', () => {
+    // Marcador sem faixa chega com `ok: true` por construção (ver
+    // mapperHelpers.ts na API) — contá-lo como normal afirmaria uma
+    // normalidade que ninguém verificou.
+    const texto = papel(
+      laudoComMarcadores({
+        panels: [
+          painel({ name: 'Glicose', ref: '70 a 99', ok: true }),
+          painel({ name: 'Observação', value: 'Amostra lipêmica', ref: '', ok: true }),
+        ],
+      }),
+    )
+
+    expect(texto).toContain('2 analitos')
+    expect(texto).toContain('1 dentro da referência')
+    expect(texto).toContain('0 alterados')
+  })
+
+  it('não mostra contadores quando nenhum analito tem referência', () => {
+    const texto = papel(
+      laudoComMarcadores({ panels: [painel({ ref: '', ok: true })] }),
+    )
+
+    expect(texto).not.toContain('dentro da referência')
   })
 })
 
@@ -144,23 +182,33 @@ describe('identificação do documento', () => {
     expect(texto).not.toContain('Laudo nº')
   })
 
-  it('"Gerado em" é a data desta cópia, não a do exame', () => {
+  it('"Data da geração" é a data desta cópia, não a do exame', () => {
     const hoje = new Date()
     const meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
     const esperado = `${String(hoje.getDate()).padStart(2, '0')} de ${meses[hoje.getMonth()]} de ${hoje.getFullYear()}`
 
     // O laudo é de julho/2026; a cópia é impressa hoje.
-    expect(papel(laudo())).toContain(`Gerado em ${esperado}`)
+    expect(papel(laudo())).toContain(`Data da geração${esperado}`)
   })
 
-  it('não imprime CNPJ, endereço nem telefone de mockup', () => {
-    // Campos que dizem QUEM RESPONDE pelo exame; ocultos até virem da
-    // configuração real do laboratório (MOSTRAR_LAUDO_DADOS_INSTITUICAO).
+  it('numera as páginas', () => {
+    // Uma folha só nos testes (jsdom não tem layout, então nada transborda),
+    // mas o "de Y" precisa existir: página solta sem numeração não dá para
+    // conferir se o laudo está completo.
+    expect(papel(laudo())).toContain('Pág. 1 de 1')
+  })
+
+  it('não imprime CNPJ, endereço, telefone nem assinatura de mockup', () => {
+    // Campos que dizem QUEM RESPONDE pelo exame. O documento novo não tem
+    // nenhum deles em texto fixo: só voltam como campo do modelo, vindo do LIS.
     const texto = papel(laudo())
 
     expect(texto).not.toContain('12.345.678/0001-90')
     expect(texto).not.toContain('SGAS 915')
     expect(texto).not.toContain('0800 123 4567')
+    expect(texto).not.toContain('Assinado digitalmente')
+    expect(texto).not.toContain('Responsável técnico')
+    expect(texto).not.toContain('Helena Pacheco')
   })
 })
 
@@ -176,6 +224,24 @@ describe('tema escuro', () => {
 
     expect(voltar.className).toContain('text-gray-300')
     expect(voltar.className).not.toContain('text-slate-600')
+  })
+})
+
+describe('exportar PDF', () => {
+  it('exporta a própria folha, sem um segundo layout', () => {
+    // A folha da tela É o documento: o PDF sai da impressão dela. Se este
+    // botão passasse a baixar outro arquivo, o app teria dois laudos com
+    // estruturas diferentes para o mesmo exame.
+    const print = vi.fn()
+    vi.stubGlobal('print', print)
+
+    const { getByText } = render(
+      <LaudoPage exam={laudoToExam(laudo())} onBack={() => {}} dark={false} />,
+    )
+    getByText('Exportar PDF').closest('button')!.click()
+
+    expect(print).toHaveBeenCalled()
+    vi.unstubAllGlobals()
   })
 })
 
@@ -201,15 +267,14 @@ describe('laboratório executor', () => {
 })
 
 describe('observações clínicas', () => {
-  it('separa o texto do LIS do aviso padrão do app', () => {
-    const { container } = render(
-      <LaudoPage exam={laudoToExam(laudo({ summary: 'Citologia negativa.' }))} onBack={() => {}} dark={false} />,
-    )
-    const bloco = [...container.querySelectorAll('p')].map((p) => p.textContent)
-
+  it('separa o parecer do laboratório do aviso padrão do app', () => {
     // Concatenados, o aviso genérico era lido como parecer do laboratório
-    // sobre ESTE exame.
-    expect(bloco).toContain('Citologia negativa.')
-    expect(bloco.some((t) => t?.startsWith('Este resultado não é um diagnóstico'))).toBe(true)
+    // sobre ESTE exame. São autorias diferentes: o parecer fica no corpo, o
+    // aviso no rodapé de toda página.
+    const folha = folhas(laudo({ summary: 'Citologia negativa.' }))
+
+    expect(folha.querySelector('.exnote')!.textContent).toContain('Citologia negativa.')
+    expect(folha.querySelector('.exnote')!.textContent).not.toContain('ato médico')
+    expect(folha.querySelector('.disc')!.textContent).toContain('ato médico')
   })
 })
