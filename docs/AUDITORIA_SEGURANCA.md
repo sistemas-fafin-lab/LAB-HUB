@@ -26,7 +26,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | **MÉDIO** |
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | **MÉDIO** |
 | S-09 | Sem política de retenção/expurgo; `on delete cascade` deixa arquivos órfãos no Storage | **MÉDIO** |
-| P-03 | API sem cabeçalhos de segurança (helmet) e sem redação de PII nos logs | **BAIXO** |
+| P-03 | API sem cabeçalhos de segurança (helmet) e sem redação de PII nos logs | ~~**BAIXO**~~ **CORRIGIDO 30/07/2026** |
 | S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | **BAIXO** |
 | S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | **PERF** |
 
@@ -139,6 +139,16 @@ Isto é o que impede a regressão silenciosa de tudo que foi corrigido hoje: a s
 2. `npm run lint` saía com **127 — `eslint: command not found`**. O script `lint` de `apps/web` era resquício do template do Vite: não havia `eslint` em nenhum workspace nem arquivo de config — "temos lint" era falso desde o commit inicial. **ESLint foi instalado e configurado no mesmo dia** e o passo entrou no workflow; a primeira execução acusou 17 erros, três deles defeito de verdade. Ver P-02.
 
 **`apps/mobile` está fora do CI**, por decisão do usuário (o app está parado). Não é só escolha de escopo: `npx tsc --noEmit` no mobile **falha hoje** (tipagem do `LinearGradient`), então `--workspaces` derrubaria o CI por algo que ninguém está tocando. Quando o app voltar, entram os três passos dele.
+
+### 30/07/2026 — P-03 fechado
+
+| | |
+|---|---|
+| **Código** | `apps/api/src/lib/http.ts` (novo), `apps/api/src/server.ts`, `apps/api/test/http.test.ts` (novo, 13 testes) |
+| **Dependência** | `@fastify/helmet` 13.1.0 |
+| **Verificação** | 222 testes na API; cabeçalhos conferidos com a API no ar; boot em produção sem `CORS_ORIGIN` derrubado |
+
+Helmet, redação de log e CORS que falha no boot em produção em vez de liberar localhost. O que não estava no relatório: `GET /integracao/pacientes/buscar?q=…` é o typeahead da recepção, e **cada busca gravava nome ou CPF em claro no log da API** — mesmo dado que a Parte 3 quer criptografar no banco. Detalhe em P-03.
 
 > **Nota de processo.** Não existe `supabase_migrations.schema_migrations` neste projeto — o schema nunca passou pelo CLI, foi tudo aplicado à mão. Os arquivos em `supabase/migrations/` são o registro versionado do que foi aplicado, não algo que uma ferramenta rastreia. Criar essa tabela agora faria um `db push` futuro achar que só as migrations novas estão aplicadas e tentar rodar as 8 antigas do zero. Ver P-04.
 
@@ -813,7 +823,12 @@ O resto era import não usado, `PADDING_FOLHA` morto, escape `\/` desnecessário
 
 ---
 
-### P-03 — Cabeçalhos de segurança e redação de log — **BAIXO**
+### P-03 — Cabeçalhos de segurança e redação de log — ~~**BAIXO**~~ **CORRIGIDO**
+
+> **STATUS 30/07/2026:** os três itens aplicados — `@fastify/helmet`, redação no
+> logger e CORS que falha no boot em produção. Ver "Verificação pós-correção" no
+> fim da seção; a redação da query saiu **maior** do que o previsto aqui, por
+> causa de um vazamento que o relatório original não tinha notado.
 
 - **Sem `@fastify/helmet`.** Para uma API só-JSON o impacto é menor que num app que serve HTML, mas `X-Content-Type-Options: nosniff`, `Strict-Transport-Security` e `X-Frame-Options` são baratos e evitam classes inteiras de problema (sniffing de resposta, clickjacking se algum endpoint um dia servir HTML).
   ```bash
@@ -835,6 +850,45 @@ O resto era import não usado, `PADDING_FOLHA` morto, escape `\/` desnecessário
   ```
 
 - **Fallback de CORS.** Sem `CORS_ORIGIN`, a API libera qualquer porta de `localhost`/`127.0.0.1`. O `.env.example` já avisa que a variável é obrigatória em produção. Vale transformar o aviso em falha explícita no boot quando `NODE_ENV=production` — configuração de segurança que depende de lembrança é configuração que um dia falta.
+
+#### Verificação pós-correção (30/07/2026)
+
+| Item | Como ficou |
+|---|---|
+| Cabeçalhos | `@fastify/helmet` 13.1.0, `contentSecurityPolicy: false` (API só-JSON) |
+| Logger | `redact` + serializer próprio de `req` que redige a query |
+| CORS | `resolverCorsOrigin()` lança em produção quando `CORS_ORIGIN` falta ou está vazia |
+| Onde | `apps/api/src/lib/http.ts` (novo), `apps/api/src/server.ts`, `apps/api/test/http.test.ts` (novo, 13 testes) |
+| Verificação | 222 testes na API; API subida de verdade e cabeçalhos conferidos na resposta; boot em `NODE_ENV=production` sem `CORS_ORIGIN` derrubado |
+
+**O achado que o relatório original não tinha visto.** A recomendação acima falava em "query strings entram no log" de forma genérica. Na prática existe um caso concreto e sério: `GET /integracao/pacientes/buscar?q=…` é o **typeahead da recepção**, e o `q` recebe nome ou CPF do paciente. O serializer padrão do Fastify grava a `url` inteira, então **cada busca no balcão escrevia um identificador de paciente em claro no log da API** — o mesmo dado que a Parte 3 quer criptografar no banco. `redact` sozinho não resolveria: os caminhos do pino não alcançam parte de uma string.
+
+A correção foi um serializer de `req` que redige o **valor** dos params fora de uma lista curta (`download`, `refresh`, `escopo`, `tipo`, `agendamentoId`). A chave continua visível — dá para ver que houve uma busca e depurar —, o valor não. A lista é fail-closed: param novo nasce redigido sem ninguém precisar lembrar.
+
+Confirmado com a API rodando:
+
+```
+"url":"/api/v1/integracao/pacientes/buscar?q=<redigido>"
+```
+
+Resposta real do `/ping`, com o servidor no ar:
+
+```
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+X-Content-Type-Options: nosniff
+X-Frame-Options: SAMEORIGIN
+(sem Content-Security-Policy — desligado de propósito)
+```
+
+E o boot em produção sem a variável:
+
+```
+Error: CORS_ORIGIN é obrigatória em produção: defina o(s) domínio(s) do frontend separados por vírgula.
+```
+
+A lógica ficou em `lib/http.ts`, e não no `server.ts`, por um motivo prático: o `server.ts` se auto-inicia (`void start()`) e não dá para importar num teste. Sem essa extração, "falha no boot em produção" seria uma afirmação sem prova — é justamente o tipo de caminho que ninguém exercita até o dia do deploy.
+
+**Fora do escopo desta correção:** a redação cobre o log da API. O CPF continua chegando em claro no `q` da requisição — ou seja, no log do proxy/CDN que estiver na frente, se houver. Quem for colocar um na frente precisa configurar a redação lá também.
 
 ---
 
@@ -1040,7 +1094,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 14 | Trocar o typeahead da recepção de nome para CPF (blind index) | §3.4 |
 | 15 | Estender a trilha append-only aos pontos de leitura de dado sensível | S-08 |
 | 16 | Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta | S-09 |
-| 17 | `@fastify/helmet` + `redact` no logger + CORS obrigatório em produção | P-03 |
+| 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | Índices faltantes + `(select auth.uid())` nas 5 policies | S-11 |
 | 19 | Migrar `anon key` e service role para o formato de chave revogável | S-10 |
 | 20 | `search_path = ''` nas funções; unificar `set_updated_at`/`set_atualizado_em` | S-10 / P-05 |

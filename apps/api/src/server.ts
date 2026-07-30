@@ -3,6 +3,8 @@ import Fastify from 'fastify'
 import sensible from '@fastify/sensible'
 import rateLimit from '@fastify/rate-limit'
 import cors from '@fastify/cors'
+import helmet from '@fastify/helmet'
+import { CAMPOS_REDIGIDOS, resolverCorsOrigin, serializarRequest } from './lib/http.js'
 import { cadastroRoutes } from './routes/cadastro.js'
 import { pacientesRoutes } from './routes/pacientes.js'
 import { agendamentosRoutes } from './routes/agendamentos.js'
@@ -13,25 +15,27 @@ import { documentosRoutes } from './routes/documentos.js'
 import { integracaoRoutes } from './routes/integracao.js'
 import { webhooksRoutes } from './routes/webhooks.js'
 
-const server = Fastify({ logger: { level: 'info' } })
+// O dado que trafega aqui é de saúde: a query da busca da recepção carrega nome
+// e CPF, então o log passa por `serializarRequest`/`redact` (ver lib/http.ts).
+const server = Fastify({
+  logger: {
+    level: process.env.LOG_LEVEL ?? 'info',
+    redact: CAMPOS_REDIGIDOS,
+    serializers: { req: serializarRequest },
+  },
+})
 
 server.register(sensible)
-// Origens do frontend permitidas. Em produção, defina CORS_ORIGIN com o(s) domínio(s)
-// separados por vírgula. Uma entrada entre barras (ex.: /^https:\/\/.*\.vercel\.app$/)
-// vira RegExp — útil p/ os previews da Vercel, cujo subdomínio muda a cada deploy.
-// Em dev (sem CORS_ORIGIN), libera qualquer porta de localhost/127.0.0.1 — o Vite troca
-// de porta (5173 → 5174 → …) quando a anterior está ocupada.
-const corsOrigin = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',')
-      .map((o) => o.trim())
-      .filter(Boolean)
-      .map((o) =>
-        o.startsWith('/') && o.endsWith('/') ? new RegExp(o.slice(1, -1)) : o,
-      )
-  : [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/]
 
+// Cabeçalhos de segurança. `contentSecurityPolicy: false` porque a API só
+// devolve JSON — CSP aqui não protege nada e ainda atrapalharia o dia em que
+// algum endpoint servir HTML de verdade. O que importa é `nosniff`, HSTS e
+// `X-Frame-Options`.
+server.register(helmet, { contentSecurityPolicy: false })
+
+// Em produção, CORS_ORIGIN é obrigatória — sem ela o boot falha (ver lib/http.ts).
 server.register(cors, {
-  origin: corsOrigin,
+  origin: resolverCorsOrigin(),
   credentials: true,
   // O default do @fastify/cors é 'GET,HEAD,POST' — sem isto o preflight barra
   // PUT/PATCH/DELETE (ex.: PUT /pacientes/me na edição de perfil).
