@@ -66,3 +66,29 @@ export const criarAgendamentoRecepcaoSchema = z
   })
 
 export type CriarAgendamentoRecepcaoInput = z.infer<typeof criarAgendamentoRecepcaoSchema>
+
+// Param do POST /integracao/pacientes/:pacienteId/correcao-identidade.
+export const correcaoIdentidadeParamSchema = z.object({
+  pacienteId: z.string().uuid(),
+})
+
+// Body da correção de identidade. Reusa as MESMAS validações do cadastro pelo
+// balcão (dígitos verificadores do CPF, data real) — um CPF que não passaria no
+// cadastro também não pode entrar por correção.
+//
+// motivo/autorizadoPor/documentoConferido não são burocracia: é o que a recepção
+// conferiu no balcão virando trilha permanente. Sem eles a operação não tem como
+// ser auditada depois, e uma troca de CPF é exatamente o que se audita primeiro
+// quando algo dá errado. Os limites de tamanho evitam despejo de texto na trilha.
+export const corrigirIdentidadeSchema = z.object({
+  cpf: cpfDigitos,
+  dataNascimento: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida (use YYYY-MM-DD)')
+    .refine(nascimentoValido, 'Data de nascimento inválida'),
+  motivo: z.string().trim().min(5, 'Descreva o motivo da correção').max(500),
+  autorizadoPor: z.string().trim().min(1, 'Identifique quem autorizou').max(120),
+  documentoConferido: z.string().trim().min(1, 'Informe o documento conferido').max(60),
+})
+
+export type CorrigirIdentidadeInput = z.infer<typeof corrigirIdentidadeSchema>

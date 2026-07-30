@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type {
   BuscarPacientesResposta,
+  CorrigirIdentidadeResposta,
   CriarAgendamentoRecepcaoResposta,
   DocumentoFlowLab,
   PacienteBuscaItem,
@@ -18,6 +19,8 @@ import {
 } from '../schemas/documento.js'
 import {
   buscarPacientesQuerySchema,
+  correcaoIdentidadeParamSchema,
+  corrigirIdentidadeSchema,
   criarAgendamentoRecepcaoSchema,
 } from '../schemas/recepcao.js'
 import type { DocumentoRow } from '../lib/mappers.js'
@@ -124,6 +127,103 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       }
 
       return { pacientes: (data ?? []).map((r) => toPacienteBuscaItem(r as PacienteBuscaRow)) }
+    },
+  )
+
+  // POST /integracao/pacientes/:pacienteId/correcao-identidade
+  //
+  // Corrige CPF/data de nascimento de um paciente que JÁ vinculou conta. Depois do
+  // claim os dois campos são imutáveis no banco (trigger de 20260730120000), e a
+  // ÚNICA saída é a RPC chamada aqui, que exige e registra a autorização.
+  //
+  // Por que só a recepção pode: nenhum dado que o sistema guarda prova que o CPF
+  // novo pertence a quem pede — CPF antigo, nascimento, e-mail, telefone e até
+  // código por SMS são todos coisas que o dono da conta já tem. Quem prova é o
+  // operador olhando o documento físico, a mesma conferência do cadastro no
+  // balcão. Por isso esta rota vive no canal de API key e não no portal.
+  //
+  // A RPC também descarta o cache de laudos do paciente: aquelas linhas foram
+  // buscadas nos LIS com o CPF ANTIGO.
+  app.post(
+    '/integracao/pacientes/:pacienteId/correcao-identidade',
+    {
+      preHandler: autenticarFlowlab, // API key, NÃO JWT de paciente
+      // Teto baixo de propósito: é operação de exceção, feita a pedido no balcão.
+      // Um pico aqui é sinal de abuso, não de uso.
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    },
+    async (request): Promise<CorrigirIdentidadeResposta> => {
+      const paramParsed = correcaoIdentidadeParamSchema.safeParse(request.params)
+      if (!paramParsed.success) {
+        throw app.httpErrors.badRequest('pacienteId inválido')
+      }
+      const bodyParsed = corrigirIdentidadeSchema.safeParse(request.body)
+      if (!bodyParsed.success) {
+        throw app.httpErrors.badRequest(bodyParsed.error.message)
+      }
+      const { cpf, dataNascimento, motivo, autorizadoPor, documentoConferido } = bodyParsed.data
+
+      const { data, error } = await supabase.rpc('corrigir_identidade_paciente', {
+        p_paciente_id: paramParsed.data.pacienteId,
+        p_cpf_novo: cpf,
+        p_nascimento_novo: dataNascimento,
+        p_motivo: motivo,
+        p_autorizado_por: autorizadoPor,
+        p_documento_conferido: documentoConferido,
+      })
+
+      if (error) {
+        // A RPC classifica as recusas por SQLSTATE para não virar 500 genérico:
+        //   22023 = entrada inválida (CPF malformado, nada a corrigir, sem conta)
+        //   P0002 = paciente inexistente
+        //   23505 = CPF já é de outro cadastro → é caso de FUSÃO, não de correção
+        //   42501 = o trigger recusou (não deve acontecer por este caminho)
+        const mapa: Record<string, (m: string) => Error> = {
+          '22023': (m) => app.httpErrors.badRequest(m),
+          P0002: () => app.httpErrors.notFound('Paciente não encontrado'),
+          '23505': (m) => app.httpErrors.conflict(m),
+        }
+        const construir = mapa[error.code ?? '']
+        if (construir) {
+          throw construir(error.message)
+        }
+        request.log.error(
+          { err: error, pacienteId: paramParsed.data.pacienteId },
+          'Falha ao corrigir identidade do paciente',
+        )
+        throw app.httpErrors.internalServerError('Falha ao corrigir identidade')
+      }
+
+      const resultado = data as {
+        correcaoId: string
+        pacienteId: string
+        cpfAnterior: string
+        laudosInvalidados: number
+        corrigidoEm: string
+      }
+
+      // Trilha permanente é a da tabela; este log é o eco operacional. Sem CPF
+      // (nem o antigo, nem o novo) — quem precisa do valor consulta a trilha.
+      request.log.info(
+        {
+          correcaoId: resultado.correcaoId,
+          pacienteId: resultado.pacienteId,
+          autorizadoPor,
+          documentoConferido,
+          laudosInvalidados: resultado.laudosInvalidados,
+        },
+        'Identidade de paciente corrigida pela recepção',
+      )
+
+      return {
+        correcaoId: resultado.correcaoId,
+        pacienteId: resultado.pacienteId,
+        // Mascarado pelo mesmo motivo do typeahead: confirma para o operador que a
+        // linha certa foi alterada sem devolver o documento inteiro pelo canal.
+        cpfAnteriorMascarado: mascararCpf(resultado.cpfAnterior),
+        laudosInvalidados: resultado.laudosInvalidados,
+        corrigidoEm: resultado.corrigidoEm,
+      }
     },
   )
 

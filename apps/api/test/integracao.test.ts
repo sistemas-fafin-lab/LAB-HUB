@@ -17,6 +17,7 @@ import { integracaoRoutes } from '../src/routes/integracao.js'
 import {
   buildApp,
   createSupabaseMock,
+  type RpcHandler,
   type StorageHandler,
   type SupaHandler,
   type SupaResult,
@@ -381,5 +382,210 @@ describe('POST /integracao/agendamentos/:labhubId/documentos', () => {
     expect(rm).toBeDefined()
     // Removeu exatamente o path que subiu.
     expect(rm?.paths[0]).toBe(up?.paths[0])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POST /integracao/pacientes/:pacienteId/correcao-identidade
+//
+// Depois do claim, CPF e nascimento são imutáveis no banco (trigger da migration
+// 20260730120000). Esta rota é a única saída, e o que ela precisa garantir é:
+// só a recepção chega nela, entrada inválida nem toca o banco, e as recusas da
+// RPC viram o status HTTP certo em vez de 500 genérico.
+// ---------------------------------------------------------------------------
+
+const PAC_ID = '55555555-5555-5555-5555-555555555555'
+const CPF_NOVO = '52998224725' // dígitos verificadores válidos
+const URL_CORRECAO = `/integracao/pacientes/${PAC_ID}/correcao-identidade`
+
+const CORPO_VALIDO = {
+  cpf: '529.982.247-25', // formatado de propósito: a API normaliza
+  dataNascimento: '1990-05-05',
+  motivo: 'CPF digitado errado no cadastro do balcão',
+  autorizadoPor: 'recepcao.ana',
+  documentoConferido: 'RG',
+}
+
+function setupCorrecao(rpc?: RpcHandler) {
+  const mock = createSupabaseMock({
+    handler: supaHandler(),
+    ...(rpc ? { rpc } : {}),
+  })
+  h.setSb(mock.client)
+  return mock
+}
+
+const RPC_OK: RpcHandler = () => ({
+  data: {
+    correcaoId: '66666666-6666-6666-6666-666666666666',
+    pacienteId: PAC_ID,
+    cpfAnterior: '12345678909',
+    nascimentoAnterior: '1990-05-05',
+    laudosInvalidados: 3,
+    corrigidoEm: '2026-07-30T12:00:00.000Z',
+  },
+  error: null,
+})
+
+describe('POST /integracao/pacientes/:pacienteId/correcao-identidade', () => {
+  it('401 sem x-api-key — não é rota de portal', async () => {
+    setupCorrecao()
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({ method: 'POST', url: URL_CORRECAO, payload: CORPO_VALIDO })
+
+    expect(res.statusCode).toBe(401)
+  })
+
+  // O JWT do paciente não abre esta rota: quem autoriza a troca é a recepção,
+  // que conferiu o documento físico — não o dono da conta.
+  it('401 com JWT de paciente no lugar da chave', async () => {
+    const mock = setupCorrecao()
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: { authorization: 'Bearer jwt-de-paciente' },
+      payload: CORPO_VALIDO,
+    })
+
+    expect(res.statusCode).toBe(401)
+    expect(mock.rpcCalls).toHaveLength(0)
+  })
+
+  it('normaliza o CPF e repassa os campos de auditoria para a RPC', async () => {
+    const mock = setupCorrecao(RPC_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: CORPO_VALIDO,
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(mock.rpcCalls).toHaveLength(1)
+    expect(mock.rpcCalls[0]?.fn).toBe('corrigir_identidade_paciente')
+    expect(mock.rpcCalls[0]?.args).toEqual({
+      p_paciente_id: PAC_ID,
+      p_cpf_novo: CPF_NOVO, // máscara removida
+      p_nascimento_novo: '1990-05-05',
+      p_motivo: 'CPF digitado errado no cadastro do balcão',
+      p_autorizado_por: 'recepcao.ana',
+      p_documento_conferido: 'RG',
+    })
+  })
+
+  // O canal devolve confirmação, não PII: o operador só precisa reconhecer que a
+  // linha certa mudou. Mesma regra do typeahead.
+  it('devolve o CPF anterior mascarado e a contagem de laudos invalidados', async () => {
+    setupCorrecao(RPC_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: CORPO_VALIDO,
+    })
+
+    const body = res.json()
+    expect(body.cpfAnteriorMascarado).toBe('•••.•••.•••-09')
+    expect(body.laudosInvalidados).toBe(3)
+    expect(body.correcaoId).toBe('66666666-6666-6666-6666-666666666666')
+    // Nem o CPF antigo nem o novo saem inteiros na resposta.
+    expect(res.body).not.toContain('12345678909')
+    expect(res.body).not.toContain(CPF_NOVO)
+  })
+
+  it('400 e nenhuma ida ao banco quando o CPF tem dígito verificador errado', async () => {
+    const mock = setupCorrecao(RPC_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: { ...CORPO_VALIDO, cpf: '52998224726' },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(mock.rpcCalls).toHaveLength(0)
+  })
+
+  // Sem motivo/autorizador a trilha não serve para auditar nada, então a rota
+  // recusa antes de tocar o banco.
+  it.each([
+    ['motivo vazio', { motivo: '' }],
+    ['motivo curto demais', { motivo: 'erro' }],
+    ['sem quem autorizou', { autorizadoPor: '   ' }],
+    ['sem documento conferido', { documentoConferido: '' }],
+    ['data inexistente', { dataNascimento: '1990-02-30' }],
+  ])('400 com %s', async (_nome, over) => {
+    const mock = setupCorrecao(RPC_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: { ...CORPO_VALIDO, ...over },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(mock.rpcCalls).toHaveLength(0)
+  })
+
+  it('400 quando o pacienteId da URL não é uuid', async () => {
+    const mock = setupCorrecao(RPC_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integracao/pacientes/nao-e-uuid/correcao-identidade',
+      headers: CHAVE,
+      payload: CORPO_VALIDO,
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(mock.rpcCalls).toHaveLength(0)
+  })
+
+  // As recusas da RPC vêm classificadas por SQLSTATE justamente para não virarem
+  // 500 — a recepção precisa saber a diferença entre "não achei" e "é fusão".
+  it.each([
+    ['23505', 409, 'CPF já pertence a outro cadastro'],
+    ['P0002', 404, 'Paciente não encontrado'],
+    ['22023', 400, 'Nada a corrigir: CPF e data de nascimento já são estes'],
+  ])('SQLSTATE %s vira HTTP %i', async (code, status) => {
+    setupCorrecao(() => ({ data: null, error: { code, message: 'msg do banco' } }))
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: CORPO_VALIDO,
+    })
+
+    expect(res.statusCode).toBe(status)
+  })
+
+  it('500 em erro de banco não classificado', async () => {
+    setupCorrecao(() => ({ data: null, error: { code: '08006', message: 'conexão caiu' } }))
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: CORPO_VALIDO,
+    })
+
+    expect(res.statusCode).toBe(500)
+    // Mensagem interna do banco não vaza para o cliente.
+    expect(res.body).not.toContain('conexão caiu')
   })
 })

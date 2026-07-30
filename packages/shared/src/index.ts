@@ -243,6 +243,32 @@ export interface CriarAgendamentoRecepcaoResposta {
   pacienteCriado: boolean // true = fantasma recém-criado; false = reusou existente
 }
 
+// Body do POST /integracao/pacientes/:pacienteId/correcao-identidade.
+//
+// Corrige CPF/data de nascimento de um paciente que JÁ vinculou conta — depois
+// disso os dois campos são imutáveis (ver a migration 20260730120000). Só a
+// recepção pode autorizar, e só depois de conferir o documento físico: nenhum
+// dado que o sistema guarda prova que o CPF novo é de quem está pedindo.
+// `autorizadoPor` e `documentoConferido` viram trilha de auditoria permanente.
+export interface CorrigirIdentidadePayload {
+  cpf: string // pode vir formatado; a API normaliza p/ 11 dígitos
+  dataNascimento: string // YYYY-MM-DD
+  motivo: string
+  autorizadoPor: string // operador da recepção (login/id no FlowLab)
+  documentoConferido: string // 'RG' | 'CNH' | ...
+}
+
+// Resposta da correção. `laudosInvalidados` é a contagem de linhas do cache dos
+// LIS que foram descartadas: elas tinham sido buscadas com o CPF ANTIGO, então
+// manter seria exibir o histórico de outra pessoa. O próximo refresh repovoa.
+export interface CorrigirIdentidadeResposta {
+  correcaoId: string
+  pacienteId: string
+  cpfAnteriorMascarado: string
+  laudosInvalidados: number
+  corrigidoEm: string
+}
+
 // Payload recebido do FlowLab via webhook de resultado (D1)
 export interface ResultadoWebhookPayload {
   agendamentoLabhubId: string

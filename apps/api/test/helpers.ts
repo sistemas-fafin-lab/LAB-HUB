@@ -31,6 +31,14 @@ export interface SupaResult {
 // Roteia cada query pela tabela/operação/filtros, devolvendo o resultado do cenário.
 export type SupaHandler = (call: SupaCall) => SupaResult
 
+// Chamada a uma função do banco via supabase.rpc(). Fica separada das SupaCall
+// porque não tem tabela nem filtros — é uma chamada de função com argumentos.
+export interface RpcCall {
+  fn: string
+  args: Record<string, unknown>
+}
+export type RpcHandler = (call: RpcCall) => SupaResult
+
 // Chamada ao Storage registrada pelo mock (upload/remove/signed URLs).
 export interface StorageCall {
   bucket: string
@@ -48,9 +56,21 @@ export function createSupabaseMock(opts: {
   handler: SupaHandler
   getUser?: SupaResult
   storage?: StorageHandler
+  rpc?: RpcHandler
 }) {
   const calls: SupaCall[] = []
   const storageCalls: StorageCall[] = []
+  const rpcCalls: RpcCall[] = []
+
+  // Default: a função existe e não devolve nada. Os testes sobrescrevem via
+  // opts.rpc p/ exercitar sucesso com payload e as recusas por SQLSTATE.
+  const rpcHandler: RpcHandler = opts.rpc ?? (() => ({ data: null, error: null }))
+
+  function rpc(fn: string, args?: Record<string, unknown>) {
+    const call: RpcCall = { fn, args: args ?? {} }
+    rpcCalls.push(call)
+    return Promise.resolve(rpcHandler(call))
+  }
   const getUser = vi.fn(async () =>
     opts.getUser ?? { data: { user: { id: 'auth-user-1' } }, error: null },
   )
@@ -114,8 +134,14 @@ export function createSupabaseMock(opts: {
   }
 
   return {
-    client: { auth: { getUser }, from: vi.fn(from), storage: { from: vi.fn(storageFrom) } },
+    client: {
+      auth: { getUser },
+      from: vi.fn(from),
+      rpc: vi.fn(rpc),
+      storage: { from: vi.fn(storageFrom) },
+    },
     calls,
+    rpcCalls,
     storageCalls,
     getUser,
   }
