@@ -5,6 +5,7 @@ import { authenticate } from '../middlewares/auth.js'
 import { criarAgendamentoSchema } from '../schemas/agendamento.js'
 import { toAgendamento } from '../lib/mappers.js'
 import { sincronizarAgendamento } from '../lib/agendamentoSync.js'
+import { mensagemZod } from '../lib/validacao.js'
 
 export async function agendamentosRoutes(app: FastifyInstance): Promise<void> {
   // POST /agendamentos — cria o agendamento e sincroniza com o FlowLab.
@@ -17,7 +18,7 @@ export async function agendamentosRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = criarAgendamentoSchema.safeParse(request.body)
       if (!parsed.success) {
-        throw app.httpErrors.badRequest(parsed.error.message)
+        throw app.httpErrors.badRequest(mensagemZod(parsed.error))
       }
       const { postoFlowlabId, dataHora } = parsed.data
 

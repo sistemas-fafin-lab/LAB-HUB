@@ -11,6 +11,7 @@ import {
   listarDocumentosSchema,
   uploadDocumentoSchema,
 } from '../schemas/documento.js'
+import { mensagemZod } from '../lib/validacao.js'
 
 const BUCKET = 'documentos'
 
@@ -82,7 +83,7 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
             : undefined,
       })
       if (!parsed.success) {
-        throw app.httpErrors.badRequest(parsed.error.message)
+        throw app.httpErrors.badRequest(mensagemZod(parsed.error))
       }
       const { tipo, agendamentoId } = parsed.data
 
@@ -183,7 +184,7 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
   app.get('/documentos', { preHandler: authenticate }, async (request) => {
     const parsed = listarDocumentosSchema.safeParse(request.query)
     if (!parsed.success) {
-      throw app.httpErrors.badRequest(parsed.error.message)
+      throw app.httpErrors.badRequest(mensagemZod(parsed.error))
     }
     const { escopo, agendamentoId } = parsed.data
 

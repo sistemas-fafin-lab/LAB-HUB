@@ -13,6 +13,7 @@ import { flowlab } from '../lib/flowlab.js'
 import { sincronizarAgendamento, type AgendamentoSyncRow } from '../lib/agendamentoSync.js'
 import { autenticarFlowlab } from '../middlewares/apiKey.js'
 import { detectarTipoArquivo } from '../lib/fileType.js'
+import { mensagemZod } from '../lib/validacao.js'
 import {
   labhubIdParamSchema,
   uploadDocumentoIntegracaoQuerySchema,
@@ -159,7 +160,11 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       }
       const bodyParsed = corrigirIdentidadeSchema.safeParse(request.body)
       if (!bodyParsed.success) {
-        throw app.httpErrors.badRequest(bodyParsed.error.message)
+        // O chamador aqui é o FlowLab, não uma pessoa: quem depura a integração lê
+        // ESTE log, não a tela. A mensagem curta vai na resposta e o detalhe fica
+        // aqui. As issues do zod carregam `path` e `code`, não os valores enviados.
+        request.log.warn({ issues: bodyParsed.error.issues }, 'payload inválido')
+        throw app.httpErrors.badRequest(mensagemZod(bodyParsed.error))
       }
       const { cpf, dataNascimento, motivo, autorizadoPor, documentoConferido } = bodyParsed.data
 
@@ -247,7 +252,11 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = criarAgendamentoRecepcaoSchema.safeParse(request.body)
       if (!parsed.success) {
-        throw app.httpErrors.badRequest(parsed.error.message)
+        // O chamador aqui é o FlowLab, não uma pessoa: quem depura a integração lê
+        // ESTE log, não a tela. A mensagem curta vai na resposta e o detalhe fica
+        // aqui. As issues do zod carregam `path` e `code`, não os valores enviados.
+        request.log.warn({ issues: parsed.error.issues }, 'payload inválido')
+        throw app.httpErrors.badRequest(mensagemZod(parsed.error))
       }
       const { pacienteId, nome, cpf, dataNascimento, telefone, postoFlowlabId, dataHora } =
         parsed.data

@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js'
 import { authenticate } from '../middlewares/auth.js'
 import { toPaciente } from '../lib/mappers.js'
 import { pacienteUpdateSchema } from '../schemas/pacienteUpdate.js'
+import { mensagemZod } from '../lib/validacao.js'
 
 export async function pacientesRoutes(app: FastifyInstance): Promise<void> {
   // GET /pacientes/me — dados do paciente autenticado (derivado do JWT, D4).
@@ -24,7 +25,7 @@ export async function pacientesRoutes(app: FastifyInstance): Promise<void> {
   app.put('/pacientes/me', { preHandler: authenticate }, async (request) => {
     const parsed = pacienteUpdateSchema.safeParse(request.body)
     if (!parsed.success) {
-      throw app.httpErrors.badRequest(parsed.error.message)
+      throw app.httpErrors.badRequest(mensagemZod(parsed.error))
     }
     const { nome, telefone, convenio } = parsed.data
 

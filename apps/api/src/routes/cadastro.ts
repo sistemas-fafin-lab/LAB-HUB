@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 import { cadastroSchema } from '../schemas/cadastro.js'
 import { toPaciente } from '../lib/mappers.js'
+import { mensagemZod } from '../lib/validacao.js'
 
 // Toggle do fluxo de confirmação de e-mail.
 //  - false (default, fase de testes): NÃO dispara e-mail; o front loga direto.
@@ -25,7 +26,7 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = cadastroSchema.safeParse(request.body)
       if (!parsed.success) {
-        throw app.httpErrors.badRequest(parsed.error.message)
+        throw app.httpErrors.badRequest(mensagemZod(parsed.error))
       }
       const { email, password, nome, cpf, sexo, dataNascimento, telefone } = parsed.data
 
@@ -60,8 +61,9 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
       // outra pessoa. `data_nascimento` só é confiável aqui porque o trigger
       // trg_pacientes_identidade a tornou imutável depois do vínculo — sem isso,
       // bastaria reivindicar e corrigir a data em seguida.
-      // Fantasma sem data registrada (coluna nullable) cai na recusa de
-      // propósito: sem o segundo fator não há claim, a recepção resolve.
+      // Fantasma sem data registrada cai na recusa de propósito: sem o segundo
+      // fator não há claim, a recepção resolve. Hoje a coluna é NOT NULL, então
+      // o caso não acontece — o guard fica como defesa se a constraint afrouxar.
       if (existente && existente.data_nascimento !== dataNascimento) {
         throw recusarClaim()
       }

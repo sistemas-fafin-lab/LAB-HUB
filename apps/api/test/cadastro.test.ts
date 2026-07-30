@@ -167,6 +167,23 @@ describe('POST /cadastro — política de senha (S-04)', () => {
     expect(calls).toHaveLength(0)
     expect(createUser).not.toHaveBeenCalled()
   })
+
+  it('devolve a frase da política, e não o JSON do zod', async () => {
+    // O web mostra `body.message` cru na tela; mandar `error.message` do zod
+    // punha um bloco de JSON na frente do paciente.
+    await montar(cenarioFantasma())
+    const res = await cadastrar({ ...CORPO, password: 'senhaminuscula123' })
+
+    expect(res.json().message).toBe('Senha deve ter ao menos uma letra maiúscula')
+    expect(res.payload).not.toContain('invalid_string')
+  })
+
+  it('e-mail inválido também sai em português', async () => {
+    await montar(cenarioFantasma())
+    const res = await cadastrar({ ...CORPO, email: 'nao-e-email' })
+
+    expect(res.json().message).toBe('E-mail inválido')
+  })
 })
 
 describe('POST /cadastro — a recusa não vira oráculo', () => {

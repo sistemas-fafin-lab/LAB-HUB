@@ -5,6 +5,7 @@ import { verifyHmac } from '../lib/hmac.js'
 import { requireEnv } from '../lib/env.js'
 import { resultadoWebhookSchema } from '../schemas/resultado.js'
 import { coletaStatusWebhookSchema } from '../schemas/coletaStatus.js'
+import { mensagemZod } from '../lib/validacao.js'
 
 const WEBHOOK_SECRET = requireEnv('FLOWLAB_WEBHOOK_SECRET')
 
@@ -45,7 +46,11 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
 
     const parsed = resultadoWebhookSchema.safeParse(json)
     if (!parsed.success) {
-      throw app.httpErrors.badRequest(parsed.error.message)
+      // O chamador aqui é o FlowLab, não uma pessoa: quem depura a integração lê
+      // ESTE log, não a tela. A mensagem curta vai na resposta e o detalhe fica
+      // aqui. As issues do zod carregam `path` e `code`, não os valores enviados.
+      request.log.warn({ issues: parsed.error.issues }, 'payload inválido')
+      throw app.httpErrors.badRequest(mensagemZod(parsed.error))
     }
     const payload = parsed.data
 
@@ -117,7 +122,11 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
 
     const parsed = coletaStatusWebhookSchema.safeParse(json)
     if (!parsed.success) {
-      throw app.httpErrors.badRequest(parsed.error.message)
+      // O chamador aqui é o FlowLab, não uma pessoa: quem depura a integração lê
+      // ESTE log, não a tela. A mensagem curta vai na resposta e o detalhe fica
+      // aqui. As issues do zod carregam `path` e `code`, não os valores enviados.
+      request.log.warn({ issues: parsed.error.issues }, 'payload inválido')
+      throw app.httpErrors.badRequest(mensagemZod(parsed.error))
     }
     const payload = parsed.data
     const novoStatus = STATUS_FLOWLAB_LABHUB[payload.status]
