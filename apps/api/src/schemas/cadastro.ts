@@ -4,7 +4,15 @@ import { z } from 'zod'
 // O CPF pode chegar formatado; normalizamos para 11 dígitos antes de validar.
 export const cadastroSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8, 'Senha deve ter ao menos 8 caracteres'),
+  // Espelha a política do Supabase Auth (S-04): mín. 12 + minúscula, maiúscula
+  // e dígito. Sem isso o zod deixa passar e o Auth recusa depois, devolvendo ao
+  // paciente uma mensagem em inglês vinda da biblioteca.
+  password: z
+    .string()
+    .min(12, 'Senha deve ter ao menos 12 caracteres')
+    .regex(/[a-z]/, 'Senha deve ter ao menos uma letra minúscula')
+    .regex(/[A-Z]/, 'Senha deve ter ao menos uma letra maiúscula')
+    .regex(/\d/, 'Senha deve ter ao menos um número'),
   nome: z.string().min(1),
   cpf: z
     .string()

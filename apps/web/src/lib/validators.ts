@@ -44,8 +44,16 @@ export function validarTelefone(tel: string): string | null {
   return digits.length === 10 || digits.length === 11 ? null : 'Telefone inválido'
 }
 
+// Espelha a política do Supabase Auth (S-04): mínimo de 12 e ao menos uma
+// minúscula, uma maiúscula e um dígito. Precisa bater com a do projeto — o Auth
+// recusa depois, e a mensagem dele vem em inglês e sem contexto. Uma regra a
+// mais aqui é melhor que uma recusa opaca lá.
 export function validarSenha(senha: string): string | null {
-  return senha.length >= 8 ? null : 'Senha deve ter ao menos 8 caracteres'
+  if (senha.length < 12) return 'Senha deve ter ao menos 12 caracteres'
+  if (!/[a-z]/.test(senha)) return 'Senha deve ter ao menos uma letra minúscula'
+  if (!/[A-Z]/.test(senha)) return 'Senha deve ter ao menos uma letra maiúscula'
+  if (!/\d/.test(senha)) return 'Senha deve ter ao menos um número'
+  return null
 }
 
 // Espera o formato YYYY-MM-DD emitido pelo <input type="date">.

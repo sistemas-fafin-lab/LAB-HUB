@@ -166,7 +166,7 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onBlur={() => handleBlur('password', password, validarSenha)}
-            placeholder="Senha (mínimo 8 caracteres)"
+            placeholder="Senha (mín. 12, com maiúscula, minúscula e número)"
             autoComplete="new-password"
           />
         )}
