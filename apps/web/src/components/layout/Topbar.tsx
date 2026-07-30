@@ -169,10 +169,17 @@ export function Topbar({ nome, iniciais, dark, onToggleDark, onOpenExam, onNav }
               )}
             </div>
           ) : (
-            /* Paciente autenticado (real) */
-            <div
-              className={`flex items-center gap-2 pl-1 pr-1 sm:pr-2 h-10 rounded-xl border ${
-                dark ? 'border-gray-700 bg-gray-800' : 'border-gray-100 bg-white'
+            /* Paciente autenticado (real) — atalho para o Perfil. É o mesmo
+               destino do item "Perfil" no menu lateral: o avatar no topo é onde
+               se espera clicar para ver a própria conta. */
+            <button
+              onClick={() => onNav('profile')}
+              title="Perfil"
+              aria-label="Abrir perfil"
+              className={`flex items-center gap-2 pl-1 pr-1 sm:pr-2 h-10 rounded-xl border transition active:scale-[0.98] ${
+                dark
+                  ? 'border-gray-700 bg-gray-800 hover:bg-gray-700'
+                  : 'border-gray-100 bg-white hover:bg-slate-50'
               }`}
             >
               <div
@@ -188,7 +195,7 @@ export function Topbar({ nome, iniciais, dark, onToggleDark, onOpenExam, onNav }
                 </div>
                 <div className="text-[10px] text-gray-500">Titular</div>
               </div>
-            </div>
+            </button>
           )}
         </div>
       </div>
