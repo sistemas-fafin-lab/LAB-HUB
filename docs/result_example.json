@@ -1,0 +1,154 @@
+[
+  {
+    "id": "453da785-aff2-4329-97e7-d41b3abe4f24",
+    "crm": "CRM-DF 15750",
+    "date": "27 Jul 2026",
+    "name": "BACTERIOSCOPIA",
+    "unit": "Lab Hub",
+    "doctor": "Dra. Larissa Mendes",
+    "groups": [
+      {
+        "name": "MACROSCOPIA",
+        "panels": [
+          {
+            "ok": true,
+            "ref": "",
+            "name": "",
+            "unit": "",
+            "trend": [],
+            "value": "Número de lâmina 1."
+          }
+        ]
+      },
+      {
+        "name": "MATERIAL",
+        "panels": [
+          {
+            "ok": true,
+            "ref": "",
+            "name": "",
+            "unit": "",
+            "trend": [],
+            "value": "Lâmina de secreção vaginal"
+          }
+        ]
+      },
+      {
+        "name": "MÉTODO",
+        "panels": [
+          {
+            "ok": true,
+            "ref": "",
+            "name": "",
+            "unit": "",
+            "trend": [],
+            "value": "Coloração de Gram"
+          }
+        ]
+      },
+      {
+        "name": "ACHADOS",
+        "panels": [
+          {
+            "ok": true,
+            "ref": "",
+            "name": "",
+            "unit": "",
+            "trend": [],
+            "value": "Presença de bacilos de Gram negativos (Gardnerella vaginalis).\nLeucócitos moderados."
+          }
+        ]
+      },
+      {
+        "name": "ÍNDICE DE NUGENT",
+        "panels": [
+          {
+            "ok": true,
+            "ref": "",
+            "name": "",
+            "unit": "",
+            "trend": [],
+            "value": "7 (Microbiota vaginal alterada - vaginose bacteriana)"
+          }
+        ]
+      },
+      {
+        "name": "CONCLUSÃO",
+        "panels": [
+          {
+            "ok": true,
+            "ref": "",
+            "name": "",
+            "unit": "",
+            "trend": [],
+            "value": "BACTERIOSCOPIA POSITIVA\nPresença de micro-organismos na amostra compatível com vaginose bacteriana."
+          }
+        ]
+      }
+    ],
+    "metodo": "Coloração de Gram",
+    "panels": [
+      {
+        "ok": true,
+        "ref": "",
+        "name": "",
+        "unit": "",
+        "trend": [],
+        "value": "Número de lâmina 1."
+      },
+      {
+        "ok": true,
+        "ref": "",
+        "name": "",
+        "unit": "",
+        "trend": [],
+        "value": "Lâmina de secreção vaginal"
+      },
+      {
+        "ok": true,
+        "ref": "",
+        "name": "",
+        "unit": "",
+        "trend": [],
+        "value": "Coloração de Gram"
+      },
+      {
+        "ok": true,
+        "ref": "",
+        "name": "",
+        "unit": "",
+        "trend": [],
+        "value": "Presença de bacilos de Gram negativos (Gardnerella vaginalis). Leucócitos moderados."
+      },
+      {
+        "ok": true,
+        "ref": "",
+        "name": "",
+        "unit": "",
+        "trend": [],
+        "value": "7 (Microbiota vaginal alterada - vaginose bacteriana)"
+      },
+      {
+        "ok": true,
+        "ref": "",
+        "name": "",
+        "unit": "",
+        "trend": [],
+        "value": "BACTERIOSCOPIA POSITIVA. Presença de micro-organismos na amostra compatível com vaginose bacteriana."
+      }
+    ],
+    "source": "aplis",
+    "status": "ready",
+    "partial": false,
+    "summary": "Bacterioscopia positiva. Presença de micro-organismos.",
+    "category": "Microbiologia",
+    "fullDate": "27 de julho de 2026",
+    "material": "Lâmina de secreção vaginal",
+    "codigo_os": "",
+    "exam_type": "BACTERIOSCOPIA",
+    "codigo_lis": "BACT-001",
+    "data_coleta": "2026-07-27",
+    "data_emissao": "2026-07-27",
+    "data_registro": "2026-07-27"
+  }
+]
