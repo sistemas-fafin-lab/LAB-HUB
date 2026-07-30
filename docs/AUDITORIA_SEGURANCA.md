@@ -16,10 +16,10 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | # | Achado | Severidade |
 |---|---|---|
 | S-01 | `anon`/`authenticated` têm INSERT/UPDATE/DELETE/TRUNCATE em todas as tabelas; paciente pode reescrever o próprio CPF e puxar laudo alheio | ~~**CRÍTICO**~~ **CORRIGIDO 30/07/2026** |
-| P-01 | Reivindicação de paciente-fantasma só por CPF, sem segundo fator de identidade | **ALTO** |
-| S-02 | Sem PITR e sem backup listado — perda de dado clínico é irreversível | **ALTO** |
+| P-01 | Reivindicação de paciente-fantasma só por CPF, sem segundo fator de identidade | ~~**ALTO**~~ **CORRIGIDO 30/07/2026** |
+| S-02 | Sem backup restaurável — perda de dado clínico é irreversível | **ALTO** |
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** |
-| S-04 | Política de senha fraca (mín. 6, sem HIBP), sessão sem expiração, troca de senha sem reautenticação, MFA não exigido | **ALTO** |
+| S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 30/07** |
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | **ALTO** |
 | S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → ver Parte 3 |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | **MÉDIO** |
@@ -30,7 +30,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | **BAIXO** |
 | S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | **PERF** |
 
-**Ordem de ataque recomendada:** ~~S-01~~ (feito) → **P-01** → S-02/S-03/S-04/S-05 → criptografia (Parte 3) → o resto.
+**Ordem de ataque recomendada:** ~~S-01~~ (feito) → ~~P-01~~ (feito) → **S-02/S-03/S-04/S-05** → criptografia (Parte 3) → o resto.
 
 > Nota importante sobre a prioridade: **criptografar as colunas não resolve S-01 nem P-01.** Nos dois casos o atacante está autenticado e autorizado — a aplicação decifra o dado para ele de bom grado. Criptografia protege contra vazamento de *dump*, backup, réplica e acesso indevido ao painel. Controle de acesso protege contra o paciente do lado. São problemas diferentes e o segundo é o mais urgente.
 
@@ -61,7 +61,7 @@ O que mudou, em uma linha cada:
 - `revoke ... from anon, authenticated` **não** remove o grant ao pseudo-role `PUBLIC`, que os dois herdam. Sem um `revoke ... from public` à parte, as funções continuariam executáveis. Detalhado em S-01.
 - Existem **duas** entradas em `pg_default_acl` para o schema `public` (grantors `postgres` e `supabase_admin`); só a primeira é alterável por nós.
 
-**O que isso NÃO resolveu:** P-01 continua aberto — quem souber o CPF de um paciente-fantasma ainda assume a linha dele no cadastro. O trigger tornou `data_nascimento` confiável (imutável pós-claim), que era a peça que faltava para a correção do P-01 valer alguma coisa. É o próximo da fila.
+**O que isso NÃO resolveu na hora:** P-01 — quem soubesse o CPF de um paciente-fantasma ainda assumia a linha dele no cadastro. O trigger tornou `data_nascimento` confiável (imutável pós-claim), que era a peça que faltava para a correção do P-01 valer alguma coisa; ~~é o próximo da fila~~ **fechado no mesmo dia**, ver abaixo.
 
 **Pendência conhecida:** ~~falta a tela do lado do FlowLab que consome a rota~~ — **escrita em 30/07/2026**, ver abaixo. O contrato está em `packages/shared` (`CorrigirIdentidadePayload` / `CorrigirIdentidadeResposta`).
 
@@ -81,7 +81,47 @@ Três decisões que valem registro:
 2. **Key de permissão própria, não `canManageColetas`.** Quem faz check-in não precisa poder destravar a identidade que o S-01 acabou de trancar. Como a tela precisa do typeahead, `GET /integracao/pacientes/buscar` passou a aceitar `canManageColetas` **ou** `canCorrigirIdentidade` no FlowLab.
 3. **A tela não tenta adivinhar "nada a corrigir".** O CPF atual chega mascarado (2 dígitos), então comparar daqui daria falso positivo; quem decide é o `22023` da RPC. O nascimento, esse sim, é pré-preenchido com o atual — o caso comum é corrigir só o CPF, e a rota exige os dois campos.
 
-Falta para valer em produção: aplicar a migration de permissão no FlowLab e testar a ponta a ponta contra esta API.
+~~Falta para valer em produção: aplicar a migration de permissão no FlowLab e testar a ponta a ponta contra esta API.~~
+
+> **Fechado em 30/07/2026.** A migration de permissão foi aplicada no Supabase de
+> teste do FlowLab (`Administrador` foi de 36 para 37 permissões) e o fluxo rodou
+> ponta a ponta: a trilha `correcoes_identidade` tem a primeira linha real, com
+> `autorizado_por` vindo da **sessão** do FlowLab (`nome <email>`) e não do corpo
+> da requisição, como projetado.
+>
+> Duas ressalvas que continuam de pé:
+> - O Supabase de **produção** do FlowLab está em outra conta e não foi
+>   verificado daqui. A migration precisa ser aplicada lá também.
+> - A migration anterior, `20260729120000_perm_add_stock_depart.sql`, segue **não
+>   aplicada** (`Administrador` sem `canAddStockDepart`). Não tem relação com este
+>   trabalho, mas sugere que migrations de permissão do FlowLab não estão sendo
+>   aplicadas por rotina — vale conferir se há outras atrás.
+
+### 30/07/2026 — P-02 e S-04 (parcial)
+
+| | |
+|---|---|
+| **P-02** | `npm audit fix` em `apps/api` e `apps/web` → **0 vulnerabilidades** nos dois. `fast-uri` 3.1.2→3.1.4, `find-my-way` 9.6.0→9.7.0, `postcss` 8.5.15→8.5.25, `nanoid` 3.3.15→3.3.16 |
+| **S-04** | senha mín. 12 + classes de caracteres + reautenticação na troca de senha, aplicados pela Management API; zod, UI e testes alinhados |
+| **Verificação** | 209 testes na API, 52 no web, type-check limpo em `api` e `web`, `vite build` passando |
+
+Na **raiz** o `npm audit fix` foi tentado e **desfeito**: ele subiu o toolchain do Expo e o total foi de 13 para 27 vulnerabilidades (mais cópias aninhadas de `brace-expansion`). O lockfile foi restaurado preservando os fixes de `api`/`web`. As 13 restantes são toolchain de build do protótipo mobile e do istanbul — nenhuma roda em produção, e o único caminho restante é `--force`, que rebaixa para `expo@46`.
+
+**S-02 adiado por decisão do usuário.** Continua sendo o item mais grave em aberto. O caminho é `pg_dump` cifrado agendado no VPS, com destino fora do Supabase e teste de restauração.
+
+**S-03 pulado por decisão do usuário.** Vale registrar que ele **está disponível** neste plano (`network-restrictions` responde `entitlement: allowed`) e que seria barato: a API fala com o Supabase só por HTTPS/PostgREST — não há `pg` nas dependências nem `DATABASE_URL` —, então restringir `dbAllowedCidrs` não afeta a aplicação, só conexão Postgres direta.
+
+### 30/07/2026 — P-01 fechado
+
+| | |
+|---|---|
+| **Código** | `apps/api/src/routes/cadastro.ts`, `apps/api/test/cadastro.test.ts` (novo, 10 testes) |
+| **Banco** | nenhuma mudança — a peça de banco necessária (trigger `trg_pacientes_identidade`) já tinha vindo com o S-01 |
+| **Verificação** | 205 testes na API passando; type-check limpo |
+
+O claim do paciente-fantasma passou a exigir **CPF e data de nascimento**, conferidos contra o que a recepção registrou, e parou de sobrescrever a data no UPDATE. As quatro recusas do cadastro foram unificadas numa resposta só, para que errar o palpite não revele que aquele CPF está na base e é reivindicável. Detalhe e tabela de desfechos em P-01.
+
+Com isso fecham os dois achados que estavam acima de tudo na ordem de ataque. O topo da fila agora é infraestrutura: S-02 (backup), S-03 (banco aberto), S-04 (autenticação) e S-05 (e-mail).
 
 > **Nota de processo.** Não existe `supabase_migrations.schema_migrations` neste projeto — o schema nunca passou pelo CLI, foi tudo aplicado à mão. Os arquivos em `supabase/migrations/` são o registro versionado do que foi aplicado, não algo que uma ferramenta rastreia. Criar essa tabela agora faria um `db push` futuro achar que só as migrations novas estão aplicadas e tentar rodar as 8 antigas do zero. Ver P-04.
 
@@ -349,17 +389,17 @@ Testes: 195 na API (+15 na nova rota) e 52 no web, todos passando.
 
 ---
 
-### S-02 — Sem PITR e sem backup — **ALTO**
+### S-02 — Sem backup restaurável — **ALTO**
 
 ```json
 {"pitr_enabled": false, "walg_enabled": true, "backups": []}
 ```
 
-`walg_enabled` significa que o Supabase faz o backup físico gerenciado do plano, mas **a lista de backups restauráveis está vazia** e não há Point-in-Time Recovery. Traduzindo o risco concreto: o `delete` em massa descrito em S-01, um `on delete cascade` disparado sem querer, ou um bug numa migration **não têm caminho de volta**. Não existe "restaurar para 10 minutos atrás".
+`walg_enabled` significa que o Supabase faz o backup físico do plano, mas **a lista de backups restauráveis está vazia**. Traduzindo o risco concreto: o `delete` em massa descrito em S-01, um `on delete cascade` disparado sem querer, ou um bug numa migration **não têm caminho de volta**.
 
 Para dado clínico isso é grave em duas frentes ao mesmo tempo: perda de registro de saúde do paciente, e descumprimento do princípio de disponibilidade/integridade da LGPD (art. 6º, VII).
 
-**Correção:** habilitar PITR (exige plano Pro+) e, independentemente disso, um `pg_dump` cifrado agendado para storage externo, com **teste de restauração documentado**. Backup que nunca foi restaurado não é backup, é esperança.
+**Correção:** `pg_dump` cifrado agendado para storage externo, com **teste de restauração documentado**. Backup que nunca foi restaurado não é backup, é esperança. Três pontos decidem se isso vale como backup: cifrar antes de sair da máquina (é CPF e laudo), guardar fora do Supabase (senão um incidente leva os dois) e restaurar de verdade pelo menos uma vez.
 
 ---
 
@@ -382,21 +422,22 @@ Duas coisas separadas:
 
 ---
 
-### S-04 — Autenticação frouxa para o tipo de dado — **ALTO**
+### S-04 — Autenticação frouxa para o tipo de dado — ~~**ALTO**~~ **PARCIALMENTE CORRIGIDO**
+
+> **STATUS 30/07/2026:** senha mínima, classes de caracteres e reautenticação na
+> troca de senha aplicadas, com o zod e a UI alinhados. Seguem abertos a
+> notificação de troca de senha ao titular, a exigência de MFA em ações sensíveis
+> e a expiração de sessão. Ver "Verificação pós-correção" no fim da seção.
 
 | Configuração | Valor atual | Problema |
 |---|---|---|
 | `password_min_length` | **6** | 6 caracteres é quebrável por força bruta offline |
 | `password_required_characters` | `null` | `123456` é uma senha válida hoje |
-| `password_hibp_enabled` | **false** | senha vazada em breach conhecida é aceita |
-| `security_captcha_enabled` | **false** | login e signup sem proteção contra automação |
 | `security_update_password_require_reauthentication` | **false** | **quem rouba a sessão troca a senha sem saber a antiga** |
-| `sessions_timebox` | **0** | sessão nunca expira |
-| `sessions_inactivity_timeout` | **0** | sessão esquecida em desktop compartilhado vale para sempre |
 | `mfa_totp_enroll_enabled` | true | disponível, mas **não exigido** |
 | `mailer_notifications_password_changed_enabled` | false | troca de senha não notifica o titular |
 
-O item mais sério é a combinação **reautenticação desligada + sessão eterna**: um token vazado (XSS, dispositivo compartilhado, backup de browser) vira posse permanente da conta, porque o atacante troca a senha sem conhecer a atual e o dono nem é avisado.
+O item mais sério é a **reautenticação desligada**: um token vazado (XSS, dispositivo compartilhado, backup de browser) vira posse da conta, porque o atacante troca a senha sem conhecer a atual e o dono nem é avisado.
 
 Observe que o `apps/api/src/schemas/cadastro.ts` já exige `min(8)` — mas essa validação só cobre o `POST /cadastro`. Qualquer chamada direta ao `/auth/v1/signup` do Supabase, ou o fluxo de reset de senha, cai nos 6 do servidor.
 
@@ -404,16 +445,35 @@ Observe que o `apps/api/src/schemas/cadastro.ts` já exige `min(8)` — mas essa
 ```
 password_min_length ............................ 12
 password_required_characters ................... letras + dígitos (mín.)
-password_hibp_enabled .......................... true
-security_captcha_enabled ....................... true (hCaptcha/Turnstile)
 security_update_password_require_reauthentication  true
-sessions_inactivity_timeout .................... 1800   (30 min)
-sessions_timebox ............................... 43200  (12 h)
 mailer_notifications_password_changed_enabled .. true
 ```
 E alinhar o `min(8)` do zod para `min(12)`.
 
 MFA por TOTP: já está habilitado no projeto. Para dado de saúde, vale oferecer no perfil e — no mínimo — exigir AAL2 em ações sensíveis (baixar laudo, trocar e-mail).
+
+#### Verificação pós-correção (30/07/2026)
+
+Aplicado pela Management API (`PATCH /v1/projects/{ref}/config/auth`), com a config anterior salva antes.
+
+| Configuração | Antes | Agora | |
+|---|---|---|---|
+| `password_min_length` | 6 | **12** | aplicado |
+| `password_required_characters` | vazio | minúscula + maiúscula + dígito | aplicado |
+| `security_update_password_require_reauthentication` | false | **true** | aplicado |
+
+A reautenticação era o item mais grave da seção e é o que efetivamente mudou: quem pega uma sessão aberta não troca mais a senha sem saber a atual.
+
+**O que continua aberto:** a sessão não expira sozinha. O paliativo é encurtar o `jwt_exp` (hoje 3600 s) — não expira a sessão, mas reduz a janela de um access token roubado.
+
+**Alinhamento no código** (senão o zod aceita e o Auth recusa depois, com mensagem em inglês vinda da biblioteca):
+
+- `apps/api/src/schemas/cadastro.ts` — `min(8)` → `min(12)` + três `regex` de classe, com mensagens em português.
+- `apps/web/src/lib/validators.ts` — `validarSenha` espelhando a mesma regra.
+- `apps/web/src/pages/CadastroPage.tsx` — placeholder do campo.
+- `apps/api/test/cadastro.test.ts` — 4 casos parametrizados de senha fraca, conferindo que a recusa é 400 e que **nenhuma** chamada ao banco acontece. Suíte da API em 209 testes.
+
+Note que a política do servidor vale para todos os caminhos — incluindo `/auth/v1/signup` direto e o reset de senha —, enquanto o zod cobre só o `POST /cadastro`. Os dois precisam concordar, mas quem manda é o servidor.
 
 ---
 
@@ -574,7 +634,11 @@ Os comentários do código são uma forma de documentação de decisão que rara
 
 ## 2.2 Achados
 
-### P-01 — Conta de paciente é reivindicável só com o CPF — **ALTO**
+### P-01 — Conta de paciente é reivindicável só com o CPF — ~~**ALTO**~~
+
+> **STATUS: CORRIGIDO em 30/07/2026.** O claim passou a exigir CPF **e** data de
+> nascimento conferindo com o que a recepção registrou, com resposta única para
+> as duas recusas. Ver "Verificação pós-correção" no fim desta seção.
 
 **Onde:** `apps/api/src/routes/cadastro.ts:33-90`.
 
@@ -610,6 +674,46 @@ if (existente && !existente.auth_user_id) {
 Cuidado deliberado com a mensagem de erro: ela não deve distinguir "CPF não existe" de "nascimento não confere", senão vira oráculo de data de nascimento. Use a mesma resposta genérica nos dois casos.
 
 Onde a garantia precisa ser forte (e é o caso, dado o volume de laudo exposto), o padrão é **claim assistido**: a recepção entrega um código de vinculação de uso único ao paciente presencialmente, e o cadastro exige esse código. Recomendo essa opção se o balcão puder acomodá-la; a conferência de nascimento é o piso, não o ideal.
+
+#### Verificação pós-correção (30/07/2026)
+
+Implementado em `apps/api/src/routes/cadastro.ts`. Três mudanças:
+
+1. O `select` do CPF passou a trazer `data_nascimento`, e o claim só acontece se ela conferir com a enviada no cadastro.
+2. `data_nascimento` **saiu** do payload do UPDATE que reivindica a linha. Já foi conferida; reenviá-la só reabriria o caminho de sobrescrever o que a recepção digitou.
+3. As recusas foram unificadas em `recusarClaim()` — mesma mensagem e mesmo 409 para os quatro caminhos.
+
+Sobre (3), o raciocínio do oráculo, porque a escolha tem custo de UX e vale estar escrita. Os desfechos possíveis são:
+
+| CPF na base | Nascimento | Antes | Agora |
+|---|---|---|---|
+| não existe | — | 201, cria paciente novo | igual |
+| fantasma | confere | 201, reivindica | igual |
+| fantasma | não confere | 201, **reivindicava mesmo assim** | 409 genérico |
+| já tem conta | — | 409 "CPF já cadastrado" | 409 genérico |
+
+Sucesso continua distinguível de recusa — não tem como não ser, já que ele cria uma conta. O que a mensagem única compra é que **uma recusa não diz qual das duas causas ocorreu**: quem chuta um CPF não descobre se ele está na base do laboratório e ainda é reivindicável, que é exatamente a lista de alvos. Contra a força bruta na data restou o rate-limit de 5/min já existente na rota.
+
+O custo é real: o paciente que já tem conta e tenta se cadastrar de novo não recebe mais "CPF já cadastrado". A mensagem única aponta os dois caminhos ("Esqueci minha senha" ou a recepção).
+
+Detalhe que só ficou disponível agora: `data_nascimento` só serve como segundo fator porque o trigger `trg_pacientes_identidade` (S-01) a tornou imutável depois do vínculo. Sem ele, bastaria reivindicar e corrigir a data em seguida — a conferência não valeria nada.
+
+Fantasma com `data_nascimento` nula cai na recusa **de propósito** (fail-closed): sem o segundo fator não há claim, e a recepção resolve. Hoje esse caso não existe — a coluna é `NOT NULL`. A guarda fica como defesa caso a restrição afrouxe.
+
+**Exercitado ao vivo em 30/07/2026** contra a API local e o Supabase real, com um paciente-fantasma descartável criado e removido no fim (base conferida de volta em 8 pacientes / 6 fantasmas / 2 usuários):
+
+| Passo | Envio | Resultado |
+|---|---|---|
+| data errada | `1988-03-22` | 409 genérico; **zero** usuário criado no Auth; fantasma intacto |
+| data certa | `1988-03-21` | 201, `paciente.id` = o id do fantasma (reivindicou, não criou linha); `data_nascimento` do balcão preservada |
+| repetido, já vinculado | outro e-mail | 409 com corpo **byte a byte idêntico** ao da data errada |
+| `update` direto na linha vinculada | `data_nascimento` | bloqueado pelo trigger do S-01 |
+
+A recusa vem **antes** do `createUser`: um chute errado não queima o e-mail nem deixa conta órfã no Auth. E o último passo é o elo com o S-01 — sem o trigger, bastaria reivindicar e corrigir a data em seguida.
+
+Cobertura: `apps/api/test/cadastro.test.ts`, 10 testes — claim aceito, as três recusas, ausência de `data_nascimento` no UPDATE, e um teste que compara byte a byte as respostas de "já cadastrado" e "não confere". Suíte da API em 205 testes.
+
+**Não** foi implementado o claim assistido por código de uso único. Continua sendo o alvo, e a conferência de nascimento continua sendo o piso.
 
 ---
 
@@ -849,8 +953,8 @@ Onde encaixar no código atual, sem espalhar: `apps/api/src/lib/mappers.ts` já 
 | 1 | `revoke all` de `anon`/`authenticated` nas tabelas + `alter default privileges` | SQL — S-01 | **feito 30/07** |
 | 2 | Trigger que torna `cpf`/`data_nascimento`/`auth_user_id` imutáveis pós-claim | SQL — S-01 | **feito 30/07** |
 | 3 | Saída autorizada de correção (RPC + trilha + rota da recepção) | SQL + `routes/integracao.ts` — S-01 | **feito 30/07** |
-| 4 | Tela no FlowLab que consome `POST /integracao/pacientes/:id/correcao-identidade` | FlowLab | **feito 30/07** (falta migration de permissão + e2e) |
-| 5 | Conferir `data_nascimento` no claim do paciente-fantasma (erro genérico) | `routes/cadastro.ts` — P-01 | aberto |
+| 4 | Tela no FlowLab que consome `POST /integracao/pacientes/:id/correcao-identidade` | FlowLab | **feito 30/07** (e2e validado; falta aplicar no FlowLab de produção) |
+| 5 | Conferir `data_nascimento` no claim do paciente-fantasma (erro genérico) | `routes/cadastro.ts` — P-01 | **feito 30/07** |
 | 6 | `npm audit fix` nos três workspaces | P-02 | aberto |
 
 Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pacientes','UPDATE')` deve retornar `false`.
@@ -859,9 +963,9 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 
 | | Ação | Onde |
 |---|---|---|
-| 7 | Habilitar PITR + `pg_dump` cifrado agendado + **teste de restauração** | S-02 |
+| 7 | `pg_dump` cifrado agendado + **teste de restauração** | S-02 |
 | 8 | Restringir `dbAllowedCidrs`; ligar SSL enforcement; rotacionar senha do banco | S-03 |
-| 9 | Senha mín. 12 + HIBP + captcha + reautenticação + timeout de sessão | S-04 |
+| 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
 | 10 | SMTP próprio, `site_url` real, `uri_allow_list`, `REQUIRE_EMAIL_CONFIRMATION=true` | S-05 |
 | 11 | `supabase link` + `db pull` — realinhar migrations com o banco real | P-04 |
 | 12 | Workflow de CI com `type-check`, `lint`, `test`, `audit --audit-level=high` | P-02 |
@@ -897,7 +1001,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "$API/advisors/performance" | jq '.lin
 curl -s -H "Authorization: Bearer $TOKEN" "$API/network-restrictions"
 curl -s -H "Authorization: Bearer $TOKEN" "$API/ssl-enforcement"
 curl -s -H "Authorization: Bearer $TOKEN" "$API/database/backups"
-curl -s -H "Authorization: Bearer $TOKEN" "$API/config/auth" | jq '{password_min_length, password_hibp_enabled, sessions_timebox, site_url}'
+curl -s -H "Authorization: Bearer $TOKEN" "$API/config/auth" | jq '{password_min_length, password_required_characters, security_update_password_require_reauthentication, site_url}'
 
 # Privilégios efetivos — o achado central (S-01)
 curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
