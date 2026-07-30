@@ -57,7 +57,6 @@ export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) 
 
   useEffect(() => {
     return fetchData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey])
 
   const selected = useMemo(

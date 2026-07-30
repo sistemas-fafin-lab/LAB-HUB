@@ -24,7 +24,7 @@ async function call<T>(fn: string, body?: unknown): Promise<T> {
   } catch (err) {
     // AbortSignal.timeout dispara um TimeoutError ao estourar o prazo.
     if (err instanceof Error && err.name === 'TimeoutError') {
-      throw new Error(`FlowLab ${fn}: timeout após ${TIMEOUT_MS}ms`)
+      throw new Error(`FlowLab ${fn}: timeout após ${TIMEOUT_MS}ms`, { cause: err })
     }
     throw err
   }

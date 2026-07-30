@@ -19,7 +19,6 @@ import type { DocumentoLaudo, EstadoAnalito, GrupoLaudo, LinhaLaudo, SecaoLaudo 
 const MM = 96 / 25.4
 const ALTURA_FOLHA = 297 * MM
 const LARGURA_FOLHA = 210 * MM
-const PADDING_FOLHA = 15 * MM
 /** `gap` do .flow e padding vertical do .pg-main — ver o CSS no index.html. */
 const GAP = 10
 const PADDING_MAIN = 16
@@ -119,7 +118,6 @@ function paginar(doc: DocumentoLaudo, m: Medidas): Fatia[][] {
       if (paginas[atual]!.length > 0 && disponivel() < moldura + alturaLinha(0)) novaFolha()
 
       let inicio = 0
-      let alturaFatia = moldura
       consome(moldura)
 
       for (let j = 0; j < grupo.linhas.length; j++) {
@@ -128,11 +126,9 @@ function paginar(doc: DocumentoLaudo, m: Medidas): Fatia[][] {
           paginas[atual]!.push({ tipo: 'grupo', indice: item.indice, de: inicio, ate: j, continuacao: inicio > 0 })
           novaFolha()
           inicio = j
-          alturaFatia = moldura
           consome(moldura)
         }
         usado += h
-        alturaFatia += h
       }
       paginas[atual]!.push({
         tipo: 'grupo',

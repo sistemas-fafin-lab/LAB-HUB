@@ -1,7 +1,6 @@
 import 'dotenv/config'
 import { writeFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
-import { AplisService } from '../src/laudos/aplis.js'
 
 // ---------------------------------------------------------------------------
 // Script para testar o fluxo completo de laudos com CPF REAL do ApLIS.
@@ -32,8 +31,6 @@ import { AplisService } from '../src/laudos/aplis.js'
 //   --nao-limpar       Nao excluir o usuario/paciente temporario ao final
 //   --sem-api          So prepara usuario/paciente, nao chama API
 // ---------------------------------------------------------------------------
-
-const aplis = new AplisService()
 
 function hojeBr(): string {
   const d = new Date()
@@ -129,7 +126,6 @@ async function main(): Promise<void> {
     const json = (await res.json()) as {
       dat?: { sucesso: number; lista?: Array<Record<string, unknown>>; msgErro?: string; codErro?: number }
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dat: any = json.dat ?? {}
     if (dat.sucesso === 0) {
       console.error(`❌ Erro: ${dat.msgErro ?? 'desconhecido'}`)

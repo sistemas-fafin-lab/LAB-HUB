@@ -14,12 +14,18 @@
     "tunnel": "ngrok http --url=https://scrubbier-songless-connor.ngrok-free.dev 3000 --log=stdout",
     "build": "npm run build --workspace=apps/web",
     "type-check": "npm run type-check --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "eslint ."
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "concurrently": "^9.1.0",
+    "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.8.0",
     "metro": "0.83.3",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.65.0"
   },
   "overrides": {
     "@types/react": "^19.1.0",

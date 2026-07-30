@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 
 // Proxy hoisted para o singleton supabase: cada teste injeta seu mock via setSb.
@@ -217,7 +217,7 @@ describe('POST /webhooks/coletas', () => {
   })
 
   it("mapeia 'bloqueado' → 'bloqueado' e grava (200)", async () => {
-    const supa = await setup(agendamentoComStatus('em_coleta'))
+    await setup(agendamentoComStatus('em_coleta'))
     const { status, body } = await postColeta(app, JSON.stringify(validColeta('bloqueado')))
     expect(status).toBe(200)
     expect(body.status).toBe('bloqueado')

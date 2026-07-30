@@ -83,7 +83,7 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
       // 3) Grava o paciente: reivindica o fantasma (UPDATE) ou insere novo. Em
       //    qualquer falha, faz rollback do usuário do Auth.
       let paciente: unknown
-      let dbError: { code?: string } | null = null
+      let dbError: { code?: string } | null
 
       if (existente) {
         // Reivindica anexando o auth e preenchendo os campos que o fantasma não

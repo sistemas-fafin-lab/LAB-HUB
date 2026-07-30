@@ -239,7 +239,7 @@ function parseLaudoEmSecoes(texto: string): SecaoLaudo[] {
     // Padrão "TÍTULO: conteúdo" — abre seção e já coloca o conteúdo.
     // SEM flag /i: com ela qualquer frase comum com dois-pontos ("Nota: ...")
     // viraria título de seção. Título de laudo é sempre CAIXA ALTA.
-    const rotuloConteudo = /^([A-ZÀ-Ü][A-ZÀ-Ü0-9 ()\/-]{2,40}):\s*(.+)$/.exec(linha)
+    const rotuloConteudo = /^([A-ZÀ-Ü][A-ZÀ-Ü0-9 ()/-]{2,40}):\s*(.+)$/.exec(linha)
     if (rotuloConteudo) {
       abre(rotuloConteudo[1]!)
       if (rotuloConteudo[2]) atual.linhas.push(rotuloConteudo[2]!.trim())
@@ -247,14 +247,14 @@ function parseLaudoEmSecoes(texto: string): SecaoLaudo[] {
     }
 
     // Padrão "TÍTULO EM CAIXA ALTA" sozinho numa linha — título de seção
-    if (/^[A-ZÀ-Ü][A-ZÀ-Ü0-9 ()\/-]{2,40}$/.test(linha)) {
+    if (/^[A-ZÀ-Ü][A-ZÀ-Ü0-9 ()/-]{2,40}$/.test(linha)) {
       abre(linha)
       continue
     }
 
     // Linha começando com algo em caixa alta seguido de dois-pontos
     // mas o conteúdo está na próxima linha (ex.: "CONCLUSÃO\nNEGATIVO...")
-    const rotuloSolo = /^([A-ZÀ-Ü][A-ZÀ-Ü0-9 ()\/-]{2,40}):?$/.exec(linha)
+    const rotuloSolo = /^([A-ZÀ-Ü][A-ZÀ-Ü0-9 ()/-]{2,40}):?$/.exec(linha)
     if (rotuloSolo) {
       abre(rotuloSolo[1]!)
       continue

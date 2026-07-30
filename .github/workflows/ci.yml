@@ -32,6 +32,14 @@ jobs:
           npm run type-check -w apps/api
           npm run type-check -w apps/web
 
+      # Config único na raiz (`eslint.config.mjs`), que já ignora o mobile.
+      # Sem `--max-warnings 0`: os avisos que sobram são do react-refresh, sobre
+      # arquivo de componente que também exporta hook ou constante — atrapalha o
+      # hot reload em dev, não quebra nada em produção. Virar erro forçaria uma
+      # série de arquivos novos sem ganho.
+      - name: Lint
+        run: npm run lint
+
       # O gate que segura S-01, P-01 e S-04: a suíte da API cobre o claim do
       # paciente-fantasma, a trilha de correção de identidade e a política de
       # senha. Sem isto, uma alteração em `routes/cadastro.ts` reabre o P-01 em

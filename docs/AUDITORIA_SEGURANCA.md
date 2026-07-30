@@ -136,7 +136,7 @@ Isto é o que impede a regressão silenciosa de tudo que foi corrigido hoje: a s
 **O YAML proposto na seção P-02 não funcionava como escrito.** Dois passos falhavam:
 
 1. `npm audit --omit=dev --audit-level=high` na **raiz** sai com código 1 (`brace-expansion`, `js-yaml`). O `apps/mobile` declara o Expo como dependência de **produção**, então o toolchain do protótipo atravessa o `--omit=dev`. Rodando por workspace, `api` e `web` dão zero. Um gate que nasce vermelho é um gate que a equipe aprende a ignorar.
-2. `npm run lint` sai com **127 — `eslint: command not found`**. O script `lint` de `apps/web` é resquício do template do Vite: não há `eslint` em nenhum workspace nem arquivo de config. O passo ficou **de fora** do workflow, com o motivo registrado no próprio arquivo. Configurar ESLint continua em aberto.
+2. `npm run lint` saía com **127 — `eslint: command not found`**. O script `lint` de `apps/web` era resquício do template do Vite: não havia `eslint` em nenhum workspace nem arquivo de config — "temos lint" era falso desde o commit inicial. **ESLint foi instalado e configurado no mesmo dia** e o passo entrou no workflow; a primeira execução acusou 17 erros, três deles defeito de verdade. Ver P-02.
 
 **`apps/mobile` está fora do CI**, por decisão do usuário (o app está parado). Não é só escolha de escopo: `npx tsc --noEmit` no mobile **falha hoje** (tipagem do `LinearGradient`), então `--workspaces` derrubaria o CI por algo que ninguém está tocando. Quando o app voltar, entram os três passos dele.
 
@@ -778,7 +778,7 @@ O workflow acima foi **testado antes de ser adotado** e dois dos seus passos fal
 | Passo proposto | Resultado real | Como ficou |
 |---|---|---|
 | `npm audit --omit=dev --audit-level=high` (raiz) | **exit 1** — `brace-expansion`, `js-yaml` | rodado por workspace: `api` e `web`, ambos zero |
-| `npm run lint` | **exit 127** — `eslint: command not found` | passo removido; ESLint não existe no repo |
+| `npm run lint` | **exit 127** — `eslint: command not found` | ESLint instalado e configurado; passo entrou depois (ver abaixo) |
 | `npm run type-check --workspaces` | falharia — `apps/mobile` não compila | três workspaces nomeados, sem o mobile |
 | `npm test --workspaces --if-present` | ok | mantido, explícito em `api` e `web` |
 
@@ -786,9 +786,30 @@ A raiz falha porque `apps/mobile` declara o Expo como dependência de **produç�
 
 O `lint` merece registro à parte: o script existe no `package.json` do `apps/web` desde o commit inicial e **nunca funcionou** — veio do template do Vite e ninguém instalou o ESLint. Vale saber que "temos lint" era falso.
 
-Estado final do workflow: `type-check` (`shared`, `api`, `web`) → testes (`api`, `web`) → build do web → `audit` (`api`, `web`), com `concurrency` cancelando runs superados. A sequência foi executada localmente na ordem do arquivo, com `set -e`.
+Estado final do workflow: `type-check` (`shared`, `api`, `web`) → **lint** → testes (`api`, `web`) → build do web → `audit` (`api`, `web`), com `concurrency` cancelando runs superados. A sequência foi executada localmente na ordem do arquivo, com `set -e`.
 
-**Continua aberto:** ESLint (instalar, configurar e acrescentar o passo) e o `apps/mobile`, fora do CI enquanto o app estiver parado.
+#### ESLint — instalado em 30/07/2026
+
+`eslint.config.mjs` na raiz (flat config, ESLint 10): `js.configs.recommended` + `typescript-eslint` recommended, mais `react-hooks` e `react-refresh` só no `apps/web`. Config único em vez de um por workspace — as regras que importam aqui valem igual nos dois lados, e duas cópias divergem.
+
+Sem `recommendedTypeChecked`: ele precisa de um program do TypeScript por workspace e leva o lint para dezenas de segundos. O `type-check` do CI já roda o compilador de verdade; o lint cobre o que o compilador não vê.
+
+A primeira execução acusou **17 erros e 4 avisos**. Todos foram corrigidos, e três eram defeito de verdade — não estilo:
+
+| Achado | Onde | Por que importa |
+|---|---|---|
+| `preserve-caught-error` | `lib/flowlab.ts:27` | o erro de timeout era relançado **sem `cause`**: o erro original do `AbortSignal` sumia, e com ele o diagnóstico de por que o FlowLab não respondeu |
+| `no-unused-vars` (write-only) | `LaudoDocumento.tsx` | `alturaFatia` era somada e reatribuída na paginação A4 e **nunca lida** — resto do cálculo de altura que sobrou do commit da paginação, tinha toda a cara de ser usada |
+| directive obsoleta | `BookingPanel.tsx:60` | `eslint-disable` de `exhaustive-deps` que não suprimia nada, dando a impressão de que havia uma exceção consciente ali |
+
+O resto era import não usado, `PADDING_FOLHA` morto, escape `\/` desnecessário em três regex de `laudos/mappers.ts` e `let dbError = null` redundante em `routes/cadastro.ts`. Nenhuma mudança de comportamento: 209 testes na API e 52 no web seguem passando.
+
+**Duas exceções escritas na config**, ambas com o motivo no arquivo:
+
+- `apps/api/scripts/**` — `no-explicit-any` e `no-useless-assignment` desligados. São ferramentas rodadas à mão contra ApLIS e FlowLab reais, com credenciais que não existem no ambiente de auditoria: reescrevê-las produziria mudança **não verificável** em código que não roda em produção.
+- Sem `--max-warnings 0` no CI. Sobram **3 avisos** de `react-refresh/only-export-components` (`AuthField`, `LaudoSecoes`, `AuthContext` exportam constante ou hook junto do componente). Afeta hot reload em dev, não produção; virar erro forçaria uma série de arquivos novos sem ganho.
+
+**Continua aberto:** `apps/mobile` fora do lint e do CI enquanto o app estiver parado — está nos `ignores` da config, é uma linha para tirar quando voltar.
 
 ---
 
@@ -1009,7 +1030,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
 | 10 | SMTP próprio, `site_url` real, `uri_allow_list`, `REQUIRE_EMAIL_CONFIRMATION=true` | S-05 |
 | 11 | `supabase link` + `db pull` — realinhar migrations com o banco real | P-04 |
-| 12 | ~~Workflow de CI com `type-check`, `lint`, `test`, `audit --audit-level=high`~~ — **feito 30/07** (sem `lint`: não há ESLint no repo) | P-02 |
+| 12 | ~~Workflow de CI com `type-check`, `lint`, `test`, `audit --audit-level=high`~~ — **feito 30/07** (ESLint instalado e configurado no mesmo dia) | P-02 |
 
 ### Este mês
 
