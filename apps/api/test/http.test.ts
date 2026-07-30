@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import Fastify from 'fastify'
 import helmet from '@fastify/helmet'
-import { CAMPOS_REDIGIDOS, redigirUrl, resolverCorsOrigin, serializarRequest } from '../src/lib/http.js'
+import {
+  CAMPOS_REDIGIDOS,
+  redigirUrl,
+  resolverCorsOrigin,
+  serializarErro,
+  serializarRequest,
+} from '../src/lib/http.js'
 
 const CORS = 'CORS_ORIGIN'
 const AMBIENTE = 'NODE_ENV'
@@ -130,6 +136,50 @@ describe('CAMPOS_REDIGIDOS', () => {
     ]) {
       expect(CAMPOS_REDIGIDOS).toContain(campo)
     }
+  })
+})
+
+describe('serializarErro', () => {
+  it('4xx não leva stack: é resposta esperada, não falha do servidor', () => {
+    // Sem isto, cada requisição sem token despeja dez linhas de stack apontando
+    // para dentro do node_modules/fastify — e uma varredura automatizada numa
+    // rota protegida enche o log de blocos idênticos que não explicam nada.
+    const err = Object.assign(new Error('Token ausente'), {
+      name: 'UnauthorizedError',
+      statusCode: 401,
+    })
+
+    expect(serializarErro(err)).toEqual({
+      type: 'UnauthorizedError',
+      message: 'Token ausente',
+      statusCode: 401,
+    })
+  })
+
+  it('5xx mantém o stack — aí sim alguém precisa investigar', () => {
+    const err = Object.assign(new Error('Falha ao criar paciente'), { statusCode: 500 })
+
+    expect(serializarErro(err)).toMatchObject({ message: 'Falha ao criar paciente' })
+    expect(serializarErro(err).stack).toBeDefined()
+  })
+
+  it('erro sem statusCode conta como 5xx', () => {
+    // Exceção não tratada não pode cair no caminho compacto e perder o stack.
+    expect(serializarErro(new Error('boom')).stack).toBeDefined()
+  })
+
+  it('preserva o `cause` — o serializer padrão do pino o descarta', () => {
+    // O `new Error(..., { cause })` de lib/flowlab.ts existe para não perder o
+    // erro original do AbortSignal. Com `stdSerializers.err` (o padrão) o campo
+    // some, e a correção não valeria nada no log.
+    const original = Object.assign(new Error('The operation was aborted'), {
+      name: 'TimeoutError',
+    })
+    const err = new Error('FlowLab listar: timeout após 8000ms', { cause: original })
+
+    const serializado = serializarErro(err) as { cause?: { message?: string } }
+
+    expect(serializado.cause?.message).toBe('The operation was aborted')
   })
 })
 

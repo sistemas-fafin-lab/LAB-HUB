@@ -1,3 +1,5 @@
+import { stdSerializers } from 'pino'
+
 // Configuração da borda HTTP: CORS, cabeçalhos de segurança e o que o logger
 // pode ou não gravar. Fica fora do `server.ts` porque lá o módulo se auto-inicia
 // (`void start()`) e não dá para importar num teste.
@@ -83,6 +85,34 @@ export function redigirUrl(url: string): string {
     .join('&')
 
   return consulta ? `${caminho}?${consulta}` : caminho
+}
+
+/** Forma que o Fastify exige do serializer de erro. */
+type ErroSerializado = { type: string; message: string; stack: string; [k: string]: unknown }
+
+/**
+ * Serializer de erro.
+ *
+ * Um 4xx é resposta esperada — token ausente, payload inválido, rate-limit —,
+ * não falha do servidor. O serializer padrão do pino imprime o stack de todos
+ * eles, então cada varredura automatizada numa rota protegida despeja dez
+ * linhas apontando para dentro do `node_modules/fastify`, que não dizem nada
+ * sobre o que aconteceu. Fica o essencial: tipo, mensagem e status.
+ *
+ * Para 5xx usa `errWithCause`, e não o `err` padrão: **o padrão do pino
+ * descarta o `cause`**. Sem isto, o `new Error(..., { cause: err })` do
+ * `lib/flowlab.ts` perde justamente o erro original do `AbortSignal` — que é a
+ * única informação que explica por que o FlowLab não respondeu.
+ */
+export function serializarErro(err: Error & { statusCode?: number }): ErroSerializado {
+  const status = err.statusCode ?? 500
+  if (status >= 400 && status < 500) {
+    // O cast existe porque a assinatura do Fastify declara `stack` obrigatório.
+    // Aqui ele é omitido de propósito: um campo vazio em toda linha de 4xx
+    // trocaria dez linhas de ruído por uma, em vez de nenhuma.
+    return { type: err.name, message: err.message, statusCode: status } as unknown as ErroSerializado
+  }
+  return stdSerializers.errWithCause(err) as unknown as ErroSerializado
 }
 
 interface RequestLogavel {

@@ -4,7 +4,12 @@ import sensible from '@fastify/sensible'
 import rateLimit from '@fastify/rate-limit'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
-import { CAMPOS_REDIGIDOS, resolverCorsOrigin, serializarRequest } from './lib/http.js'
+import {
+  CAMPOS_REDIGIDOS,
+  resolverCorsOrigin,
+  serializarErro,
+  serializarRequest,
+} from './lib/http.js'
 import { cadastroRoutes } from './routes/cadastro.js'
 import { pacientesRoutes } from './routes/pacientes.js'
 import { agendamentosRoutes } from './routes/agendamentos.js'
@@ -21,7 +26,7 @@ const server = Fastify({
   logger: {
     level: process.env.LOG_LEVEL ?? 'info',
     redact: CAMPOS_REDIGIDOS,
-    serializers: { req: serializarRequest },
+    serializers: { req: serializarRequest, err: serializarErro },
   },
 })
 
