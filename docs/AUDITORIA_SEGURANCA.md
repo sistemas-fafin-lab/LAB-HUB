@@ -22,7 +22,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 30/07** |
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | **ALTO** |
 | S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → ver Parte 3 |
-| P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | **MÉDIO** |
+| P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | **MÉDIO** |
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | **MÉDIO** |
 | S-09 | Sem política de retenção/expurgo; `on delete cascade` deixa arquivos órfãos no Storage | **MÉDIO** |
@@ -115,13 +115,30 @@ Na **raiz** o `npm audit fix` foi tentado e **desfeito**: ele subiu o toolchain 
 
 | | |
 |---|---|
-| **Código** | `apps/api/src/routes/cadastro.ts`, `apps/api/test/cadastro.test.ts` (novo, 10 testes) |
+| **Código** | `apps/api/src/routes/cadastro.ts`, `apps/api/test/cadastro.test.ts` (novo, 14 testes) |
 | **Banco** | nenhuma mudança — a peça de banco necessária (trigger `trg_pacientes_identidade`) já tinha vindo com o S-01 |
-| **Verificação** | 205 testes na API passando; type-check limpo |
+| **Verificação** | 209 testes na API passando; type-check limpo |
 
 O claim do paciente-fantasma passou a exigir **CPF e data de nascimento**, conferidos contra o que a recepção registrou, e parou de sobrescrever a data no UPDATE. As quatro recusas do cadastro foram unificadas numa resposta só, para que errar o palpite não revele que aquele CPF está na base e é reivindicável. Detalhe e tabela de desfechos em P-01.
 
 Com isso fecham os dois achados que estavam acima de tudo na ordem de ataque. O topo da fila agora é infraestrutura: S-02 (backup), S-03 (banco aberto), S-04 (autenticação) e S-05 (e-mail).
+
+### 30/07/2026 — CI (fecha o P-02)
+
+| | |
+|---|---|
+| **Arquivo** | `.github/workflows/ci.yml` (o repositório não tinha nenhum workflow) |
+| **Cobre** | `type-check` em `shared`/`api`/`web`, testes de `api` e `web`, build do web, `npm audit --omit=dev --audit-level=high` em `api` e `web` |
+| **Verificação** | sequência inteira executada localmente na ordem do workflow, com `set -e`: passa. 209 testes na API, 52 no web |
+
+Isto é o que impede a regressão silenciosa de tudo que foi corrigido hoje: a suíte da API cobre o claim do P-01, a trilha do S-01 e a política de senha do S-04, e até agora só rodava se alguém lembrasse.
+
+**O YAML proposto na seção P-02 não funcionava como escrito.** Dois passos falhavam:
+
+1. `npm audit --omit=dev --audit-level=high` na **raiz** sai com código 1 (`brace-expansion`, `js-yaml`). O `apps/mobile` declara o Expo como dependência de **produção**, então o toolchain do protótipo atravessa o `--omit=dev`. Rodando por workspace, `api` e `web` dão zero. Um gate que nasce vermelho é um gate que a equipe aprende a ignorar.
+2. `npm run lint` sai com **127 — `eslint: command not found`**. O script `lint` de `apps/web` é resquício do template do Vite: não há `eslint` em nenhum workspace nem arquivo de config. O passo ficou **de fora** do workflow, com o motivo registrado no próprio arquivo. Configurar ESLint continua em aberto.
+
+**`apps/mobile` está fora do CI**, por decisão do usuário (o app está parado). Não é só escolha de escopo: `npx tsc --noEmit` no mobile **falha hoje** (tipagem do `LinearGradient`), então `--workspaces` derrubaria o CI por algo que ninguém está tocando. Quando o app voltar, entram os três passos dele.
 
 > **Nota de processo.** Não existe `supabase_migrations.schema_migrations` neste projeto — o schema nunca passou pelo CLI, foi tudo aplicado à mão. Os arquivos em `supabase/migrations/` são o registro versionado do que foi aplicado, não algo que uma ferramenta rastreia. Criar essa tabela agora faria um `db push` futuro achar que só as migrations novas estão aplicadas e tentar rodar as 8 antigas do zero. Ver P-04.
 
@@ -717,7 +734,12 @@ Cobertura: `apps/api/test/cadastro.test.ts`, 10 testes — claim aceito, as trê
 
 ---
 
-### P-02 — Vulnerabilidades em dependências e ausência de CI — **MÉDIO**
+### P-02 — Vulnerabilidades em dependências e ausência de CI — ~~**MÉDIO**~~ **CORRIGIDO**
+
+> **STATUS 30/07/2026:** `npm audit fix` em `api` e `web` (zero vulnerabilidades
+> nos dois) e workflow de CI criado em `.github/workflows/ci.yml`. O YAML abaixo
+> era uma proposta e **falhava em dois passos** — ver "Verificação pós-correção"
+> no fim da seção para o que foi de fato aplicado.
 
 ```
 apps/api : 3 high   — fast-uri (host confusion), find-my-way (DDoS via HTTP/2), postcss (path traversal)
@@ -748,6 +770,25 @@ jobs:
       - run: npm test --workspaces --if-present
       - run: npm audit --omit=dev --audit-level=high
 ```
+
+#### Verificação pós-correção (30/07/2026)
+
+O workflow acima foi **testado antes de ser adotado** e dois dos seus passos falham neste repositório:
+
+| Passo proposto | Resultado real | Como ficou |
+|---|---|---|
+| `npm audit --omit=dev --audit-level=high` (raiz) | **exit 1** — `brace-expansion`, `js-yaml` | rodado por workspace: `api` e `web`, ambos zero |
+| `npm run lint` | **exit 127** — `eslint: command not found` | passo removido; ESLint não existe no repo |
+| `npm run type-check --workspaces` | falharia — `apps/mobile` não compila | três workspaces nomeados, sem o mobile |
+| `npm test --workspaces --if-present` | ok | mantido, explícito em `api` e `web` |
+
+A raiz falha porque `apps/mobile` declara o Expo como dependência de **produção** — o `--omit=dev` não filtra o toolchain do protótipo. Não é vulnerabilidade em código que roda: é o `apps/mobile` estar no lugar errado da árvore de dependências. O P-05 já sugere tirá-lo do workspace principal justamente por isso; enquanto ele ficar, auditar por workspace é o que produz um sinal honesto.
+
+O `lint` merece registro à parte: o script existe no `package.json` do `apps/web` desde o commit inicial e **nunca funcionou** — veio do template do Vite e ninguém instalou o ESLint. Vale saber que "temos lint" era falso.
+
+Estado final do workflow: `type-check` (`shared`, `api`, `web`) → testes (`api`, `web`) → build do web → `audit` (`api`, `web`), com `concurrency` cancelando runs superados. A sequência foi executada localmente na ordem do arquivo, com `set -e`.
+
+**Continua aberto:** ESLint (instalar, configurar e acrescentar o passo) e o `apps/mobile`, fora do CI enquanto o app estiver parado.
 
 ---
 
@@ -955,7 +996,7 @@ Onde encaixar no código atual, sem espalhar: `apps/api/src/lib/mappers.ts` já 
 | 3 | Saída autorizada de correção (RPC + trilha + rota da recepção) | SQL + `routes/integracao.ts` — S-01 | **feito 30/07** |
 | 4 | Tela no FlowLab que consome `POST /integracao/pacientes/:id/correcao-identidade` | FlowLab | **feito 30/07** (e2e validado; falta aplicar no FlowLab de produção) |
 | 5 | Conferir `data_nascimento` no claim do paciente-fantasma (erro genérico) | `routes/cadastro.ts` — P-01 | **feito 30/07** |
-| 6 | `npm audit fix` nos três workspaces | P-02 | aberto |
+| 6 | `npm audit fix` nos três workspaces | P-02 | **feito 30/07** (raiz desfeita — ver registro) |
 
 Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pacientes','UPDATE')` deve retornar `false`.
 
@@ -968,7 +1009,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
 | 10 | SMTP próprio, `site_url` real, `uri_allow_list`, `REQUIRE_EMAIL_CONFIRMATION=true` | S-05 |
 | 11 | `supabase link` + `db pull` — realinhar migrations com o banco real | P-04 |
-| 12 | Workflow de CI com `type-check`, `lint`, `test`, `audit --audit-level=high` | P-02 |
+| 12 | ~~Workflow de CI com `type-check`, `lint`, `test`, `audit --audit-level=high`~~ — **feito 30/07** (sem `lint`: não há ESLint no repo) | P-02 |
 
 ### Este mês
 

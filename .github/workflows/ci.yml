@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Push seguido de push na mesma branch cancela o run anterior: o que importa é o
+# estado final do código, não a fila de commits intermediários.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Type-check workspace a workspace, e não com `--workspaces`, porque
+      # `apps/mobile` (protótipo com mocks, parado) não compila hoje e derrubaria
+      # o CI por algo que ninguém está tocando. Quando o mobile voltar, entra aqui.
+      - name: Type-check
+        run: |
+          npm run type-check -w packages/shared
+          npm run type-check -w apps/api
+          npm run type-check -w apps/web
+
+      # O gate que segura S-01, P-01 e S-04: a suíte da API cobre o claim do
+      # paciente-fantasma, a trilha de correção de identidade e a política de
+      # senha. Sem isto, uma alteração em `routes/cadastro.ts` reabre o P-01 em
+      # silêncio.
+      - name: Testes
+        run: |
+          npm test -w apps/api
+          npm test -w apps/web
+
+      - name: Build do web
+        run: npm run build -w apps/web
+
+      # Auditoria por workspace, não na raiz: `apps/mobile` declara o Expo como
+      # dependência de produção, então o toolchain dele passa pelo `--omit=dev` e
+      # a raiz falha com 2 `high` que não rodam em produção nenhuma. `api` e `web`
+      # estão em zero desde 30/07/2026 e é isso que precisa continuar verdade.
+      - name: Auditoria de dependências (produção)
+        run: |
+          npm audit --omit=dev --audit-level=high -w apps/api
+          npm audit --omit=dev --audit-level=high -w apps/web
+
+# Sem passo de lint: o script `lint` de `apps/web` é resquício do template do
+# Vite — não há `eslint` nas dependências de nenhum workspace nem arquivo de
+# config, então `npm run lint` falha com "command not found". Configurar ESLint
+# é trabalho à parte; quando existir, entra como passo próprio aqui.
