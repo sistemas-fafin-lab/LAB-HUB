@@ -15,6 +15,8 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
   // FlowLab já tiver pré-criado um paciente "fantasma" com este CPF (sem
   // auth_user_id), o cadastro REIVINDICA essa linha em vez de criar outra — assim
   // o histórico (agendamentos feitos no balcão) já aparece para a conta nova.
+  // O claim exige CPF **e** data de nascimento conferindo com o que a recepção
+  // registrou; só o CPF não basta (ver `recusarClaim` abaixo).
   // Se a etapa do banco falhar, remove o usuário recém-criado para não deixar
   // conta órfã (mas nunca apaga uma linha de paciente que já existia).
   app.post(
@@ -27,19 +29,41 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
       }
       const { email, password, nome, cpf, sexo, dataNascimento, telefone } = parsed.data
 
-      // 1) Procura uma linha existente com este CPF (chave do claim).
+      // 1) Procura uma linha existente com este CPF (primeira chave do claim).
       //    - com auth_user_id  → já é de uma conta: CPF em uso.
-      //    - sem auth_user_id  → fantasma da recepção: será reivindicado abaixo.
+      //    - sem auth_user_id  → fantasma da recepção: reivindicado abaixo, mas
+      //      só se a data de nascimento conferir com a que o balcão registrou.
       const { data: existente, error: buscaErr } = await supabase
         .from('pacientes')
-        .select('id, auth_user_id')
+        .select('id, auth_user_id, data_nascimento')
         .eq('cpf', cpf)
         .maybeSingle()
       if (buscaErr) {
         throw app.httpErrors.internalServerError('Falha ao verificar CPF')
       }
+      // Resposta ÚNICA para "CPF já tem conta" e "nascimento não confere".
+      // Distinguir os dois entregaria de graça a informação que o atacante quer:
+      // que aquele CPF está na base do laboratório e ainda não foi reivindicado
+      // — ou seja, a lista de alvos. Com a resposta igual, quem chuta um CPF não
+      // aprende nada; o único sinal que resta é o cadastro dar certo, e aí o
+      // rate-limit de 5/min desta rota é o que segura a força bruta na data.
+      const recusarClaim = () =>
+        app.httpErrors.conflict(
+          'Não foi possível cadastrar com esses dados. Se você já tem conta, use "Esqueci minha senha"; se não, procure a recepção.',
+        )
       if (existente?.auth_user_id) {
-        throw app.httpErrors.conflict('CPF já cadastrado')
+        throw recusarClaim()
+      }
+      // Segundo fator de identidade do claim. CPF no Brasil não é segredo (nota
+      // fiscal, cadastro de loja, vazamento público), então ele sozinho não pode
+      // valer como prova para assumir uma linha com agendamentos e laudos de
+      // outra pessoa. `data_nascimento` só é confiável aqui porque o trigger
+      // trg_pacientes_identidade a tornou imutável depois do vínculo — sem isso,
+      // bastaria reivindicar e corrigir a data em seguida.
+      // Fantasma sem data registrada (coluna nullable) cai na recusa de
+      // propósito: sem o segundo fator não há claim, a recepção resolve.
+      if (existente && existente.data_nascimento !== dataNascimento) {
+        throw recusarClaim()
       }
 
       // 2) Cria o usuário no Auth alinhado ao flag: em dev
@@ -64,7 +88,9 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
       if (existente) {
         // Reivindica anexando o auth e preenchendo os campos que o fantasma não
         // tinha (email/sexo) — o próprio paciente é a fonte da verdade sobre seus
-        // dados. O `.is('auth_user_id', null)` garante um único vencedor sob
+        // dados. `data_nascimento` fica DE FORA: já foi conferida acima, então
+        // reenviá-la só reabriria o caminho de sobrescrever o que a recepção
+        // registrou. O `.is('auth_user_id', null)` garante um único vencedor sob
         // corrida: se outro cadastro reivindicou primeiro, o UPDATE não casa.
         const { data, error } = await supabase
           .from('pacientes')
@@ -73,7 +99,6 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
             nome,
             email,
             sexo,
-            data_nascimento: dataNascimento,
             ...(telefone ? { telefone } : {}),
           })
           .eq('id', existente.id)
@@ -85,7 +110,7 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
         if (!error && !data) {
           // A linha foi reivindicada por outro cadastro entre o SELECT e o UPDATE.
           await supabase.auth.admin.deleteUser(userId)
-          throw app.httpErrors.conflict('CPF já cadastrado')
+          throw recusarClaim()
         }
       } else {
         const { data, error } = await supabase
@@ -107,7 +132,8 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
       if (dbError || !paciente) {
         await supabase.auth.admin.deleteUser(userId)
         if (dbError?.code === '23505') {
-          throw app.httpErrors.conflict('CPF já cadastrado')
+          // Outro cadastro inseriu este CPF entre o SELECT e o INSERT.
+          throw recusarClaim()
         }
         throw app.httpErrors.internalServerError('Falha ao criar paciente')
       }
