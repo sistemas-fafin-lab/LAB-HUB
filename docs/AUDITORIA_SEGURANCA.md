@@ -865,10 +865,11 @@ O resto era import não usado, `PADDING_FOLHA` morto, escape `\/` desnecessário
 
 A correção foi um serializer de `req` que redige o **valor** dos params fora de uma lista curta (`download`, `refresh`, `escopo`, `tipo`, `agendamentoId`). A chave continua visível — dá para ver que houve uma busca e depurar —, o valor não. A lista é fail-closed: param novo nasce redigido sem ninguém precisar lembrar.
 
-Confirmado com a API rodando:
+Confirmado com a API rodando, em par com um caso de controle — uma evidência só não distinguiria "redige o que deve" de "redige tudo", e um log cego não é melhor que um log vazado:
 
 ```
-"url":"/api/v1/integracao/pacientes/buscar?q=<redigido>"
+"url":"/api/v1/integracao/pacientes/buscar?q=<redigido>"   ← CPF na query, redigido
+"url":"/api/v1/laudos?refresh=true"                        ← param inofensivo, intacto
 ```
 
 Resposta real do `/ping`, com o servidor no ar:
