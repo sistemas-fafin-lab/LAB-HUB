@@ -627,13 +627,15 @@ A verificação foi uma sondagem do protocolo Postgres contra o pooler, **envian
 
 #### Atualização de 31/07/2026 — a senha do banco é fraca, e isso reordena o achado
 
-Ao fornecer a senha para o `supabase link`, ficou visível que ela é **`labhub00421`**: 11 caracteres, só minúsculas e dígitos, contendo o nome do projeto. Está em dicionário de qualquer ferramenta de força bruta.
+Para o `supabase link`, o usuário definiu uma senha **temporária e fraca** (11 caracteres, minúsculas e dígitos, com o nome do projeto), com a intenção declarada de trocá-la por uma forte em seguida. O registro fica pelo que o episódio revelou, não como acusação: **a senha do banco é trocável a qualquer momento sem impacto nenhum**, e por isso não há motivo para uma fraca sobreviver a uma sessão.
 
-Isso **corrige uma avaliação anterior desta auditoria**. Ao explicar por que a exposição a `0.0.0.0/0` era item de "reduzir superfície" e não emergência, o argumento usado foi que a senha era aleatória e o SCRAM impede adivinhação offline. A primeira metade era suposição, e é falsa. Com senha adivinhável e o pooler alcançável do mundo inteiro, o que separava o banco da internet passa a ser um dicionário.
+Ainda assim, o episódio **corrige uma avaliação anterior desta auditoria**. Ao explicar por que a exposição a `0.0.0.0/0` era item de "reduzir superfície" e não emergência, o argumento usado foi que a senha era aleatória e o SCRAM impede adivinhação offline. A segunda metade continua verdadeira; **a primeira era suposição minha, e não se sustenta** — a força da senha do banco nunca foi verificada nesta auditoria, só presumida.
+
+É a lição que sobrevive ao caso concreto: com o pooler alcançável do mundo inteiro, a senha é a única barreira, e uma barreira que ninguém mediu não deveria ter entrado como premissa de um cálculo de risco. Enquanto o CIDR estiver aberto, **a força dessa senha é um controle de segurança**, e vale tratá-la como tal — inclusive as temporárias, que têm o hábito de sobreviver mais do que o previsto.
 
 **A ordem correta agora:** rotacionar a senha vem **antes** de restringir CIDR, não depois — o passo 3 da correção original virou o passo 1. E rotacionar é barato: **nada na aplicação usa essa senha.** Não há `pg` nas dependências, não há `DATABASE_URL`, o `docker-compose.yml` do VPS não consome banco, e a API fala HTTPS/PostgREST com a `service_role` key, que é outro segredo. O único efeito colateral é ter de refazer o `supabase link` na máquina de desenvolvimento.
 
-A senha também trafegou por uma conversa de chat, o que é motivo suficiente para trocá-la mesmo que fosse forte.
+A senha também trafegou por uma conversa de chat, o que é motivo suficiente para trocá-la mesmo que fosse forte. Depois da troca o `supabase link` desta máquina para de funcionar — é só rodar de novo com a senha nova, e nada além disso quebra.
 
 **O que continua aberto, e por quê.** `dbAllowedCidrs` segue `0.0.0.0/0` **por decisão do usuário**: a máquina de trabalho tem IP dinâmico, e travar a allowlist no IP de hoje faria o `supabase db push` (P-04) falhar um dia com um timeout sem explicação — o tipo de defesa que se desliga sozinha na primeira vez que atrapalha. A escolha é consciente, não esquecimento.
 
