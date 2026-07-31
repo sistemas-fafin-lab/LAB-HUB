@@ -20,7 +20,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-02 | Sem backup restaurável — perda de dado clínico é irreversível | **ALTO** |
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** |
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 30/07** |
-| S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | **ALTO** → **parcial 31/07** |
+| S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** (falta aplicar a flag no `.env` do VPS) |
 | S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → ver Parte 3 |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | **MÉDIO** |
@@ -30,7 +30,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | **BAIXO** |
 | S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | **PERF** |
 
-**Ordem de ataque recomendada:** ~~S-01~~ (feito) → ~~P-01~~ (feito) → **S-02/S-03/S-04/S-05** → criptografia (Parte 3) → o resto.
+**Ordem de ataque recomendada:** ~~S-01~~ (feito) → ~~P-01~~ (feito) → **S-02/S-03**/~~S-04~~/~~S-05~~ → criptografia (Parte 3) → o resto.
 
 > Nota importante sobre a prioridade: **criptografar as colunas não resolve S-01 nem P-01.** Nos dois casos o atacante está autenticado e autorizado — a aplicação decifra o dado para ele de bom grado. Criptografia protege contra vazamento de *dump*, backup, réplica e acesso indevido ao painel. Controle de acesso protege contra o paciente do lado. São problemas diferentes e o segundo é o mais urgente.
 
@@ -548,9 +548,11 @@ Note que a política do servidor vale para todos os caminhos — incluindo `/aut
 
 ### S-05 — Configuração de e-mail incompatível com produção — **ALTO** → **PARCIALMENTE CORRIGIDO**
 
-> **STATUS 31/07/2026:** SMTP próprio, `site_url` e `uri_allow_list` aplicados,
-> reaproveitando a conta do FlowLab. Falta o teste de entrega ponta a ponta e,
-> depois dele, `REQUIRE_EMAIL_CONFIRMATION=true`.
+> **STATUS 31/07/2026:** SMTP próprio, `site_url`, `uri_allow_list` e
+> `REQUIRE_EMAIL_CONFIRMATION=true` aplicados, reaproveitando a conta do
+> FlowLab. Entrega comprovada ponta a ponta. Seguem abertos os templates em
+> inglês e o alias `no-reply@` não verificado — e o `.env` do VPS, que é onde a
+> API de produção lê a flag.
 
 ```
 site_url        = 'http://localhost:3000'
@@ -596,12 +598,40 @@ Quatro decisões que valem estar escritas:
 
 O teste foi assim porque a base tem **2 usuários e nenhum interno** (`select count(*) … filter (where email like '%@laboratoriolab.com.br')` → 0): disparar recuperação de senha para descobrir se o SMTP funciona significaria mandar e-mail para conta de pessoa real.
 
-**O que continua faltando, e por quê:**
+#### Teste de entrega ponta a ponta (31/07/2026) — **passou**
 
-- **Entrega de ponta a ponta não foi comprovada.** `AUTH OK` prova credencial e porta; não prova que o GoTrue monta e entrega a mensagem. Só um "esqueci minha senha" real fecha isso.
-- **O alias `no-reply@` pode ser reescrito.** O Gmail troca o `From` pelo endereço autenticado (`sistemas@`) a menos que `no-reply@laboratoriolab.com.br` esteja verificado como "enviar e-mail como" na conta. O FlowLab já envia com esse remetente, então provavelmente está — mas isso é inferência, e aparece no primeiro e-mail que chegar.
-- **`REQUIRE_EMAIL_CONFIRMATION` segue `false`** de propósito. Ligar antes de comprovar a entrega tranca o cadastro: o paciente cria a conta, não recebe o e-mail e não consegue entrar. É o último passo, depois do teste real.
-- **A caixa é compartilhada com o FlowLab.** Cota do Workspace e reputação de envio passam a ser dividas entre os dois sistemas; um pico num afeta o outro.
+O endereço de teste não era usuário, e `POST /auth/v1/recover` para conta inexistente responde 200 **sem enviar nada** (o GoTrue não revela se a conta existe). O teste ingênuo não provaria nada. Foi criado um usuário descartável, disparada a recuperação real e o usuário apagado em seguida — base conferida de volta em 2 usuários, sem resíduo.
+
+```
+12:59:42  user_signedup            POST /admin/users     200   195 ms
+12:59:45  user_recovery_requested  POST /recover         200   1,83 s   ←
+13:00:06  user_deleted             DELETE /admin/users   200   108 ms
+```
+
+**A duração é a evidência, não o código 200.** As chamadas administrativas levaram ~100–200 ms; o `/recover` levou dez vezes mais porque nele cabe o handshake TLS e a entrega ao `smtp.gmail.com`. Falha de SMTP faria o GoTrue devolver **500** ("Error sending recovery email") e uma entrega no-op levaria milissegundos. Zero entradas de nível `error` nos logs de auth.
+
+E-mail confirmado na caixa pelo titular do endereço.
+
+**Dois achados que só o e-mail real mostrou:**
+
+1. **O Gmail reescreveu o remetente.** Chegou como `LAB-HUB <sistemas@laboratoriolab.com.br>` — o nome de exibição passou, o endereço não. O `no-reply@laboratoriolab.com.br` **não** está verificado como "enviar e-mail como" na conta do Workspace; o Gmail substitui pelo endereço autenticado. A suposição registrada acima (de que o FlowLab enviar com esse remetente implicava alias verificado) **estava errada** — o FlowLab usa nodemailer, que monta o `From` por conta própria, e isso não é a mesma coisa que ter o alias liberado. A configuração segue com `no-reply@` de propósito: no dia em que o alias for verificado no Google, passa a valer sem mexer aqui.
+2. **O template chega em inglês.** *"Reset your password — We received a request to reset your password."* É o padrão do Supabase, e ninguém o traduziu. Paciente brasileiro recebendo recuperação de senha em inglês tende a tratar como golpe — o que é o efeito oposto do pretendido. Vale para **todos** os templates, inclusive o de confirmação de cadastro, que passa a ser disparado a cada novo paciente agora que a confirmação está ligada. Corrigível pela mesma Management API (`mailer_subjects_*` / `mailer_templates_*_content`).
+
+#### `REQUIRE_EMAIL_CONFIRMATION` (31/07/2026)
+
+Ligado depois da entrega comprovada, que era a ordem certa: com ele em `true` e o SMTP quebrado, o paciente cria a conta, não recebe o e-mail e não consegue entrar.
+
+Isto fecha o pior dos três itens do S-05 — com `false`, **qualquer pessoa criava conta com o e-mail de outra e já entrava logada**, que somado ao P-01 era o caminho mais curto para assumir o registro de um paciente real.
+
+A rota já estava pronta para os dois modos (`routes/cadastro.ts`): `email_confirm: !REQUIRE_EMAIL_CONFIRMATION` no `createUser`, `auth.resend({ type: 'signup' })` em seguida, e `requiresEmailConfirmation` na resposta para o front decidir o que mostrar.
+
+> **Falta um passo fora deste repositório.** A API de produção **não** roda na Vercel: é o `docker-compose.yml` num VPS, com deploy manual (`git pull && docker compose up -d --build`) e um `.env` que vive na máquina. O que foi alterado aqui é o `.env` local (dev, não versionado) e o `.env.example`. **Em produção alguém precisa editar o `.env` do VPS e reiniciar o container** — até lá, o cadastro em produção continua criando conta pré-confirmada.
+
+**O que continua em aberto:**
+
+- **Templates em inglês** (achado 2 acima) — o mais visível para o paciente.
+- **Alias `no-reply@` não verificado** (achado 1) — hoje as respostas vão para a caixa de sistemas.
+- **A caixa é compartilhada com o FlowLab.** Cota do Workspace e reputação de envio passam a ser divididas entre os dois sistemas; um pico num afeta o outro.
 
 ---
 
@@ -1207,7 +1237,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 7 | `pg_dump` cifrado agendado + **teste de restauração** | S-02 |
 | 8 | Restringir `dbAllowedCidrs`; ligar SSL enforcement; rotacionar senha do banco | S-03 |
 | 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
-| 10 | ~~SMTP próprio, `site_url` real, `uri_allow_list`~~ — **feito 31/07**; falta testar a entrega e só então `REQUIRE_EMAIL_CONFIRMATION=true` | S-05 |
+| 10 | ~~SMTP próprio, `site_url` real, `uri_allow_list`, `REQUIRE_EMAIL_CONFIRMATION=true`~~ — **feito 31/07**, entrega comprovada; falta o `.env` do VPS e traduzir os templates | S-05 |
 | 11 | `supabase link` + `db pull` — realinhar migrations com o banco real | P-04 |
 | 12 | ~~Workflow de CI com `type-check`, `lint`, `test`, `audit --audit-level=high`~~ — **feito 30/07** (ESLint instalado e configurado no mesmo dia) | P-02 |
 
