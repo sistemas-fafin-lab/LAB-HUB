@@ -25,7 +25,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | **MÉDIO** |
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | **MÉDIO** |
-| S-09 | Sem política de retenção/expurgo; `on delete cascade` deixa arquivos órfãos no Storage | **MÉDIO** |
+| S-09 | Sem política de retenção/expurgo; `on delete cascade` deixa arquivos órfãos no Storage | ~~**MÉDIO**~~ **CORRIGIDO 31/07/2026** |
 | P-03 | API sem cabeçalhos de segurança (helmet) e sem redação de PII nos logs | ~~**BAIXO**~~ **CORRIGIDO 30/07/2026** |
 | S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | **BAIXO** |
 | S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | ~~**PERF**~~ **CORRIGIDO 31/07/2026** |
@@ -331,6 +331,23 @@ Registro do que fica descoberto até um eventual upgrade: **sessão do LAB-HUB n
 | **Verificação** | advisor de performance zerado nos dois achados; suíte da API em 245 testes |
 
 Duas correções do próprio diagnóstico, feitas em vez de deixar a seção mentir: (1) o `auth_rls_initplan` **não** era custo de performance aqui — a API usa service_role, que ignora RLS, então as policies não rodam em caminho vivo; a reescrita é higiene para quando voltarem a valer. (2) Os índices ainda não são usados (`unused_index` no advisor) porque 8 linhas cabem num seq scan — o INFO é esperado e não deve ser "corrigido" apagando o índice.
+
+---
+
+### 31/07/2026 — S-09 fechado (retenção, expurgo e exclusão de conta)
+
+| | |
+|---|---|
+| **Migration** | `20260731170000_s09_exclusao_conta.sql` — `pacientes.excluido_em`, trilha `exclusoes_conta`, saída auditada no trigger de identidade, RPC `excluir_conta_paciente` |
+| **API** | `lib/expurgo.ts`, `DELETE /pacientes/me`, `scripts/expurgo.ts` (`npm run expurgo`), guard de claim em `routes/cadastro.ts` |
+| **Verificação** | comportamento medido em produção com rollback garantido; privilégios de `service_role` e `anon` conferidos; 256 testes |
+
+Duas coisas que este item obrigou a decidir antes de programar:
+
+1. **"Excluir a conta" não pode ser "apagar tudo"** num laboratório. Laudo é prontuário, e a CFM 1.821/2007 exige 20 anos de guarda — ressalvado pela LGPD art. 16, I. Some o acesso e os documentos do paciente; fica o prontuário.
+2. **O cascade era uma bomba armada.** `auth.admin.deleteUser()` teria apagado prontuário e trilha de auditoria em silêncio, deixando os arquivos órfãos no bucket. A ordem correta — desvincular antes de apagar o usuário — é o que a RPC existe para permitir sem reabrir o S-01.
+
+Detalhe, tabela de comportamento medido e o efeito colateral no claim do P-01 na seção S-09.
 
 ---
 
@@ -930,7 +947,12 @@ A LGPD (arts. 37 e 38) espera registro das operações de tratamento, e para dad
 
 ---
 
-### S-09 — Sem retenção/expurgo, e cascade deixa arquivo órfão
+### S-09 — Sem retenção/expurgo, e cascade deixa arquivo órfão — ~~**MÉDIO**~~ **CORRIGIDO 31/07/2026**
+
+> **STATUS:** migration `20260731170000_s09_exclusao_conta.sql` + `lib/expurgo.ts`
+> + `DELETE /pacientes/me` + `npm run expurgo`. Ver "Verificação pós-correção" no
+> fim da seção — inclusive a decisão jurídica que muda o que "excluir a conta"
+> significa aqui, e uma armadilha de cascade que a correção desarmou.
 
 A migration `20260715120000_documentos_paciente.sql` já documenta o problema com todas as letras:
 
@@ -943,6 +965,59 @@ O diagnóstico está certo e a rotina que ele pede não existe. Somando:
 - **Deletar um paciente pelo banco** deixa os arquivos no bucket, invisíveis e sem dono.
 
 **Correção:** um job (Edge Function agendada ou cron na API) que (1) apaga documentos perenes sem uso há N meses e pedidos médicos de coletas já realizadas há N dias, sempre `storage.remove` **antes** do `delete` da linha; e (2) uma rotina de exclusão de conta que faça a mesma ordem. O `DELETE /documentos/:id` já implementa essa ordem corretamente — serve de modelo.
+
+#### Verificação pós-correção (31/07/2026)
+
+**A decisão que veio antes do código: "excluir a conta" aqui não pode ser "apagar tudo".**
+
+A LGPD dá o direito de eliminação (art. 18, VI), e o art. 16, I ressalva o que a lei manda guardar. Laudo clínico é exatamente isso: a Resolução CFM 1.821/2007 exige o prontuário por **20 anos** a contar do último registro. Uma rotina que apagasse `exam_results`/`resultados` a pedido do paciente não seria privacidade — seria destruir registro de guarda obrigatória. Então a exclusão implementada é precisa:
+
+| Apaga | Retém |
+|---|---|
+| conta no Auth, documentos enviados pelo paciente, e-mail, telefone, convênio | nome, CPF, nascimento, agendamentos, resultados, laudos |
+
+Sem nome e CPF o prontuário retido não identifica ninguém e deixa de cumprir a obrigação que justifica a retenção — por isso eles ficam.
+
+**A armadilha que a correção desarmou.** `pacientes.auth_user_id → auth.users ON DELETE CASCADE`, e cinco tabelas referenciam `pacientes ON DELETE CASCADE`. Um `auth.admin.deleteUser()` inocente apagaria em silêncio **o prontuário inteiro e a trilha de auditoria**, deixando os arquivos órfãos no bucket — precisamente o que a migration de 2026-07-15 avisou. A saída é desvincular ANTES: com `auth_user_id = null`, o cascade não encontra o que derrubar.
+
+Mas o trigger do S-01 proíbe justamente mexer em `auth_user_id`. A saída segue o mesmo desenho da correção de identidade — não um flag solto, e sim amarrada a uma linha de `exclusoes_conta` da mesma transação, conferida pelo trigger.
+
+**Comportamento medido em produção** (bloco `do $$ … raise exception`, tudo revertido):
+
+| Cenário | Resultado |
+|---|---|
+| `update pacientes set auth_user_id = null` na marra | **bloqueado** — "Vínculo de conta é imutável" |
+| Repontar o paciente para OUTRA conta, mesmo via saída nova | **bloqueado** — a saída só vai para `null`, nunca para outro dono |
+| RPC `excluir_conta_paciente` | desvincula, limpa contato, marca `excluido_em`, abre a trilha |
+| Prontuário depois | nome e CPF mantidos, agendamentos intactos |
+| Reescrever a trilha | **bloqueado** — "Trilha de exclusão é append-only" |
+| Fechar a trilha (`auth_removido_em`) | aceito uma vez; alterar depois, bloqueado |
+
+**Privilégios efetivos** (o que vale para a API, que é `service_role` — não confundir com o `postgres` da Management API, que é dono e passa por cima de tudo):
+
+```
+service_role  DELETE em exclusoes_conta ............ false
+service_role  UPDATE na tabela .................... false
+service_role  UPDATE só em auth_removido_em ....... true
+anon          SELECT / EXECUTE .................... false / false
+```
+
+**Ordem de execução da exclusão**, cada passo falhando só de um jeito que o seguinte conserta: documentos (Storage → linhas) → RPC de desvínculo → `deleteUser` no Auth → fecha a trilha. Se o `deleteUser` falhar, a conta fica órfã no Auth mas **não dá acesso a nada** (sem `auth_user_id`, o `middlewares/auth.ts` não resolve paciente), e `auth_removido_em` fica null como sinal de pendência. É o único estado intermediário possível, e é seguro por construção.
+
+**Efeito colateral que exigiu decisão, não só código.** Um paciente excluído volta a ser "fantasma" — e o P-01 permite reivindicar fantasma com CPF + data de nascimento. Sem guard, o prontuário de quem pediu para sair voltaria a ser reivindicável por esses dois dados, que não são segredo. `POST /cadastro` passa a recusar o claim quando `excluido_em` está preenchido, com a **mesma mensagem genérica** das outras recusas (distinguir revelaria que aquele CPF já teve conta neste laboratório). Consequência assumida: o caminho de volta é o balcão.
+
+**Prazos de retenção**, configuráveis porque são decisão do laboratório:
+
+| Env | Padrão | Critério |
+|---|---|---|
+| `RETENCAO_DOC_COLETA_DIAS` | 90 | contado do `data_hora` do agendamento, não do upload |
+| `RETENCAO_DOC_PERENE_MESES` | 24 | só apaga se o paciente estiver **inativo** — quem volta todo mês nunca perde a identidade |
+
+Os padrões erram para o lado de reter um pouco mais, que é o lado recuperável.
+
+**Onde roda:** `npm run expurgo` (`docker compose exec api node dist/scripts/expurgo.js`), processo separado no cron do sistema. Não é `setInterval` dentro da API de propósito — expurgo é destrutivo, e como processo próprio tem código de saída que o cron enxerga, e não roda N vezes se a API escalar para N réplicas. Também **não** há endpoint HTTP para dispará-lo: seria mais um caminho autenticado para operação irreversível, e o P-06 mostrou como termina chave de integração no mundo real.
+
+**Testes:** 10 casos novos em `test/expurgo.test.ts` (ordem Storage→linha, abortar sem apagar linha quando o Storage falha, poupar paciente ativo, prazos vindos do ambiente, e os quatro caminhos de falha da exclusão) + 1 em `cadastro.test.ts` para a recusa do claim. Suíte da API: **256 testes**.
 
 ---
 
@@ -1608,7 +1683,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 13 | Criptografia de coluna, começando por `exam_results.result` e `resultados.paineis` | Parte 3 |
 | 14 | Trocar o typeahead da recepção de nome para CPF (blind index) | §3.4 |
 | 15 | Estender a trilha append-only aos pontos de leitura de dado sensível | S-08 |
-| 16 | Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta | S-09 |
+| 16 | ~~Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta~~ — **feito 31/07** | S-09 |
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | ~~Índices faltantes + `(select auth.uid())` nas 5 policies~~ — **feito 31/07** | S-11 |
 | 19 | Migrar `anon key` e service role para o formato de chave revogável | S-10 |

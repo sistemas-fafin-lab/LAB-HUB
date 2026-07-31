@@ -119,6 +119,18 @@ describe('POST /cadastro — claim do paciente-fantasma (P-01)', () => {
     expect(createUser).not.toHaveBeenCalled()
   })
 
+  it('recusa o claim de prontuário de conta excluída, mesmo com a data certa', async () => {
+    // S-09: quem pede exclusão vira fantasma de novo, mas com histórico clínico
+    // retido atrás. Reivindicar isso só com CPF + nascimento seria entregar o
+    // prontuário inteiro de quem pediu para sair. O caminho de volta é o balcão.
+    await montar(cenarioFantasma(fantasma({ excluido_em: '2026-07-31T12:00:00Z' })))
+    const res = await cadastrar()
+
+    expect(res.statusCode).toBe(409)
+    expect(createUser).not.toHaveBeenCalled()
+    expect(calls.some((c) => c.op === 'update')).toBe(false)
+  })
+
   it('não sobrescreve a data que a recepção registrou', async () => {
     await montar(cenarioFantasma())
     await cadastrar()

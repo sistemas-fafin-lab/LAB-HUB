@@ -60,6 +60,7 @@ export function createSupabaseMock(opts: {
   getUser?: SupaResult
   storage?: StorageHandler
   rpc?: RpcHandler
+  deleteUser?: SupaResult
 }) {
   const calls: SupaCall[] = []
   const storageCalls: StorageCall[] = []
@@ -69,14 +70,25 @@ export function createSupabaseMock(opts: {
   // opts.rpc p/ exercitar sucesso com payload e as recusas por SQLSTATE.
   const rpcHandler: RpcHandler = opts.rpc ?? (() => ({ data: null, error: null }))
 
+  // Thenable, e não Promise pura: a RPC de exclusão devolve uma TABLE (uma
+  // linha), então a chamada real é `supabase.rpc(...).single()`. Quem só faz
+  // `await supabase.rpc(...)` continua funcionando pelo `then`.
   function rpc(fn: string, args?: Record<string, unknown>) {
     const call: RpcCall = { fn, args: args ?? {} }
     rpcCalls.push(call)
-    return Promise.resolve(rpcHandler(call))
+    const resultado = () => Promise.resolve(rpcHandler(call))
+    return {
+      single: () => resultado(),
+      then: (resolve: (r: SupaResult) => unknown, reject?: (e: unknown) => unknown) =>
+        resultado().then(resolve, reject),
+    }
   }
   const getUser = vi.fn(async () =>
     opts.getUser ?? { data: { user: { id: 'auth-user-1' } }, error: null },
   )
+  // Admin API do Auth. Só o deleteUser por ora (exclusão de conta, S-09); o
+  // createUser do cadastro é mockado caso a caso nos testes que o exercitam.
+  const deleteUser = vi.fn(async () => opts.deleteUser ?? { data: null, error: null })
 
   // Default: tudo dá certo. Os testes sobrescrevem via opts.storage p/ exercitar
   // falha de upload, de assinatura, etc.
@@ -132,6 +144,8 @@ export function createSupabaseMock(opts: {
       is: (c: string, v: unknown) => ((state.filters[c] = v), builder),
       not: (c: string, op: string, v: unknown) => ((state.filters[`${c}__not_${op}`] = v), builder),
       lt: (c: string, v: unknown) => ((state.filters[`${c}__lt`] = v), builder),
+      gte: (c: string, v: unknown) => ((state.filters[`${c}__gte`] = v), builder),
+      in: (c: string, v: unknown) => ((state.filters[`${c}__in`] = v), builder),
       or: (f: string) => ((state.filters.__or = f), builder),
       order: () => builder,
       limit: () => builder,
@@ -145,7 +159,7 @@ export function createSupabaseMock(opts: {
 
   return {
     client: {
-      auth: { getUser },
+      auth: { getUser, admin: { deleteUser } },
       from: vi.fn(from),
       rpc: vi.fn(rpc),
       storage: { from: vi.fn(storageFrom) },
@@ -154,5 +168,6 @@ export function createSupabaseMock(opts: {
     rpcCalls,
     storageCalls,
     getUser,
+    deleteUser,
   }
 }

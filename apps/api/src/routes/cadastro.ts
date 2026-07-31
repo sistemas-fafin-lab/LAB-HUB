@@ -36,7 +36,7 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
       //      só se a data de nascimento conferir com a que o balcão registrou.
       const { data: existente, error: buscaErr } = await supabase
         .from('pacientes')
-        .select('id, auth_user_id, data_nascimento')
+        .select('id, auth_user_id, data_nascimento, excluido_em')
         .eq('cpf', cpf)
         .maybeSingle()
       if (buscaErr) {
@@ -53,6 +53,18 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
           'Não foi possível cadastrar com esses dados. Se você já tem conta, use "Esqueci minha senha"; se não, procure a recepção.',
         )
       if (existente?.auth_user_id) {
+        throw recusarClaim()
+      }
+      // Quem pediu exclusão de conta vira um "fantasma" de novo — auth_user_id
+      // null, mas com o prontuário retido atrás (LGPD art. 16, I). Sem este
+      // guard, esse prontuário voltaria a ser reivindicável só com CPF +
+      // nascimento, e o prêmio aqui é o histórico clínico INTEIRO de alguém que
+      // pediu para sair, não o único agendamento de um fantasma da recepção.
+      // Mesma recusa genérica: distinguir os casos revelaria que aquele CPF já
+      // teve conta neste laboratório, que é exatamente o que a mensagem única
+      // acima existe para não contar. A pessoa que quiser voltar resolve no
+      // balcão — decisão consciente de exigir gente no caminho de volta.
+      if (existente?.excluido_em) {
         throw recusarClaim()
       }
       // Segundo fator de identidade do claim. CPF no Brasil não é segredo (nota

@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth.js'
 import { toPaciente } from '../lib/mappers.js'
 import { pacienteUpdateSchema } from '../schemas/pacienteUpdate.js'
 import { mensagemZod } from '../lib/validacao.js'
+import { excluirContaPaciente } from '../lib/expurgo.js'
 
 export async function pacientesRoutes(app: FastifyInstance): Promise<void> {
   // GET /pacientes/me — dados do paciente autenticado (derivado do JWT, D4).
@@ -47,4 +48,25 @@ export async function pacientesRoutes(app: FastifyInstance): Promise<void> {
     }
     return toPaciente(data)
   })
+
+  // DELETE /pacientes/me — exclusão de conta a pedido do titular (LGPD art. 18, VI).
+  //
+  // O que some: o acesso (usuário no Auth), os documentos que o paciente enviou,
+  // e-mail, telefone e convênio. O que fica: nome, CPF, nascimento, agendamentos
+  // e laudos — prontuário, retido por obrigação legal (CFM 1.821/2007, ressalvado
+  // pela LGPD art. 16, I). O detalhe do porquê está na migration 20260731170000.
+  //
+  // Rate limit baixo: é irreversível e ninguém exclui a conta duas vezes por
+  // minuto. Se chegar em rajada, é bug de front ou abuso — nos dois casos, segurar.
+  app.delete(
+    '/pacientes/me',
+    {
+      preHandler: authenticate,
+      config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
+    },
+    async (request, reply) => {
+      await excluirContaPaciente(request.pacienteId, request.log)
+      return reply.code(204).send()
+    },
+  )
 }
