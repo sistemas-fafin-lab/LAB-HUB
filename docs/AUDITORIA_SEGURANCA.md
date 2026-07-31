@@ -863,6 +863,27 @@ O resto era import não usado, `PADDING_FOLHA` morto, escape `\/` desnecessário
 
 **Continua aberto:** `apps/mobile` fora do lint e do CI enquanto o app estiver parado — está nos `ignores` da config, é uma linha para tirar quando voltar.
 
+#### Revisão do gate (31/07/2026)
+
+Motivo da revisão: o workflow foi escrito em 30/07 e **nunca executou** — nada foi enviado ao remoto desde então (18 commits locais). Um gate que ninguém viu rodar é uma hipótese, não um gate. Rodei o arquivo passo a passo, primeiro no repositório de trabalho e depois sobre um **clone limpo com `npm ci`**, que é o que o GitHub faz.
+
+| Passo | Repo de trabalho | Clone limpo (`npm ci`) |
+|---|---|---|
+| `npm ci` | — | **24 s**, lockfile em dia |
+| Type-check (`shared`, `api`, `web`) | OK | OK |
+| Lint | 0 erros, 3 avisos | idem |
+| Testes (`api` / `web`) | 245 / 52 | 245 / 52 |
+| Build do web | OK | OK |
+| Auditoria (`api`, `web`) | 0 e 0 | 0 e 0 |
+
+O clone limpo importa por um motivo específico: instalação nova não tem hoisting acumulado, então é onde **dependência usada mas não declarada** aparece. Foi o modo de falha do `pino` em 30/07 (`lib/http.ts` importava direto o que só existia como dependência transitiva do Fastify) — a declaração feita naquele dia está confirmada aqui.
+
+**Um defeito encontrado no próprio arquivo:** o comentário no rodapé do `ci.yml` afirmava *"Sem passo de lint: … `npm run lint` falha com command not found"*. O passo de lint tinha sido acrescentado no mesmo dia, dez linhas acima. Sobrou da versão anterior do arquivo e passou a contradizer o conteúdo — o tipo de comentário que faz a próxima pessoa duvidar do que está lendo, ou pior, acreditar nele. Removido.
+
+**Uma melhoria aplicada:** `permissions: contents: read` no topo. Sem essa declaração o `GITHUB_TOKEN` nasce com o default da organização, que pode ser escrita ampla; um job que só lê código não precisa disso, e o `postinstall` de qualquer dependência roda dentro do job. É menor privilégio no lugar de confiar que a configuração do GitHub está certa.
+
+**Observação não corrigida:** `on: [push, pull_request]` sem filtro faz um PR de branch do próprio repositório disparar **dois runs** (o `push` e o `pull_request`), com grupos de `concurrency` diferentes, então nenhum cancela o outro. É desperdício, não defeito. A correção usual — `push: branches: [main, master]` — muda quando branch de trabalho recebe CI, e isso é decisão de fluxo, não técnica.
+
 ---
 
 ### P-03 — Cabeçalhos de segurança e redação de log — ~~**BAIXO**~~ **CORRIGIDO**
