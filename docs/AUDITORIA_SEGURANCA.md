@@ -625,6 +625,16 @@ A verificação foi uma sondagem do protocolo Postgres contra o pooler, **envian
 
 **Nada quebrou, e não havia como quebrar:** não há `pg` nas dependências, não há `DATABASE_URL` em lugar nenhum e o `docker-compose.yml` do VPS não consome banco — a aplicação inteira fala HTTPS/PostgREST, que não passa por aqui. Conferido depois de aplicar: PostgREST respondeu `206` com `content-range: 0-0/8` e a API de produção respondeu `200` no `/ping`.
 
+#### Atualização de 31/07/2026 — a senha do banco é fraca, e isso reordena o achado
+
+Ao fornecer a senha para o `supabase link`, ficou visível que ela é **`labhub00421`**: 11 caracteres, só minúsculas e dígitos, contendo o nome do projeto. Está em dicionário de qualquer ferramenta de força bruta.
+
+Isso **corrige uma avaliação anterior desta auditoria**. Ao explicar por que a exposição a `0.0.0.0/0` era item de "reduzir superfície" e não emergência, o argumento usado foi que a senha era aleatória e o SCRAM impede adivinhação offline. A primeira metade era suposição, e é falsa. Com senha adivinhável e o pooler alcançável do mundo inteiro, o que separava o banco da internet passa a ser um dicionário.
+
+**A ordem correta agora:** rotacionar a senha vem **antes** de restringir CIDR, não depois — o passo 3 da correção original virou o passo 1. E rotacionar é barato: **nada na aplicação usa essa senha.** Não há `pg` nas dependências, não há `DATABASE_URL`, o `docker-compose.yml` do VPS não consome banco, e a API fala HTTPS/PostgREST com a `service_role` key, que é outro segredo. O único efeito colateral é ter de refazer o `supabase link` na máquina de desenvolvimento.
+
+A senha também trafegou por uma conversa de chat, o que é motivo suficiente para trocá-la mesmo que fosse forte.
+
 **O que continua aberto, e por quê.** `dbAllowedCidrs` segue `0.0.0.0/0` **por decisão do usuário**: a máquina de trabalho tem IP dinâmico, e travar a allowlist no IP de hoje faria o `supabase db push` (P-04) falhar um dia com um timeout sem explicação — o tipo de defesa que se desliga sozinha na primeira vez que atrapalha. A escolha é consciente, não esquecimento.
 
 Se um dia isso for retomado, dois fatos poupam a investigação: (a) o fluxo de trabalho atual **já não usa a porta 5432** — todas as migrations desta auditoria foram aplicadas pela Management API por HTTPS, então dá para fechar bem apertado sem perder capacidade; (b) **não há risco de se trancar para fora** — a Management API e o painel não passam pela restrição de rede, então a reabertura é sempre possível. Falta confirmar empiricamente se a restrição alcança o pooler além do host direto; a sondagem acima é o teste pronto para isso.
@@ -1248,7 +1258,18 @@ Varredura do resto do schema para não sobrar órfão: **6 tabelas** (`pacientes
 **Duas ressalvas honestas:**
 
 - `create event trigger` exige papel com privilégio de superusuário. No ambiente local (`supabase start`) roda; contra projeto hospedado, o `postgres` do CLI pode não ter o direito. Em produção isso não é problema, porque os dois objetos já existem e a migration nasce marcada como aplicada — mas está escrito no cabeçalho dela para quem for recriar um ambiente hospedado.
-- O `supabase link` continua sem rodar, e é ele que dá `migration list` e `db pull` de graça. Não foi feito aqui porque exige a senha do banco. O ledger, que era o que faltava para o `db push` ser seguro, já está de pé.
+- ~~O `supabase link` continua sem rodar~~ — **feito no mesmo dia**, depois que o usuário forneceu a senha do banco. O `supabase migration list` confirma o ledger construído à mão, e essa é a validação mais forte possível: quem julga não sou eu, é a própria ferramenta que reclamaria da divergência.
+
+```
+local            remote           time
+20260626120000   20260626120000   2026-06-26 12:00:00
+…                …                …
+20260731150000   20260731150000   2026-07-31 15:00:00
+```
+
+As 14 com `local == remote`, nenhuma linha só de um lado. O `supabase/.temp/` que o `link` cria entrou no `.gitignore`: guarda estado de sessão por máquina, não pertence ao repositório.
+
+`supabase db diff`/`db pull` não rodaram — exigem Docker para o shadow database, indisponível nesta máquina. A varredura manual de tabelas, triggers, policies e views cobre o mesmo terreno para objetos; o que ela não pegaria é diferença fina de *default* ou *constraint*, que fica para quando houver Docker.
 
 ---
 

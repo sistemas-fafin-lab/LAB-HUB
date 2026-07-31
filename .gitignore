@@ -41,3 +41,7 @@ Thumbs.db
 
 .vercel
 .env*
+
+# Estado local do CLI do Supabase (guarda o project-ref e credenciais de sessão
+# do `supabase link`). É por máquina, não por repositório.
+supabase/.temp/
