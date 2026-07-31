@@ -292,6 +292,18 @@ Rollback conferido depois: nascimento de volta em 2005-01-01, 8 pacientes, e nen
 
 **A ponta a ponta ficou provada de graça, e não por mim:** a trilha já tinha uma linha de 31/07 com `autorizado_por = Gabriel Silva Carneiro <tech2.laboratorio.lab@gmail.com>` e `documento_conferido = CNH`. É uma correção real, feita pela tela, com a identidade do operador vinda da **sessão** do FlowLab — que era exatamente o que faltava verificar do lado que eu não conseguia alcançar sem um login.
 
+Confirmado depois, lendo a trilha: às 17:47 saiu a primeira correção de **paciente sem conta** (`sem_conta = true`), com CPF e nascimento alterados e a mesma autoria de sessão. As três linhas juntas cobrem o recurso inteiro — com conta e sem conta, só nascimento e CPF+nascimento.
+
+### 31/07/2026 — P-04 fechado (ledger de migrations)
+
+| | |
+|---|---|
+| **Banco** | `supabase_migrations.schema_migrations` criada e preenchida com as 14 versões (equivale a `migration repair --status applied`) |
+| **Repo** | `20260731150000_p04_captura_rls_auto_enable.sql` — DDL extraído do catálogo de produção |
+| **Verificação** | 14 no banco × 14 no repositório, zero divergência dos dois lados; varredura de tabelas, triggers, policies e views sem órfão |
+
+O diagnóstico de julho estava incompleto: o ledger não estava desatualizado, **não existia**. Detalhe, incluindo por que um `db push` às cegas falharia alto em vez de destruir dado, na seção P-04.
+
 ---
 
 # PARTE 1 — SUPABASE
@@ -1182,7 +1194,7 @@ A lógica ficou em `lib/http.ts`, e não no `server.ts`, por um motivo prático:
 
 ---
 
-### P-04 — As migrations não refletem o banco real — **MÉDIO (processo)**
+### P-04 — As migrations não refletem o banco real — ~~**MÉDIO (processo)**~~ **CORRIGIDO 31/07/2026**
 
 O projeto **não está linkado** ao CLI (`supabase link` nunca rodou; não há `supabase/config.toml`), e o banco tem pelo menos um objeto que não existe no repositório: a função `rls_auto_enable()` e seu event trigger (S-07).
 
@@ -1195,6 +1207,48 @@ supabase db pull            # traz o schema real para uma migration
 supabase migration list     # confere o que está aplicado vs. o que está no repo
 ```
 E, daqui em diante, toda mudança de schema entra por migration — inclusive as feitas pelo painel.
+
+#### Verificação pós-correção (31/07/2026)
+
+Medido antes de agir, e o diagnóstico de julho estava **incompleto**:
+
+```
+supabase_migrations.schema_migrations  →  NÃO EXISTIA
+migrations no repositório              →  13
+```
+
+Não era um ledger desatualizado: **ele não existia**. As 13 migrations entraram por SQL direto (painel e Management API), e o banco não tinha registro de nenhuma. Um `supabase db push` enxergaria as 13 como pendentes e tentaria reaplicar tudo num banco que já tinha tudo.
+
+**Qual seria o estrago, de verdade** — vale a distinção entre "destrutivo" e "barulhento":
+
+| | |
+|---|---|
+| `drop table` / `truncate` no nível da migration | **nenhum** |
+| `delete from` | só dentro de corpo de função (tempo de execução, não de aplicação) |
+| `create table` sem `if not exists` | **5 migrations** |
+
+O push morreria no primeiro `create table` com *relation already exists*, antes de tocar em dado. A armadilha era **menos perigosa do que esta auditoria supunha** — falha alto em vez de corromper em silêncio. O prejuízo real era o outro: ambiente recriado ≠ produção.
+
+**O que foi feito, sem CLI e sem a senha do banco** (o `link` exige as duas):
+
+1. **Ledger criado e preenchido** pela Management API — `supabase_migrations.schema_migrations` com as 14 versões marcadas como aplicadas. É o equivalente exato a `supabase migration repair --status applied` em cada uma. Escreve numa tabela de controle nova; não toca em dado nenhum.
+2. **Órfãos capturados** em `20260731150000_p04_captura_rls_auto_enable.sql`, com o DDL extraído do catálogo de produção (`pg_get_functiondef` + `pg_event_trigger`), não reescrito de memória.
+
+Estado final, conferido lendo o banco e o diretório:
+
+```
+registradas no banco : 14
+no repositório       : 14
+só no banco          : nenhuma
+só no repositório    : nenhuma
+```
+
+Varredura do resto do schema para não sobrar órfão: **6 tabelas** (`pacientes`, `agendamentos`, `resultados`, `documentos`, `exam_results`, `correcoes_identidade`), **3 triggers**, **5 policies**, **0 views** — tudo criado por migration do repositório.
+
+**Duas ressalvas honestas:**
+
+- `create event trigger` exige papel com privilégio de superusuário. No ambiente local (`supabase start`) roda; contra projeto hospedado, o `postgres` do CLI pode não ter o direito. Em produção isso não é problema, porque os dois objetos já existem e a migration nasce marcada como aplicada — mas está escrito no cabeçalho dela para quem for recriar um ambiente hospedado.
+- O `supabase link` continua sem rodar, e é ele que dá `migration list` e `db pull` de graça. Não foi feito aqui porque exige a senha do banco. O ledger, que era o que faltava para o `db push` ser seguro, já está de pé.
 
 ---
 
@@ -1433,7 +1487,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 8 | ~~Ligar SSL enforcement~~ — **feito 31/07**. `dbAllowedCidrs` mantido aberto (IP dinâmico); rotação de senha pendente | S-03 |
 | 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
 | 10 | ~~SMTP próprio, `site_url` real, `uri_allow_list`, `REQUIRE_EMAIL_CONFIRMATION=true`~~ — **feito 31/07**, templates em português e verificado em produção | S-05 |
-| 11 | `supabase link` + `db pull` — realinhar migrations com o banco real | P-04 |
+| 11 | ~~Realinhar migrations com o banco real~~ — **feito 31/07** (ledger criado + órfãos capturados, sem CLI); `supabase link` segue pendente, exige a senha do banco | P-04 |
 | 12 | ~~Workflow de CI com `type-check`, `lint`, `test`, `audit --audit-level=high`~~ — **feito 30/07** (ESLint instalado e configurado no mesmo dia) | P-02 |
 
 ### Este mês
