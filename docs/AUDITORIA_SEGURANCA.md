@@ -29,6 +29,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | P-03 | API sem cabeçalhos de segurança (helmet) e sem redação de PII nos logs | ~~**BAIXO**~~ **CORRIGIDO 30/07/2026** |
 | S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | **BAIXO** |
 | S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | **PERF** |
+| P-06 | `FLOWLAB_API_KEY` de produção é `flowAPIKey1234567890`; sozinha, reescreve o CPF de qualquer paciente | **ALTO** (novo 31/07) |
 
 **Ordem de ataque recomendada:** ~~S-01~~ (feito) → ~~P-01~~ (feito) → **S-02**/~~S-03~~ (parcial)/~~S-04~~/~~S-05~~ → criptografia (Parte 3) → o resto.
 
@@ -1194,6 +1195,35 @@ Três notas que valem mais que os diffs:
 2. **Os 404 continuam indistinguíveis entre si de propósito** — id inexistente, id de outro paciente e resultado sem PDF devolvem a mesma frase. Separar contaria a quem o id pertence. Há teste fixando isso, para que a próxima pessoa não "melhore" a mensagem.
 3. **O mock de Storage descartava o TTL.** Nenhum teste do repositório jamais conferiu esse valor em nenhuma rota: dava para trocar 300 por 3600 em `documentos.ts` e a suíte continuar verde. Corrigido no helper, não só onde o P-05 apontava.
 
+### P-06 — A `FLOWLAB_API_KEY` de produção é um valor de exemplo — **ALTO**
+
+Achado em 31/07/2026, ao verificar a tela de correção de identidade. **Verificado ao vivo:** a API de produção (`labhub.ngrok.app`) aceita `x-api-key: flowAPIKey1234567890`. Não é um segredo aleatório — é uma string de desenvolvimento, do tipo que se adivinha ou que sobra em print, chat e tutorial.
+
+O que essa chave abre, sozinha, sem nenhum JWT:
+
+| Rota | O que dá para fazer |
+|---|---|
+| `GET /integracao/pacientes/buscar?q=` | listar pacientes por nome — devolve `id`, nome, data de nascimento e CPF mascarado |
+| `POST /integracao/pacientes/:id/correcao-identidade` | **reescrever CPF e data de nascimento de qualquer paciente** |
+| `GET /integracao/agendamentos/:id/documentos` | ler os documentos do paciente (RG/CNH/carteirinha/pedido) |
+| `POST /integracao/agendamentos/:id/documentos` | enviar documento no cadastro de um paciente |
+| `POST /integracao/agendamentos` | criar agendamento |
+
+As duas primeiras linhas se encadeiam: a busca entrega o `id`, e a correção aceita esse `id`. **Isso reabre exatamente o que S-01 e P-01 fecharam** — a diferença é que agora o caminho não é o portal do paciente, é o canal de integração. O trigger `trg_pacientes_identidade` não protege daqui, porque a RPC de correção é justamente a saída autorizada que ele deixou aberta.
+
+A severidade subiu **hoje**: antes de a rota de correção existir, a chave dava leitura de PII e escrita de agendamento. Agora dá escrita de identidade.
+
+O que não é o caso, e vale registrar para não superestimar: a string **não está no histórico de nenhum dos dois repositórios** (conferido com `git log -S` em `flowlab` e `LAB-HUB`; os dois são públicos no GitHub, e o `.env.example` de cada um traz placeholder, não o valor). O risco é a fraqueza do valor, não uma publicação.
+
+**Correção — rotacionar para um segredo aleatório.** A chave é compartilhada, então a troca precisa ser simultânea em quatro lugares, ou a integração cai:
+
+1. Vercel do FlowLab (`FLOWLAB_API_KEY`, **Production e Preview**)
+2. `.env` da API do LAB-HUB **no VPS** (mudar o local não muda produção — ver a topologia)
+3. Segredo `flowlab_api_key` no Vault do Supabase de produção do FlowLab
+4. `FLOWLAB_API_KEY` do `.env` local de quem desenvolve
+
+Enquanto não rotaciona, o mitigante que existe é o rate limit de 10/min na rota de correção — que reduz o volume, não o acesso.
+
 ---
 
 # PARTE 3 — Plano de criptografia dos dados do paciente
@@ -1356,6 +1386,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 
 | | Ação | Onde |
 |---|---|---|
+| 6.5 | **Rotacionar a `FLOWLAB_API_KEY`** nos 4 lugares (Vercel Prod+Preview, `.env` do VPS, Vault do Supabase do FlowLab, `.env` local) | P-06 |
 | 7 | `pg_dump` cifrado agendado + **teste de restauração** | S-02 |
 | 8 | ~~Ligar SSL enforcement~~ — **feito 31/07**. `dbAllowedCidrs` mantido aberto (IP dinâmico); rotação de senha pendente | S-03 |
 | 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
