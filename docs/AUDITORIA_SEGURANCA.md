@@ -1258,6 +1258,14 @@ O que não é o caso, e vale registrar para não superestimar: a string **não e
 
 Enquanto não rotaciona, o mitigante que existe é o rate limit de 10/min na rota de correção — que reduz o volume, não o acesso.
 
+> **Rotação dispensada por decisão do usuário em 31/07/2026.** Fica registrado
+> para quem ler depois: o achado não foi refutado, foi aceito. O que muda o
+> cálculo, se um dia for retomado, é que a simultaneidade nos quatro lugares
+> **não é obrigatória** — bastaria a API do LAB-HUB aceitar duas chaves durante
+> uma janela de transição (`FLOWLAB_API_KEY` e `FLOWLAB_API_KEY_ANTERIOR`, ambas
+> na mesma comparação de tempo constante de `middlewares/apiKey.ts`), e aí a
+> troca vira quatro passos independentes, sem queda nenhuma da integração.
+
 ---
 
 # PARTE 3 — Plano de criptografia dos dados do paciente
@@ -1420,7 +1428,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 
 | | Ação | Onde |
 |---|---|---|
-| 6.5 | **Rotacionar a `FLOWLAB_API_KEY`** nos 4 lugares (Vercel Prod+Preview, `.env` do VPS, Vault do Supabase do FlowLab, `.env` local) | P-06 |
+| 6.5 | ~~Rotacionar a `FLOWLAB_API_KEY`~~ — **dispensado pelo usuário 31/07** (achado aceito, não refutado) | P-06 |
 | 7 | `pg_dump` cifrado agendado + **teste de restauração** | S-02 |
 | 8 | ~~Ligar SSL enforcement~~ — **feito 31/07**. `dbAllowedCidrs` mantido aberto (IP dinâmico); rotação de senha pendente | S-03 |
 | 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
