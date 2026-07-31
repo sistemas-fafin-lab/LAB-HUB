@@ -152,14 +152,14 @@ Helmet, redação de log e CORS que falha no boot em produção em vez de libera
 
 > **Nota de processo.** Não existe `supabase_migrations.schema_migrations` neste projeto — o schema nunca passou pelo CLI, foi tudo aplicado à mão. Os arquivos em `supabase/migrations/` são o registro versionado do que foi aplicado, não algo que uma ferramenta rastreia. Criar essa tabela agora faria um `db push` futuro achar que só as migrations novas estão aplicadas e tentar rodar as 8 antigas do zero. Ver P-04.
 
-### 31/07/2026 — P-05 (parte de código fechada)
+### 31/07/2026 — P-05 fechado
 
 | | |
 |---|---|
 | **Código** | `apps/api/src/routes/resultados.ts`, `apps/api/src/lib/nomeArquivo.ts` (novo), `apps/api/src/routes/documentos.ts`, `apps/api/src/routes/integracao.ts`, `apps/api/test/helpers.ts` |
 | **Testes** | `apps/api/test/resultados.test.ts` (novo, 9 — a rota **não tinha nenhum**), `apps/api/test/nomeArquivo.test.ts` (novo, 4) |
-| **SQL preparado, não aplicado** | `20260731120000_p05_unifica_trigger_atualizado_em.sql`, `20260731130000_p05_limites_bucket_laudos.sql` |
-| **Verificação** | 245 testes na API (era 232), type-check e lint limpos |
+| **Banco** | `20260731120000_p05_unifica_trigger_atualizado_em.sql`, `20260731130000_p05_limites_bucket_laudos.sql` — **aplicadas em produção** |
+| **Verificação** | 245 testes na API (era 232), type-check e lint limpos; trigger repontado testado em produção com rollback garantido |
 
 Três coisas mudaram de fato:
 
@@ -169,10 +169,28 @@ Três coisas mudaram de fato:
 
 **Descoberta no meio do caminho:** o mock de Storage em `test/helpers.ts` **descartava o TTL** (`_ttl`), então nenhum teste jamais conferiu esse número. Era possível trocar 300 por 3600 em qualquer rota e a suíte inteira continuar verde. O `ttl` agora é registrado na `StorageCall`.
 
-**As duas migrations foram escritas, mas não aplicadas** — aguardam decisão, por serem DDL em produção. Levantamento feito antes de escrevê-las, por consulta somente leitura:
+**As duas migrations de banco foram aplicadas em produção** no mesmo dia, autorizadas pelo usuário. Levantamento feito antes de escrevê-las, por consulta somente leitura:
 
-- `set_updated_at()` e `set_atualizado_em()` servem **um trigger cada** (`agendamentos` e `exam_results`), sem uso fora disso. A justificativa escrita na migration de 21/07 (*"aqui a coluna se chama atualizado_em, então o trigger precisa da sua própria função"*) é **falsa**: `set_updated_at()` também atribui `new.atualizado_em`, e nunca houve coluna `updated_at` neste schema. Fica a de nome correto; a migration também põe `search_path = ''` nela, fechando parte do S-10.
-- O bucket `laudos` está com `file_size_limit` e `allowed_mime_types` nulos e **0 objetos** — ou seja, restringir agora não pode invalidar nada existente.
+- `set_updated_at()` e `set_atualizado_em()` serviam **um trigger cada** (`agendamentos` e `exam_results`), sem uso fora disso. A justificativa escrita na migration de 21/07 (*"aqui a coluna se chama atualizado_em, então o trigger precisa da sua própria função"*) é **falsa**: `set_updated_at()` também atribui `new.atualizado_em`, e nunca houve coluna `updated_at` neste schema. Ficou a de nome correto, com `search_path = ''`, o que fecha parte do S-10 para ela.
+- O bucket `laudos` estava com `file_size_limit` e `allowed_mime_types` nulos e **0 objetos** — restringir não podia invalidar nada existente.
+
+Estado depois de aplicar (lido de produção):
+
+```
+set_atualizado_em | proconfig={search_path=""} | trg_exam_results_atualizado_em -> exam_results,
+                                                 trg_agendamentos_updated -> agendamentos
+laudos | private | 10485760 | {application/pdf} | 0 objetos
+```
+
+**Repontar um trigger em produção pede teste de comportamento, não só de catálogo** — `pg_trigger` mostrar o vínculo não prova que a função carimba. O teste rodou dentro de `do $$ … raise exception`, que aborta a transação inteira e garante que nenhum UPDATE persiste (a Management API não tem dry-run e pode dar autocommit por statement, então `begin … rollback` solto não serviria):
+
+```
+RESULTADO || agendamentos: linha=0213ca22-… carimbou=true || exam_results: linha=nenhuma carimbou=n/a
+```
+
+Rollback conferido depois: a linha usada continua com `atualizado_em` de 27/07, 3 dias antes do teste.
+
+**O que esse teste não cobriu:** `exam_results` está vazia, então o trigger dela não foi exercitado. O risco é baixo e vale registrar por quê — o trigger de `exam_results` **não foi repontado** (já apontava para `set_atualizado_em`); o que mudou para ele foi só o corpo da função, que é o mesmo que acabou de carimbar `agendamentos`.
 
 **Fora de escopo por decisão anterior:** tirar `apps/mobile` do workspace (o app está parado, mesmo motivo pelo qual ficou fora do CI).
 
@@ -935,15 +953,15 @@ E, daqui em diante, toda mudança de schema entra por migration — inclusive as
 
 ### P-05 — Observações de qualidade (não-segurança) — **CORRIGIDO (código) 31/07/2026**
 
-> **STATUS 31/07/2026:** os três itens de código estão fechados. Os dois de banco
-> têm migration escrita e **aguardam aplicação**. Um item segue fora de escopo
-> por decisão anterior. Ver "Verificação pós-correção" no fim da seção.
+> **STATUS 31/07/2026:** os cinco itens acionáveis estão fechados — três em
+> código, dois em banco (migrations aplicadas em produção). O sexto segue fora
+> de escopo por decisão anterior. Ver "Verificação pós-correção" no fim da seção.
 
 - ~~**`resultados.ts` funde erro de banco com "não encontrado"**~~ **CORRIGIDO.** (`maybeSingle` sem checar `error` separadamente) — o próprio `documentos.ts` comentava isso como defeito conhecido de `resultados.ts:31`. Uma falha transitória do banco virava 404 mentiroso. Correção de 3 linhas, no padrão que `documentos.ts` já usa.
 - ~~**TTL de signed URL inconsistente**~~ **CORRIGIDO.** 300 s em `documentos.ts`, 900 s em `integracao.ts` (ambos justificados por escrito), mas **3600 s** em `resultados.ts:38` sem justificativa. Uma URL de laudo válida por uma hora sobrevive a histórico de browser e link compartilhado por engano. Alinhado para 300 s.
 - ~~**`sanitizarNome()` está duplicada**~~ **CORRIGIDO.** Estava em `routes/documentos.ts` e `routes/integracao.ts`, com o comentário explicando que foi mantida local "para não acoplar os dois arquivos". Virou `lib/nomeArquivo.ts` — em vez do teste de equivalência que este relatório sugeria, que detectaria a divergência em vez de impedi-la.
-- **`set_updated_at()` e `set_atualizado_em()` têm corpo idêntico** — ambas atribuem `new.atualizado_em`. A segunda foi criada porque a primeira "era de `agendamentos`", mas as duas escrevem a mesma coluna. Uma função só serve as duas tabelas; a duplicata é manutenção dobrada para zero ganho. → migration `20260731120000` escrita, **não aplicada**.
-- **Bucket `laudos` sem `file_size_limit` nem `allowed_mime_types`**, ao contrário de `documentos`. Só o `service_role` escreve nele, então o risco é baixo, mas a assimetria não tem razão de ser. → migration `20260731130000` escrita, **não aplicada**.
+- **`set_updated_at()` e `set_atualizado_em()` têm corpo idêntico** — ambas atribuem `new.atualizado_em`. A segunda foi criada porque a primeira "era de `agendamentos`", mas as duas escrevem a mesma coluna. Uma função só serve as duas tabelas; a duplicata é manutenção dobrada para zero ganho. → **CORRIGIDO**, migration `20260731120000`.
+- **Bucket `laudos` sem `file_size_limit` nem `allowed_mime_types`**, ao contrário de `documentos`. Só o `service_role` escreve nele, então o risco é baixo, mas a assimetria não tem razão de ser. → **CORRIGIDO**, migration `20260731130000`.
 - **`apps/mobile` é protótipo com mocks** (`src/mocks/exams.ts`), sem cliente Supabase e sem chamada de API. Não é superfície de ataque hoje, mas é a origem da maior parte dos 16 avisos de `npm audit` (toolchain do Expo). Se o app está parado, considere movê-lo para fora do workspace principal para não poluir a auditoria do que está em produção. → **fora de escopo** enquanto o mobile estiver parado (mesma decisão que o tirou do CI).
 
 #### Verificação pós-correção (31/07/2026)
@@ -1144,9 +1162,9 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | Índices faltantes + `(select auth.uid())` nas 5 policies | S-11 |
 | 19 | Migrar `anon key` e service role para o formato de chave revogável | S-10 |
-| 20 | `search_path = ''` nas funções; unificar `set_updated_at`/`set_atualizado_em` | S-10 / P-05 — migration `20260731120000` escrita, **falta aplicar** |
+| 20 | `search_path = ''` nas funções (parcial: falta `rls_auto_enable`); ~~unificar `set_updated_at`/`set_atualizado_em`~~ — **feito 31/07** | S-10 / P-05 |
 | 21 | ~~Alinhar TTL de signed URL em `resultados.ts` (3600 s → 300 s)~~ — **feito 31/07**, junto com o 404 mentiroso e a duplicata de `sanitizarNome` | P-05 |
-| 22 | Limites do bucket `laudos` (10 MB + `application/pdf`) | P-05 — migration `20260731130000` escrita, **falta aplicar** |
+| 22 | ~~Limites do bucket `laudos` (10 MB + `application/pdf`)~~ — **feito 31/07** | P-05 |
 
 ---
 
