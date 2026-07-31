@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { booleanEnv, numeroEnv, requireEnv } from '../src/lib/env.js'
+import { booleanEnv, chaveSupabase, numeroEnv, requireEnv } from '../src/lib/env.js'
 
 // Config quebrada não pode virar comportamento estranho. Os dois modos de falha
 // abaixo são reais e aconteciam antes do guard:
@@ -103,5 +103,54 @@ describe('requireEnv', () => {
 
   it('lança nomeando a variável — erro de boot tem que dizer qual falta', () => {
     expect(() => requireEnv(VAR)).toThrow(VAR)
+  })
+})
+
+// S-10: as chaves legadas (`anon`/`service_role`) são JWTs assinados com o
+// segredo do projeto — não se revoga uma sem rotacionar o segredo inteiro e
+// derrubar toda sessão viva. As novas (`sb_secret_…`) são revogáveis uma a uma.
+// Aceitar os dois nomes é o que deixa a troca acontecer em produção sem uma
+// janela em que a API fique sem chave válida.
+describe('chaveSupabase', () => {
+  const NOVO = 'TESTE_CHAVE_NOVA'
+  const LEGADO = 'TESTE_CHAVE_LEGADA'
+
+  afterEach(() => {
+    delete process.env[NOVO]
+    delete process.env[LEGADO]
+  })
+
+  it('prefere a chave nova quando as duas existem', () => {
+    process.env[NOVO] = 'sb_secret_nova'
+    process.env[LEGADO] = 'eyJlegada'
+    expect(chaveSupabase(NOVO, LEGADO)).toBe('sb_secret_nova')
+  })
+
+  it('cai na legada enquanto a migração não terminou, avisando', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    process.env[LEGADO] = 'eyJlegada'
+
+    expect(chaveSupabase(NOVO, LEGADO)).toBe('eyJlegada')
+    // O aviso é o que impede a migração de parar no meio e ser esquecida.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(NOVO))
+  })
+
+  it('não avisa se a chave nova já foi colocada na variável de nome legado', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    process.env[LEGADO] = 'sb_secret_nova'
+
+    expect(chaveSupabase(NOVO, LEGADO)).toBe('sb_secret_nova')
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('ignora valor só com espaços, em vez de subir com chave vazia', () => {
+    process.env[NOVO] = '   '
+    process.env[LEGADO] = 'sb_secret_nova'
+    expect(chaveSupabase(NOVO, LEGADO)).toBe('sb_secret_nova')
+  })
+
+  it('lança nomeando as DUAS variáveis — quem lê o erro precisa saber a saída', () => {
+    expect(() => chaveSupabase(NOVO, LEGADO)).toThrow(NOVO)
+    expect(() => chaveSupabase(NOVO, LEGADO)).toThrow(LEGADO)
   })
 })

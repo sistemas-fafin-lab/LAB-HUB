@@ -3,7 +3,10 @@
 interface ImportMetaEnv {
   readonly VITE_API_URL?: string
   readonly VITE_SUPABASE_URL: string
-  readonly VITE_SUPABASE_ANON_KEY: string
+  // As duas são opcionais no TIPO porque exatamente uma precisa existir, e o
+  // guard de lib/supabase.ts é quem checa isso — ver § S-10 da auditoria.
+  readonly VITE_SUPABASE_PUBLISHABLE_KEY?: string
+  readonly VITE_SUPABASE_ANON_KEY?: string
   readonly VITE_UMAMI_TRACKER_SRC?: string
   readonly VITE_UMAMI_WEBSITE_ID?: string
 }

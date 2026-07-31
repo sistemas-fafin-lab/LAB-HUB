@@ -27,7 +27,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | **MÉDIO** |
 | S-09 | Sem política de retenção/expurgo; `on delete cascade` deixa arquivos órfãos no Storage | ~~**MÉDIO**~~ **CORRIGIDO 31/07/2026** |
 | P-03 | API sem cabeçalhos de segurança (helmet) e sem redação de PII nos logs | ~~**BAIXO**~~ **CORRIGIDO 30/07/2026** |
-| S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | **BAIXO** |
+| S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | ~~**BAIXO**~~ **parcial 31/07** (`search_path` feito; chaves: código pronto, produção pendente) |
 | S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | ~~**PERF**~~ **CORRIGIDO 31/07/2026** |
 | P-06 | `FLOWLAB_API_KEY` de produção é `flowAPIKey1234567890`; sozinha, reescreve o CPF de qualquer paciente | **ALTO** (novo 31/07) |
 
@@ -348,6 +348,20 @@ Duas coisas que este item obrigou a decidir antes de programar:
 2. **O cascade era uma bomba armada.** `auth.admin.deleteUser()` teria apagado prontuário e trilha de auditoria em silêncio, deixando os arquivos órfãos no bucket. A ordem correta — desvincular antes de apagar o usuário — é o que a RPC existe para permitir sem reabrir o S-01.
 
 Detalhe, tabela de comportamento medido e o efeito colateral no claim do P-01 na seção S-09.
+
+---
+
+### 31/07/2026 — S-10: chaves revogáveis (código pronto, produção pendente)
+
+| | |
+|---|---|
+| **Código** | `lib/env.ts` (`chaveSupabase`), `apps/api/src/lib/supabase.ts`, `apps/web/src/lib/supabase.ts`, os dois `.env.example` |
+| **Testes** | 5 casos novos em `env.test.ts`; API em 261, web em 52 |
+| **Verificação** | as chaves `sb_publishable_`/`sb_secret_` foram exercitadas contra produção: a primeira mapeia para `anon` e apanha do revoke do S-01, a segunda ignora RLS igual à legada |
+
+**Isto não fecha o S-10.** O código aceita as chaves novas; produção continua usando as legadas até que a env mude no VPS e no host do front. Desativar as legadas agora derrubaria API e portal no mesmo segundo — é a última etapa, e é do responsável. Passo a passo na seção S-10.
+
+O achado do `search_path`, que constava como pendente, já estava fechado — ver a correção do plano de ação no mesmo dia.
 
 ---
 
@@ -1030,7 +1044,12 @@ Os padrões erram para o lado de reter um pouco mais, que é o lado recuperável
 > `pg_catalog` (precisa dele para enxergar os catálogos que consulta).
 > `set_updated_at` não existe mais — foi unificada. O advisor de segurança não
 > reporta mais `function_search_path_mutable`. O plano de ação dizia que faltava
-> `rls_auto_enable`; era falso positivo. Seguem abertos os outros dois bullets.
+> `rls_auto_enable`; era falso positivo.
+>
+> **O item das chaves está PELA METADE (31/07/2026):** o código já aceita as
+> chaves novas, e elas foram testadas contra produção. O que falta **não é
+> código** — é trocar a env no VPS e no host do front e desativar as legadas no
+> painel. Ver "Migração das chaves" no fim da seção.
 
 - **`set_updated_at()` e `set_atualizado_em()` sem `search_path` fixo** (2 warnings do advisor). São triggers simples e não `SECURITY DEFINER`, então o risco real é baixo, mas o custo da correção é uma linha:
   ```sql
@@ -1042,6 +1061,45 @@ Os padrões erram para o lado de reter um pouco mais, que é o lado recuperável
 - **`anon key` no formato JWT legado** (`eyJhbGciOiJIUzI1NiIs…`). Chaves legadas não são revogáveis individualmente: vazou, só rotacionando o JWT secret do projeto inteiro, o que invalida todas as sessões. As novas chaves `publishable`/`secret` do Supabase são revogáveis e rotacionáveis isoladamente. Migrar é barato e vale — principalmente para a **service role**, que hoje é o segredo mais valioso do sistema.
 
 - **`max_rows = 1000` no PostgREST.** Depois do revoke de S-01 isso deixa de importar para `anon`/`authenticated`, mas mantenha em mente que é o teto por request.
+
+#### Migração das chaves (31/07/2026) — código pronto, produção pendente
+
+**As chaves novas já existem** e nasceram com o projeto em 24/06/2026 — ninguém precisou criá-las:
+
+| Tipo | Prefixo | Criada em |
+|---|---|---|
+| `publishable` | `sb_publishable_BWoaU…` | 24/06/2026 |
+| `secret` | `sb_secret_hDgbe…` | 24/06/2026 |
+| `legacy` anon / service_role | JWT `eyJ…` | (nascem com o projeto) |
+
+**Testadas contra produção antes de qualquer recomendação** (só o status HTTP foi impresso; os valores nunca saíram da variável de shell):
+
+```
+publishable → /auth/v1/health ................. 200
+publishable → /rest/v1/pacientes .............. 401  permission denied for table pacientes
+secret      → /rest/v1/pacientes .............. 200  devolveu linhas
+legacy anon → /rest/v1/pacientes .............. 401  idêntico à publishable
+```
+
+Os dois lados ficam provados de uma vez: a `publishable` mapeia para `anon` e bate na mesma parede que o S-01 levantou (SQLSTATE 42501), e a `secret` ignora RLS como a `service_role` legada. **Trocar a chave não muda comportamento nenhum** — muda só o custo de revogá-la se vazar.
+
+**O que foi feito no código.** As duas pontas passam a aceitar o nome novo e o legado, preferindo o novo:
+
+| Onde | Novo | Reserva |
+|---|---|---|
+| `apps/api/src/lib/supabase.ts` | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_ROLE_KEY` |
+| `apps/web/src/lib/supabase.ts` | `VITE_SUPABASE_PUBLISHABLE_KEY` | `VITE_SUPABASE_ANON_KEY` |
+
+Aceitar os dois **não é indecisão** — é o que torna a troca reversível numa infra que não se implanta por push: a API roda em docker-compose num VPS, então deploy do código e ajuste do ambiente são dois atos separados, em momentos separados. Exigir os dois no mesmo instante criaria uma janela com a API sem chave válida. E para a migração não parar no meio e ser esquecida, `chaveSupabase()` avisa no boot enquanto o valor ainda for um JWT (`eyJ…`) — só nesse caso, para não incomodar quem já colocou a chave nova na variável de nome antigo.
+
+**O que falta, e é sua mão, não minha** (nesta ordem — a última etapa é a única irreversível):
+
+1. Subir o código que entende os dois nomes.
+2. No VPS: `SUPABASE_SECRET_KEY=sb_secret_…` no `.env` do compose e recriar o container. Some o aviso no boot.
+3. No host do front: `VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_…` e **rebuild** — é env de build, não de runtime; trocar sem rebuildar não muda o bundle.
+4. Confirmar que os dois sobem, e só então desativar as legadas no painel.
+
+**Não desativei as legadas.** Fazê-lo agora derrubaria a API e o portal no mesmo segundo, porque produção ainda usa a chave antiga. Essa etapa só é segura depois de (2) e (3), e é sua para dar.
 
 ---
 
@@ -1686,7 +1744,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 16 | ~~Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta~~ — **feito 31/07** | S-09 |
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | ~~Índices faltantes + `(select auth.uid())` nas 5 policies~~ — **feito 31/07** | S-11 |
-| 19 | Migrar `anon key` e service role para o formato de chave revogável | S-10 |
+| 19 | Migrar `anon key` e service role para o formato de chave revogável — **código feito 31/07**; falta trocar a env no VPS/front e desativar as legadas | S-10 |
 | 20 | ~~`search_path` fixo nas funções~~ — **feito**; ~~unificar `set_updated_at`/`set_atualizado_em`~~ — **feito 31/07** | S-10 / P-05 |
 | 21 | ~~Alinhar TTL de signed URL em `resultados.ts` (3600 s → 300 s)~~ — **feito 31/07**, junto com o 404 mentiroso e a duplicata de `sanitizarNome` | P-05 |
 | 22 | ~~Limites do bucket `laudos` (10 MB + `application/pdf`)~~ — **feito 31/07** | P-05 |

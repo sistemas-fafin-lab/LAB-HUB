@@ -36,6 +36,45 @@ export function numeroEnv(name: string, padrao: number, minimo = 0): number {
 }
 
 /**
+ * Lê a chave do Supabase aceitando o nome NOVO e, como reserva, o LEGADO.
+ *
+ * As chaves antigas (`anon`/`service_role`) são JWTs assinados com o segredo do
+ * projeto: não dá para revogar uma sem rotacionar o segredo inteiro, o que
+ * derruba todas as sessões de todo mundo. As novas (`sb_publishable_…`,
+ * `sb_secret_…`) são opacas e revogáveis uma a uma — é o achado S-10.
+ *
+ * Aceitar os dois nomes é o que torna a migração reversível numa infra que não
+ * se implanta por push (a API roda em docker-compose num VPS): sobe-se o código
+ * que entende os dois, depois troca-se a env, e só então a chave velha é
+ * desativada no painel. Cada passo é revertido sozinho; a ordem inversa deixaria
+ * a API sem chave válida entre o deploy e o ajuste do ambiente.
+ *
+ * O aviso existe para a migração não parar no meio e ser esquecida: enquanto a
+ * chave for JWT (`eyJ…`), o boot diz isso em voz alta.
+ */
+export function chaveSupabase(nomeNovo: string, nomeLegado: string): string {
+  const novo = process.env[nomeNovo]?.trim()
+  if (novo) return novo
+
+  const legado = process.env[nomeLegado]?.trim()
+  if (!legado) {
+    throw new Error(
+      `Variável de ambiente obrigatória ausente: ${nomeNovo} (ou ${nomeLegado}, legada)`,
+    )
+  }
+
+  // Só avisa se de fato for o formato antigo: quem já colocou a chave nova na
+  // variável de nome legado não precisa ouvir nada.
+  if (legado.startsWith('eyJ')) {
+    console.warn(
+      `[env] ${nomeLegado} está no formato JWT legado, que não é revogável isoladamente. ` +
+        `Migre para ${nomeNovo} com a chave sb_… do painel (auditoria § S-10).`,
+    )
+  }
+  return legado
+}
+
+/**
  * Lê uma env BOOLEANA opcional. Só 'true' e 'false' (em qualquer caixa) contam;
  * ausente ou vazia cai no padrão.
  *
