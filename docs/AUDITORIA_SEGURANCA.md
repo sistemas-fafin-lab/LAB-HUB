@@ -152,6 +152,30 @@ Helmet, redação de log e CORS que falha no boot em produção em vez de libera
 
 > **Nota de processo.** Não existe `supabase_migrations.schema_migrations` neste projeto — o schema nunca passou pelo CLI, foi tudo aplicado à mão. Os arquivos em `supabase/migrations/` são o registro versionado do que foi aplicado, não algo que uma ferramenta rastreia. Criar essa tabela agora faria um `db push` futuro achar que só as migrations novas estão aplicadas e tentar rodar as 8 antigas do zero. Ver P-04.
 
+### 31/07/2026 — P-05 (parte de código fechada)
+
+| | |
+|---|---|
+| **Código** | `apps/api/src/routes/resultados.ts`, `apps/api/src/lib/nomeArquivo.ts` (novo), `apps/api/src/routes/documentos.ts`, `apps/api/src/routes/integracao.ts`, `apps/api/test/helpers.ts` |
+| **Testes** | `apps/api/test/resultados.test.ts` (novo, 9 — a rota **não tinha nenhum**), `apps/api/test/nomeArquivo.test.ts` (novo, 4) |
+| **SQL preparado, não aplicado** | `20260731120000_p05_unifica_trigger_atualizado_em.sql`, `20260731130000_p05_limites_bucket_laudos.sql` |
+| **Verificação** | 245 testes na API (era 232), type-check e lint limpos |
+
+Três coisas mudaram de fato:
+
+1. **`resultados.ts` parou de fundir erro de banco com "não encontrado".** Era o item mais concreto da seção: `if (error || !resultado?.declaracao_url)` transformava uma falha transitória do banco em **404 mentiroso**. O paciente lia "declaração não encontrada" para um laudo que existe — e a leitura natural disso é desistir, não tentar de novo. Quem investiga também não via nada: 404 não é anomalia, então não havia sinal no log. Agora erro é 500 (com log) e ausência é 404.
+2. **TTL de 3600 s → 300 s**, alinhado a `documentos.ts`. Conferido antes que o web não guarda a URL: `api.declaracao()` é chamada dentro do `onClick` e o `window.open` acontece na sequência (`LaudoPage.tsx:40`, `ExamDetailPage.tsx:98`, `WebHero.tsx:76`) — nada cacheia, então encurtar não quebra fluxo nenhum. O comentário de `documentos.ts` que citava "os 3600s de resultados.ts" como contraste foi corrigido junto; ele teria virado documentação falsa.
+3. **`sanitizarNome()` deixou de ser duplicado** — virou `lib/nomeArquivo.ts`. O relatório sugeria "ao menos um teste que garanta que continuam equivalentes"; extrair custa o mesmo e torna a divergência impossível em vez de detectável depois. O argumento original ("não acoplar os dois arquivos de rota") não se aplica a um módulo de lib: nenhuma rota passa a depender da outra. O que estava em jogo não é cosmético — a remoção de `\r\n` existe para impedir injeção de header no `Content-Disposition`, e essa é a linha que não pode enfraquecer numa cópia e continuar forte na outra.
+
+**Descoberta no meio do caminho:** o mock de Storage em `test/helpers.ts` **descartava o TTL** (`_ttl`), então nenhum teste jamais conferiu esse número. Era possível trocar 300 por 3600 em qualquer rota e a suíte inteira continuar verde. O `ttl` agora é registrado na `StorageCall`.
+
+**As duas migrations foram escritas, mas não aplicadas** — aguardam decisão, por serem DDL em produção. Levantamento feito antes de escrevê-las, por consulta somente leitura:
+
+- `set_updated_at()` e `set_atualizado_em()` servem **um trigger cada** (`agendamentos` e `exam_results`), sem uso fora disso. A justificativa escrita na migration de 21/07 (*"aqui a coluna se chama atualizado_em, então o trigger precisa da sua própria função"*) é **falsa**: `set_updated_at()` também atribui `new.atualizado_em`, e nunca houve coluna `updated_at` neste schema. Fica a de nome correto; a migration também põe `search_path = ''` nela, fechando parte do S-10.
+- O bucket `laudos` está com `file_size_limit` e `allowed_mime_types` nulos e **0 objetos** — ou seja, restringir agora não pode invalidar nada existente.
+
+**Fora de escopo por decisão anterior:** tirar `apps/mobile` do workspace (o app está parado, mesmo motivo pelo qual ficou fora do CI).
+
 ---
 
 # PARTE 1 — SUPABASE
@@ -909,14 +933,36 @@ E, daqui em diante, toda mudança de schema entra por migration — inclusive as
 
 ---
 
-### P-05 — Observações de qualidade (não-segurança)
+### P-05 — Observações de qualidade (não-segurança) — **CORRIGIDO (código) 31/07/2026**
 
-- **`set_updated_at()` e `set_atualizado_em()` têm corpo idêntico** — ambas atribuem `new.atualizado_em`. A segunda foi criada porque a primeira "era de `agendamentos`", mas as duas escrevem a mesma coluna. Uma função só serve as duas tabelas; a duplicata é manutenção dobrada para zero ganho.
-- **`sanitizarNome()` está duplicada** em `routes/documentos.ts` e `routes/integracao.ts`, com o comentário explicando que foi mantida local "para não acoplar os dois arquivos". É uma escolha defensável, mas as duas cópias precisam mudar juntas se a regra mudar — vale ao menos um teste que garanta que continuam equivalentes.
-- **`apps/mobile` é protótipo com mocks** (`src/mocks/exams.ts`), sem cliente Supabase e sem chamada de API. Não é superfície de ataque hoje, mas é a origem da maior parte dos 16 avisos de `npm audit` (toolchain do Expo). Se o app está parado, considere movê-lo para fora do workspace principal para não poluir a auditoria do que está em produção.
-- **`resultados.ts` funde erro de banco com "não encontrado"** (`maybeSingle` sem checar `error` separadamente) — o próprio `documentos.ts` comenta isso como defeito conhecido de `resultados.ts:31`. Uma falha transitória do banco vira 404 mentiroso. Correção de 3 linhas, no padrão que `documentos.ts` já usa.
-- **TTL de signed URL inconsistente**: 300 s em `documentos.ts`, 900 s em `integracao.ts` (ambos justificados por escrito), mas **3600 s** em `resultados.ts:38` sem justificativa. Uma URL de laudo válida por uma hora sobrevive a histórico de browser e link compartilhado por engano. Alinhe para 300 s salvo motivo documentado.
-- **Bucket `laudos` sem `file_size_limit` nem `allowed_mime_types`**, ao contrário de `documentos`. Só o `service_role` escreve nele, então o risco é baixo, mas a assimetria não tem razão de ser.
+> **STATUS 31/07/2026:** os três itens de código estão fechados. Os dois de banco
+> têm migration escrita e **aguardam aplicação**. Um item segue fora de escopo
+> por decisão anterior. Ver "Verificação pós-correção" no fim da seção.
+
+- ~~**`resultados.ts` funde erro de banco com "não encontrado"**~~ **CORRIGIDO.** (`maybeSingle` sem checar `error` separadamente) — o próprio `documentos.ts` comentava isso como defeito conhecido de `resultados.ts:31`. Uma falha transitória do banco virava 404 mentiroso. Correção de 3 linhas, no padrão que `documentos.ts` já usa.
+- ~~**TTL de signed URL inconsistente**~~ **CORRIGIDO.** 300 s em `documentos.ts`, 900 s em `integracao.ts` (ambos justificados por escrito), mas **3600 s** em `resultados.ts:38` sem justificativa. Uma URL de laudo válida por uma hora sobrevive a histórico de browser e link compartilhado por engano. Alinhado para 300 s.
+- ~~**`sanitizarNome()` está duplicada**~~ **CORRIGIDO.** Estava em `routes/documentos.ts` e `routes/integracao.ts`, com o comentário explicando que foi mantida local "para não acoplar os dois arquivos". Virou `lib/nomeArquivo.ts` — em vez do teste de equivalência que este relatório sugeria, que detectaria a divergência em vez de impedi-la.
+- **`set_updated_at()` e `set_atualizado_em()` têm corpo idêntico** — ambas atribuem `new.atualizado_em`. A segunda foi criada porque a primeira "era de `agendamentos`", mas as duas escrevem a mesma coluna. Uma função só serve as duas tabelas; a duplicata é manutenção dobrada para zero ganho. → migration `20260731120000` escrita, **não aplicada**.
+- **Bucket `laudos` sem `file_size_limit` nem `allowed_mime_types`**, ao contrário de `documentos`. Só o `service_role` escreve nele, então o risco é baixo, mas a assimetria não tem razão de ser. → migration `20260731130000` escrita, **não aplicada**.
+- **`apps/mobile` é protótipo com mocks** (`src/mocks/exams.ts`), sem cliente Supabase e sem chamada de API. Não é superfície de ataque hoje, mas é a origem da maior parte dos 16 avisos de `npm audit` (toolchain do Expo). Se o app está parado, considere movê-lo para fora do workspace principal para não poluir a auditoria do que está em produção. → **fora de escopo** enquanto o mobile estiver parado (mesma decisão que o tirou do CI).
+
+#### Verificação pós-correção (31/07/2026)
+
+| Item | Antes | Agora |
+|---|---|---|
+| Falha de banco em `GET /resultados/:id/declaracao` | 404 "Declaração não encontrada" | 500 "Falha ao carregar resultado", com log |
+| TTL da signed URL de declaração | 3600 s | **300 s** |
+| `sanitizarNome()` | 2 cópias | 1, em `lib/nomeArquivo.ts` |
+| Testes de `routes/resultados.ts` | **nenhum** | 9 |
+| TTL registrado pelo mock de Storage | descartado (`_ttl`) | `StorageCall.ttl` |
+
+Suíte da API em **245 testes**. As duas colunas do meio da tabela acima existiam sem nenhum teste cobrindo a rota — daí o arquivo novo cobrir também os caminhos que já estavam corretos (filtro por `paciente_id` do token, 401 sem token, falha ao assinar).
+
+Três notas que valem mais que os diffs:
+
+1. **O 404 mentiroso era pior do que "erro trocado".** 404 é resposta esperada: não vira alerta, não vira anomalia no log, e o paciente que o recebe conclui que o laudo dele não existe. Uma indisponibilidade do banco se apresentava como ausência de documento, para os dois lados ao mesmo tempo.
+2. **Os 404 continuam indistinguíveis entre si de propósito** — id inexistente, id de outro paciente e resultado sem PDF devolvem a mesma frase. Separar contaria a quem o id pertence. Há teste fixando isso, para que a próxima pessoa não "melhore" a mensagem.
+3. **O mock de Storage descartava o TTL.** Nenhum teste do repositório jamais conferiu esse valor em nenhuma rota: dava para trocar 300 por 3600 em `documentos.ts` e a suíte continuar verde. Corrigido no helper, não só onde o P-05 apontava.
 
 ---
 
@@ -1098,8 +1144,9 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | Índices faltantes + `(select auth.uid())` nas 5 policies | S-11 |
 | 19 | Migrar `anon key` e service role para o formato de chave revogável | S-10 |
-| 20 | `search_path = ''` nas funções; unificar `set_updated_at`/`set_atualizado_em` | S-10 / P-05 |
-| 21 | Alinhar TTL de signed URL em `resultados.ts` (3600 s → 300 s) | P-05 |
+| 20 | `search_path = ''` nas funções; unificar `set_updated_at`/`set_atualizado_em` | S-10 / P-05 — migration `20260731120000` escrita, **falta aplicar** |
+| 21 | ~~Alinhar TTL de signed URL em `resultados.ts` (3600 s → 300 s)~~ — **feito 31/07**, junto com o 404 mentiroso e a duplicata de `sanitizarNome` | P-05 |
+| 22 | Limites do bucket `laudos` (10 MB + `application/pdf`) | P-05 — migration `20260731130000` escrita, **falta aplicar** |
 
 ---
 

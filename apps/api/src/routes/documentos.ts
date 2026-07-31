@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase.js'
 import { flowlab } from '../lib/flowlab.js'
 import { authenticate } from '../middlewares/auth.js'
 import { detectarTipoArquivo } from '../lib/fileType.js'
+import { sanitizarNome } from '../lib/nomeArquivo.js'
 import { toDocumento, type DocumentoRow } from '../lib/mappers.js'
 import {
   documentoIdParamSchema,
@@ -19,20 +20,9 @@ const TAMANHO_MAX_BYTES = 10 * 1024 * 1024 // casa com o file_size_limit do buck
 
 // TTL curto: signed URL é capability ao portador sobre dado pessoal sensível —
 // vaza por histórico do browser, Referer, log e tela compartilhada. 5 min bastam
-// para abrir/baixar, e o cliente pede outra quando precisar. Bem menor que os
-// 3600s de resultados.ts, que servem um laudo já entregue ao paciente.
+// para abrir/baixar, e o cliente pede outra quando precisar. Mesmo valor de
+// resultados.ts; só integracao.ts difere (900s), com justificativa própria.
 const URL_TTL_SEGUNDOS = 300
-
-// Limite do nome exibido. O nome original NÃO compõe o path (que é UUID), mas vai
-// para o Content-Disposition da signed URL de download e é renderizado no FlowLab.
-const NOME_MAX_CHARS = 120
-
-// Só exibição: corta, remove quebras de linha (que envenenariam o header
-// Content-Disposition) e garante algo não-vazio.
-function sanitizarNome(original: string | undefined, extensao: string): string {
-  const limpo = (original ?? '').replace(/[\r\n\t]/g, '').trim().slice(0, NOME_MAX_CHARS)
-  return limpo || `documento.${extensao}`
-}
 
 export async function documentosRoutes(app: FastifyInstance): Promise<void> {
   // Parser multipart. @fastify/multipart é fp-wrapped, então este registro sobe
@@ -211,8 +201,9 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
     }
     const { download } = request.query as { download?: string }
 
-    // maybeSingle + erro separado de "não encontrado": resultados.ts:31 funde os
-    // dois, e aí uma falha transitória do banco vira um 404 mentiroso.
+    // maybeSingle + erro separado de "não encontrado": fundir os dois faz uma
+    // falha transitória do banco virar um 404 mentiroso. `resultados.ts` seguia
+    // o padrão errado até o P-05 e hoje faz igual a este.
     const { data: doc, error } = await supabase
       .from('documentos')
       .select('storage_path, nome_arquivo')

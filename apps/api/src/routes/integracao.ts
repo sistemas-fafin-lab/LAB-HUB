@@ -13,6 +13,7 @@ import { flowlab } from '../lib/flowlab.js'
 import { sincronizarAgendamento, type AgendamentoSyncRow } from '../lib/agendamentoSync.js'
 import { autenticarFlowlab } from '../middlewares/apiKey.js'
 import { detectarTipoArquivo } from '../lib/fileType.js'
+import { sanitizarNome } from '../lib/nomeArquivo.js'
 import { mensagemZod } from '../lib/validacao.js'
 import {
   labhubIdParamSchema,
@@ -43,21 +44,9 @@ const FLOWLAB_URL_TTL_SEGUNDOS = 900
 // (routes/documentos.ts). O corpo binário do upload de integração é limitado a isto.
 const TAMANHO_MAX_BYTES = 10 * 1024 * 1024
 
-// Limite do nome exibido (idêntico ao de routes/documentos.ts). O nome NÃO compõe o
-// path (que é UUID) — vai só para exibição e para o Content-Disposition do download.
-const NOME_MAX_CHARS = 120
-
 // Teto de resultados do typeahead de pacientes: o suficiente p/ o operador
 // reconhecer a pessoa sem transformar a busca num despejo da base.
 const BUSCA_PACIENTES_LIMITE = 8
-
-// Só exibição: corta, remove quebras de linha (que envenenariam o header
-// Content-Disposition) e garante algo não-vazio. Espelha sanitizarNome de
-// routes/documentos.ts — mantido local para não acoplar os dois arquivos de rota.
-function sanitizarNome(original: string | undefined, extensao: string): string {
-  const limpo = (original ?? '').replace(/[\r\n\t]/g, '').trim().slice(0, NOME_MAX_CHARS)
-  return limpo || `documento.${extensao}`
-}
 
 // Mascara o CPF revelando só os 2 últimos dígitos (verificadores) — o operador
 // já digitou/tem o CPF em mãos; isto serve só para ele confirmar que a linha é a

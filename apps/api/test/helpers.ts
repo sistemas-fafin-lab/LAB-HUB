@@ -44,6 +44,9 @@ export interface StorageCall {
   bucket: string
   op: 'upload' | 'remove' | 'createSignedUrl' | 'createSignedUrls'
   paths: string[]
+  // TTL da signed URL, em segundos. Registrado porque é decisão de segurança
+  // (P-05): sem isto, alguém troca 300 por 3600 e nenhum teste reclama.
+  ttl?: number
   options?: unknown
 }
 export type StorageHandler = (call: StorageCall) => SupaResult
@@ -93,17 +96,24 @@ export function createSupabaseMock(opts: {
     })
 
   function storageFrom(bucket: string) {
-    const run = (op: StorageCall['op'], paths: string[], options?: unknown) => {
-      const call: StorageCall = { bucket, op, paths, ...(options ? { options } : {}) }
+    const run = (op: StorageCall['op'], paths: string[], ttl?: number, options?: unknown) => {
+      const call: StorageCall = {
+        bucket,
+        op,
+        paths,
+        ...(ttl === undefined ? {} : { ttl }),
+        ...(options ? { options } : {}),
+      }
       storageCalls.push(call)
       return Promise.resolve(storageHandler(call))
     }
     return {
-      upload: (path: string, _body: unknown, options?: unknown) => run('upload', [path], options),
+      upload: (path: string, _body: unknown, options?: unknown) =>
+        run('upload', [path], undefined, options),
       remove: (paths: string[]) => run('remove', paths),
-      createSignedUrl: (path: string, _ttl: number, options?: unknown) =>
-        run('createSignedUrl', [path], options),
-      createSignedUrls: (paths: string[], _ttl: number) => run('createSignedUrls', paths),
+      createSignedUrl: (path: string, ttl: number, options?: unknown) =>
+        run('createSignedUrl', [path], ttl, options),
+      createSignedUrls: (paths: string[], ttl: number) => run('createSignedUrls', paths, ttl),
     }
   }
 
