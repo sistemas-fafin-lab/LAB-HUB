@@ -97,6 +97,55 @@ Três decisões que valem registro:
 >   trabalho, mas sugere que migrations de permissão do FlowLab não estão sendo
 >   aplicadas por rotina — vale conferir se há outras atrás.
 
+#### Deploy em produção (31/07/2026)
+
+O código estava pronto desde 30/07, mas **nunca tinha saído da máquina**: os três
+commits viviam na branch local `feature/ac-correcao-identidade`, sem merge no
+`main` e sem existir no `origin`. Não era um problema de código — era o deploy que
+nunca aconteceu. Daí o sintoma reportado pela recepção continuar de pé um dia
+depois de o trabalho estar "pronto".
+
+Merge feito em `main` (`79476c4`) e publicado. O `main` tinha andado 3 commits
+desde a divergência, então valia conferir antes: o merge saiu **sem conflito**, e
+o único arquivo disputado (`src/utils/permissions.ts`, que recebeu a permissão de
+WhatsApp no meio-tempo) juntou sozinho.
+
+**A revisão que importava antes de publicar** foi `api/_lib/recepcaoAgendamento.ts`:
+a branch não só adicionou código, ela **refatorou `autorizarOperador()`**, que é
+compartilhada com fluxos que já rodam em produção (busca de pacientes, criação de
+agendamento e os handlers do Envio ao Apoio). Um erro ali quebraria o check-in,
+não a tela nova. Conferido: a fachada mantém assinatura, semântica, o bypass de
+`role === 'admin'`, os mesmos status e até a mesma mensagem de 403 — o que ela faz
+agora é delegar para `identificarOperador(token, permissoes[], acao)`, que
+generaliza a checagem para *anyOf* de permissões e devolve também a identidade do
+operador (necessária para o `autorizadoPor`). A única mudança em consulta
+existente foi acrescentar `name, email` ao `select` de `user_profiles` — colunas
+`NOT NULL` desde a criação da tabela em 2025 (`20250616124235_rough_breeze.sql`),
+então não há como o `select` falhar em produção.
+
+| Verificação | Resultado |
+|---|---|
+| Merge `main` ← branch | sem conflito |
+| `vite build` | passa; `correcao-identidade` e "Correção de Identidade" presentes no bundle |
+| `tsc -p tsconfig.app.json` | 26 erros, **todos** em `IT/` e `quotations/` (pré-existentes); nenhum nos arquivos da tela |
+| `eslint` nos arquivos novos | limpo (os erros de `App.tsx`/`Layout.tsx` são linhas pré-existentes) |
+| Envs de produção na Vercel | `LABHUB_API_URL` e `FLOWLAB_API_KEY` já existiam (18 dias) |
+
+> **Falta um passo, e ele não é meu:** a migration
+> `20260730120000_perm_corrigir_identidade.sql` precisa rodar no Supabase de
+> **produção** do FlowLab (`jqxeqmeikqclmmongclj`), que está em outra conta — o
+> token daqui recebe **403** nele. Sem isso o deploy é inócuo por segurança, não
+> por bug: ninguém tem `canCorrigirIdentidade`, então o item de menu não aparece
+> e a rota devolve 403. É também o motivo de o deploy ter risco praticamente
+> nulo para quem já usa o sistema: enquanto a permissão não existir, nada muda
+> para usuário nenhum.
+>
+> O `tsconfig.json` da raiz do FlowLab está com `"ignoreDeprecations": "6.0"`,
+> valor inválido para o TypeScript instalado — `tsc -b` morre em TS5103 antes de
+> checar qualquer arquivo. Descoberto aqui de passagem; é problema do FlowLab,
+> não deste trabalho, mas significa que **o type-check daquele repositório não
+> está rodando**.
+
 ### 30/07/2026 — P-02 e S-04 (parcial)
 
 | | |
