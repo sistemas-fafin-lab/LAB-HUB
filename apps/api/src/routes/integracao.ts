@@ -122,9 +122,15 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /integracao/pacientes/:pacienteId/correcao-identidade
   //
-  // Corrige CPF/data de nascimento de um paciente que JÁ vinculou conta. Depois do
-  // claim os dois campos são imutáveis no banco (trigger de 20260730120000), e a
-  // ÚNICA saída é a RPC chamada aqui, que exige e registra a autorização.
+  // Corrige CPF/data de nascimento do paciente. Depois do claim os dois campos são
+  // imutáveis no banco (trigger de 20260730120000), e a ÚNICA saída é a RPC chamada
+  // aqui, que exige e registra a autorização.
+  //
+  // Vale também para o paciente SEM conta, que o trigger nem trava (31/07/2026):
+  // não porque precise da saída de emergência, mas porque é a mesma decisão um
+  // passo antes — o CPF do fantasma é o que define quem poderá reivindicar aquele
+  // registro no cadastro (P-01). Antes disto a RPC recusava esse caso mandando
+  // "corrija direto no cadastro", lugar que não existe nem aqui nem no FlowLab.
   //
   // Por que só a recepção pode: nenhum dado que o sistema guarda prova que o CPF
   // novo pertence a quem pede — CPF antigo, nascimento, e-mail, telefone e até
@@ -168,7 +174,7 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
 
       if (error) {
         // A RPC classifica as recusas por SQLSTATE para não virar 500 genérico:
-        //   22023 = entrada inválida (CPF malformado, nada a corrigir, sem conta)
+        //   22023 = entrada inválida (CPF malformado, nada a corrigir)
         //   P0002 = paciente inexistente
         //   23505 = CPF já é de outro cadastro → é caso de FUSÃO, não de correção
         //   42501 = o trigger recusou (não deve acontecer por este caminho)

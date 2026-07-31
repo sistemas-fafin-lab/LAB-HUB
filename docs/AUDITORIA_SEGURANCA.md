@@ -258,6 +258,40 @@ Duas coisas que ficaram claras no caminho e mudam a leitura do achado: sem TLS *
 
 **`dbAllowedCidrs` continua `0.0.0.0/0` por decisão do usuário** (IP dinâmico na máquina de trabalho). Motivo e caminho de retomada registrados na seção S-03.
 
+### 31/07/2026 — a correção de identidade passa a valer para o paciente sem conta
+
+| | |
+|---|---|
+| **Banco** | `20260731140000_correcao_identidade_sem_conta.sql` — **aplicada em produção** |
+| **Código** | comentários de `apps/api/src/routes/integracao.ts` e do proxy do FlowLab (`api/_lib/recepcaoAgendamento.ts`); nenhuma mudança de comportamento fora da RPC |
+| **Verificação** | 245 testes na API; teste de comportamento em produção com rollback garantido |
+
+Descoberto ao testar a tela recém-publicada: corrigir a data de nascimento de um paciente devolvia
+
+```
+400 — Paciente ainda não vinculado a uma conta: corrija direto no cadastro
+```
+
+**Não era bug, era o desenho recusando o caso** — para o fantasma o trigger de identidade não trava nada, então a correção "não precisaria" da saída de emergência. O que ninguém tinha verificado é se o destino da mensagem existia. **Não existe:** o FlowLab não tem nenhuma tela que edite paciente (zero referências), e o canal de integração do LAB-HUB não tem rota de UPDATE de paciente. A mensagem mandava o operador para lugar nenhum.
+
+E o caso recusado era a maioria: **6 dos 8 pacientes da base não têm conta**. São os cadastros de balcão — exatamente os mais sujeitos a CPF digitado errado. A tela cobria 2 de 8, e não os que doem. O problema operacional que motivou o trabalho continuava de pé.
+
+**Decisão (do usuário): mesma cerimônia para os dois casos.** Trocar o CPF de um fantasma não é operação menor que trocar o de quem já tem conta — é a mesma decisão um passo antes. O CPF do fantasma é o que define **quem poderá reivindicar aquele registro** no cadastro (P-01); mudá-lo entrega o histórico de uma pessoa a outra. A alternativa (edição leve, sem motivo nem documento) deixaria justamente essa troca sem registro de quem autorizou. Então a RPC perdeu só a recusa: validação, trava de concorrência, "nada a corrigir", conflito de CPF (fusão), trilha append-only e expurgo do cache de laudos seguem idênticos.
+
+Teste de comportamento em produção, no cenário exato que falhou (mesmo CPF, nascimento diferente), dentro de `do $$ … raise exception`:
+
+```
+paciente sem conta: 81a0843e-…
+cpf mudou: f  (esperado false)
+nascimento: 2005-01-01 -> 2005-01-02
+laudosInvalidados: 0
+trilha gravada: autorizado_por=Sonda <auditoria> documento=RG nasc 2005-01-01->2005-01-02
+```
+
+Rollback conferido depois: nascimento de volta em 2005-01-01, 8 pacientes, e nenhuma linha `Sonda` na trilha.
+
+**A ponta a ponta ficou provada de graça, e não por mim:** a trilha já tinha uma linha de 31/07 com `autorizado_por = Gabriel Silva Carneiro <tech2.laboratorio.lab@gmail.com>` e `documento_conferido = CNH`. É uma correção real, feita pela tela, com a identidade do operador vinda da **sessão** do FlowLab — que era exatamente o que faltava verificar do lado que eu não conseguia alcançar sem um login.
+
 ---
 
 # PARTE 1 — SUPABASE
