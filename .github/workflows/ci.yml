@@ -33,9 +33,17 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # @v5 nas duas: o @v4 roda em Node 20, aposentado nos runners. Hoje o
+      # GitHub força Node 24 e emite aviso; quando a compatibilidade forçada
+      # sair, o @v4 para de rodar. Exigem runner >= 2.327.1 — os hospedados do
+      # GitHub já estão acima disso, mas um self-hosted precisaria atualizar.
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      # `cache: npm` continua explícito de propósito. O setup-node@v5 passou a
+      # ligar cache sozinho quando existe o campo `packageManager` no
+      # package.json — que este projeto NÃO tem. Depender desse automático seria
+      # perder o cache no dia em que alguém mexesse no campo.
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
