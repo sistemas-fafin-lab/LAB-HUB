@@ -20,7 +20,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-02 | Sem backup restaurável — perda de dado clínico é irreversível | **ALTO** |
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** |
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 30/07** |
-| S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** (falta aplicar a flag no `.env` do VPS) |
+| S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** |
 | S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → ver Parte 3 |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | **MÉDIO** |
@@ -550,9 +550,9 @@ Note que a política do servidor vale para todos os caminhos — incluindo `/aut
 
 > **STATUS 31/07/2026:** SMTP próprio, `site_url`, `uri_allow_list` e
 > `REQUIRE_EMAIL_CONFIRMATION=true` aplicados, reaproveitando a conta do
-> FlowLab. Entrega comprovada ponta a ponta. Seguem abertos os templates em
-> inglês e o alias `no-reply@` não verificado — e o `.env` do VPS, que é onde a
-> API de produção lê a flag.
+> FlowLab, com os templates traduzidos. Entrega comprovada ponta a ponta e
+> cadastro real verificado em produção (criado e removido). Segue aberto o
+> alias `no-reply@`, que o Gmail reescreve enquanto não for verificado.
 
 ```
 site_url        = 'http://localhost:3000'
@@ -627,11 +627,40 @@ A rota já estava pronta para os dois modos (`routes/cadastro.ts`): `email_confi
 
 > **Falta um passo fora deste repositório.** A API de produção **não** roda na Vercel: é o `docker-compose.yml` num VPS, com deploy manual (`git pull && docker compose up -d --build`) e um `.env` que vive na máquina. O que foi alterado aqui é o `.env` local (dev, não versionado) e o `.env.example`. **Em produção alguém precisa editar o `.env` do VPS e reiniciar o container** — até lá, o cadastro em produção continua criando conta pré-confirmada.
 
+#### Templates traduzidos (31/07/2026)
+
+Oito templates passaram para português pela Management API: `confirmation`, `recovery`, `password_changed_notification`, `reauthentication`, `email_change`, `email_changed_notification`, `magic_link` e `invite`. Nome do produto: **Lab Hub**, que é o `<title>` do app — não foi inventado nome de laboratório.
+
+Ficaram em inglês, de propósito, os cinco que **não têm como disparar** hoje: `identity_linked` / `identity_unlinked` (não há provedor OAuth), `mfa_factor_enrolled` / `unenrolled` e `phone_changed` (sem SMS) — todos com a notificação correspondente em `false`.
+
+Três decisões de conteúdo que não são tradução literal:
+
+1. **O nome do produto aparece no assunto e no corpo.** O `From` que sai hoje é `sistemas@laboratoriolab.com.br` (o Gmail reescreve; ver acima), então o paciente não reconhece o remetente pelo endereço. O texto precisa dizer de onde vem.
+2. **Link cru embaixo do botão** em todo template com `ConfirmationURL`. Cliente de e-mail que remove o `<a>` deixaria a mensagem inútil, e o endereço visível permite conferir para onde o link aponta antes de clicar — o oposto do padrão de phishing.
+3. **O template de reautenticação avisa que o código nunca é pedido por telefone, WhatsApp ou e-mail.** O código de reautenticação é o que protege a troca de senha (S-04); quem consegue esse código por engenharia social contorna a proteção inteira.
+
+#### Verificação em produção (31/07/2026) — cadastro real, criado e removido
+
+A API de produção **não** é a Vercel: é o `docker-compose` no VPS. Confirmado que o deploy com a flag entrou — `GET /ping` respondeu e os cabeçalhos do P-03 (`nosniff`, HSTS, `X-Frame-Options`) estavam presentes, ou seja, é o build atual.
+
+Cadastro real contra `https://labhub.ngrok.app`, com CPF de teste conferido antes como **ausente da base** (para não cair sem querer no fluxo de reivindicação de um paciente-fantasma real):
+
+| Verificação | Resultado |
+|---|---|
+| `POST /api/v1/cadastro` | **201**, `requiresEmailConfirmation: true` |
+| `auth.users.email_confirmed_at` | **null** — conta criada NÃO confirmada |
+| `auth.users.confirmation_sent_at` | preenchido — o e-mail saiu |
+| Login **com a senha correta** | **400 `email_not_confirmed`**, sem `access_token` |
+
+A última linha é a que fecha o achado. Antes desta mudança, esse mesmo login devolveria um token: qualquer pessoa criava conta com o e-mail de outra e entrava. Agora a senha certa não basta — é preciso provar posse do endereço.
+
+Limpeza conferida: paciente e usuário removidos, base de volta a **2 usuários / 8 pacientes / 6 fantasmas**, e nem o endereço nem o CPF de teste retornam nada.
+
 **O que continua em aberto:**
 
-- **Templates em inglês** (achado 2 acima) — o mais visível para o paciente.
-- **Alias `no-reply@` não verificado** (achado 1) — hoje as respostas vão para a caixa de sistemas.
+- **Alias `no-reply@` não verificado** (achado 1) — as respostas de paciente vão para a caixa de sistemas.
 - **A caixa é compartilhada com o FlowLab.** Cota do Workspace e reputação de envio passam a ser divididas entre os dois sistemas; um pico num afeta o outro.
+- **Cinco templates seguem em inglês** — inertes hoje, mas viram e-mail em inglês no dia em que MFA, OAuth ou SMS entrarem.
 
 ---
 
@@ -1237,7 +1266,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 7 | `pg_dump` cifrado agendado + **teste de restauração** | S-02 |
 | 8 | Restringir `dbAllowedCidrs`; ligar SSL enforcement; rotacionar senha do banco | S-03 |
 | 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
-| 10 | ~~SMTP próprio, `site_url` real, `uri_allow_list`, `REQUIRE_EMAIL_CONFIRMATION=true`~~ — **feito 31/07**, entrega comprovada; falta o `.env` do VPS e traduzir os templates | S-05 |
+| 10 | ~~SMTP próprio, `site_url` real, `uri_allow_list`, `REQUIRE_EMAIL_CONFIRMATION=true`~~ — **feito 31/07**, templates em português e verificado em produção | S-05 |
 | 11 | `supabase link` + `db pull` — realinhar migrations com o banco real | P-04 |
 | 12 | ~~Workflow de CI com `type-check`, `lint`, `test`, `audit --audit-level=high`~~ — **feito 30/07** (ESLint instalado e configurado no mesmo dia) | P-02 |
 
