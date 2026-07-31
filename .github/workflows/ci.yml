@@ -1,7 +1,17 @@
 name: CI
 
+# `push` filtrado nas branches de integração + `pull_request` sem filtro.
+#
+# Sem o filtro, um PR de branch deste repositório dispara DOIS runs — o do push e
+# o do pull_request — e eles não se cancelam: os grupos de `concurrency` abaixo
+# usam `github.ref`, que é `refs/heads/<branch>` num caso e `refs/pull/N/merge`
+# no outro. Era o dobro dos minutos para o mesmo commit.
+#
+# A troca: branch de trabalho deixa de receber CI a cada push e passa a receber
+# ao abrir o PR. Quem quiser o sinal antes disso abre o PR como rascunho.
 on:
   push:
+    branches: [main, master]
   pull_request:
 
 # Push seguido de push na mesma branch cancela o run anterior: o que importa é o
