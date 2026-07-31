@@ -18,7 +18,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-01 | `anon`/`authenticated` têm INSERT/UPDATE/DELETE/TRUNCATE em todas as tabelas; paciente pode reescrever o próprio CPF e puxar laudo alheio | ~~**CRÍTICO**~~ **CORRIGIDO 30/07/2026** |
 | P-01 | Reivindicação de paciente-fantasma só por CPF, sem segundo fator de identidade | ~~**ALTO**~~ **CORRIGIDO 30/07/2026** |
 | S-02 | Sem backup restaurável — perda de dado clínico é irreversível | **ALTO** |
-| S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** |
+| S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** → **parcial 31/07** (SSL exigido; CIDR aberto por decisão) |
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 30/07** |
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** |
 | S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → ver Parte 3 |
@@ -30,7 +30,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | **BAIXO** |
 | S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | **PERF** |
 
-**Ordem de ataque recomendada:** ~~S-01~~ (feito) → ~~P-01~~ (feito) → **S-02/S-03**/~~S-04~~/~~S-05~~ → criptografia (Parte 3) → o resto.
+**Ordem de ataque recomendada:** ~~S-01~~ (feito) → ~~P-01~~ (feito) → **S-02**/~~S-03~~ (parcial)/~~S-04~~/~~S-05~~ → criptografia (Parte 3) → o resto.
 
 > Nota importante sobre a prioridade: **criptografar as colunas não resolve S-01 nem P-01.** Nos dois casos o atacante está autenticado e autorizado — a aplicação decifra o dado para ele de bom grado. Criptografia protege contra vazamento de *dump*, backup, réplica e acesso indevido ao painel. Controle de acesso protege contra o paciente do lado. São problemas diferentes e o segundo é o mais urgente.
 
@@ -109,7 +109,7 @@ Na **raiz** o `npm audit fix` foi tentado e **desfeito**: ele subiu o toolchain 
 
 **S-02 adiado por decisão do usuário.** Continua sendo o item mais grave em aberto. O caminho é `pg_dump` cifrado agendado no VPS, com destino fora do Supabase e teste de restauração.
 
-**S-03 pulado por decisão do usuário.** Vale registrar que ele **está disponível** neste plano (`network-restrictions` responde `entitlement: allowed`) e que seria barato: a API fala com o Supabase só por HTTPS/PostgREST — não há `pg` nas dependências nem `DATABASE_URL` —, então restringir `dbAllowedCidrs` não afeta a aplicação, só conexão Postgres direta.
+**S-03 pulado por decisão do usuário.** Vale registrar que ele **está disponível** neste plano (`network-restrictions` responde `entitlement: allowed`) e que seria barato: a API fala com o Supabase só por HTTPS/PostgREST — não há `pg` nas dependências nem `DATABASE_URL` —, então restringir `dbAllowedCidrs` não afeta a aplicação, só conexão Postgres direta. *(Retomado em 31/07: metade do achado foi corrigida — ver o registro daquele dia.)*
 
 ### 30/07/2026 — P-01 fechado
 
@@ -193,6 +193,20 @@ Rollback conferido depois: a linha usada continua com `atualizado_em` de 27/07, 
 **O que esse teste não cobriu:** `exam_results` está vazia, então o trigger dela não foi exercitado. O risco é baixo e vale registrar por quê — o trigger de `exam_results` **não foi repontado** (já apontava para `set_atualizado_em`); o que mudou para ele foi só o corpo da função, que é o mesmo que acabou de carimbar `agendamentos`.
 
 **Fora de escopo por decisão anterior:** tirar `apps/mobile` do workspace (o app está parado, mesmo motivo pelo qual ficou fora do CI).
+
+### 31/07/2026 — S-03 pela metade (SSL exigido)
+
+| | |
+|---|---|
+| **Infra** | `PUT /v1/projects/{ref}/ssl-enforcement` → `{"database": true}` |
+| **Código** | nenhuma mudança — não há consumidor de Postgres direto no repositório |
+| **Verificação** | sondagem do protocolo Postgres antes/depois (sem enviar senha); PostgREST `206` e `/ping` de produção `200` depois de aplicar |
+
+O servidor **passou a recusar sessão em texto puro**: o mesmo `StartupMessage` que antes recebia um desafio SASL agora recebe `ESSLREQUIRED`. `SSLRequest` segue respondendo `S`, então nenhum cliente correto notou diferença.
+
+Duas coisas que ficaram claras no caminho e mudam a leitura do achado: sem TLS **a senha nunca esteve exposta** (SCRAM é desafio-resposta) — o que vazava era o conteúdo da sessão, CPF e laudo; e a porta que realmente importa é o **pooler IPv4** (`aws-1-us-east-2.pooler.supabase.com`), porque o host direto é só IPv6 e parece fechado de qualquer rede sem IPv6.
+
+**`dbAllowedCidrs` continua `0.0.0.0/0` por decisão do usuário** (IP dinâmico na máquina de trabalho). Motivo e caminho de retomada registrados na seção S-03.
 
 ---
 
@@ -472,7 +486,12 @@ Para dado clínico isso é grave em duas frentes ao mesmo tempo: perda de regist
 
 ---
 
-### S-03 — Banco exposto à internet inteira e sem SSL obrigatório — **ALTO**
+### S-03 — Banco exposto à internet inteira e sem SSL obrigatório — **ALTO** → **PARCIALMENTE CORRIGIDO**
+
+> **STATUS 31/07/2026:** SSL enforcement **ligado** — o servidor recusa conexão em
+> texto puro. A restrição de CIDR segue **aberta**, por decisão do usuário: a
+> máquina de trabalho tem IP dinâmico. Ver "Verificação pós-correção" no fim da
+> seção.
 
 ```json
 network-restrictions: {"dbAllowedCidrs": ["0.0.0.0/0"], "dbAllowedCidrsV6": ["::/0"]}
@@ -481,13 +500,38 @@ ssl-enforcement:      {"database": false}
 
 Duas coisas separadas:
 
-- **`0.0.0.0/0`** — qualquer host do planeta pode abrir conexão TCP com `db.rhiopafwojxujghscavi.supabase.co:5432`. A senha é a única barreira, e o alvo fica exposto a força bruta e a qualquer CVE futura do Postgres/pooler.
+- **`0.0.0.0/0`** — qualquer host do planeta pode abrir conexão TCP com o banco. A senha é a única barreira, e o alvo fica exposto a força bruta e a qualquer CVE futura do Postgres/pooler.
 - **SSL não obrigatório** — o servidor **aceita** conexão em texto puro. Um cliente mal configurado (script, ferramenta de BI, migração) negocia sem TLS e trafega laudo e CPF em claro pela internet.
+
+Duas precisões que mudam a leitura da gravidade, e que valem estar escritas:
+
+**Sem TLS, a senha não vaza.** O SCRAM é desafio-resposta — a senha não trafega, com ou sem TLS. O que trafega em claro é **tudo depois do login**: as queries e os resultados, isto é, CPF, nome, data de nascimento e laudo legíveis em qualquer ponto do caminho. E, sem TLS, não há autenticação do servidor: um atacante em posição de rede pode se passar pelo banco.
+
+**Onde a porta realmente está.** O host direto (`db.<ref>.supabase.co`) resolve **só em IPv6** — de uma rede sem IPv6 ele é inalcançável, o que dá uma falsa sensação de fechado. O caminho IPv4 é o pooler, `aws-1-us-east-2.pooler.supabase.com:5432`, e é por ele que a exposição existe de fato. Qualquer teste que só olhe o host direto conclui errado.
 
 **Correção:**
 1. Restringir `dbAllowedCidrs` aos IPs de saída da API e da sua máquina. Se a API roda em plataforma com IP dinâmico, use o Supavisor/pooler e restrinja o que der.
 2. Ligar SSL enforcement — isso só rejeita conexões inseguras; a API (via `supabase-js`, que usa HTTPS/PostgREST) não é afetada.
 3. Rotacionar a senha do banco depois, já que ela esteve exposta a força bruta aberta.
+
+#### Verificação pós-correção (31/07/2026)
+
+Aplicado por `PUT /v1/projects/{ref}/ssl-enforcement` com `{"requestedConfig":{"database":true}}` → `{"currentConfig":{"database":true},"appliedSuccessfully":true}`.
+
+A verificação foi uma sondagem do protocolo Postgres contra o pooler, **enviando apenas o nome de usuário — nenhuma senha**, antes e depois:
+
+| | Resposta do servidor a um `StartupMessage` sem TLS |
+|---|---|
+| Antes | `R` — pediu autenticação **SASL/SCRAM**, em texto puro |
+| Depois | `E` — `CXX000 M(ESSLREQUIRED) SSL connection is required for user: postgres` |
+
+`SSLRequest` continua respondendo `S`: TLS segue oferecido, então quem conecta corretamente não notou nada. O que mudou é que o caminho inseguro deixou de existir, em vez de depender de o cliente pedir TLS por conta própria.
+
+**Nada quebrou, e não havia como quebrar:** não há `pg` nas dependências, não há `DATABASE_URL` em lugar nenhum e o `docker-compose.yml` do VPS não consome banco — a aplicação inteira fala HTTPS/PostgREST, que não passa por aqui. Conferido depois de aplicar: PostgREST respondeu `206` com `content-range: 0-0/8` e a API de produção respondeu `200` no `/ping`.
+
+**O que continua aberto, e por quê.** `dbAllowedCidrs` segue `0.0.0.0/0` **por decisão do usuário**: a máquina de trabalho tem IP dinâmico, e travar a allowlist no IP de hoje faria o `supabase db push` (P-04) falhar um dia com um timeout sem explicação — o tipo de defesa que se desliga sozinha na primeira vez que atrapalha. A escolha é consciente, não esquecimento.
+
+Se um dia isso for retomado, dois fatos poupam a investigação: (a) o fluxo de trabalho atual **já não usa a porta 5432** — todas as migrations desta auditoria foram aplicadas pela Management API por HTTPS, então dá para fechar bem apertado sem perder capacidade; (b) **não há risco de se trancar para fora** — a Management API e o painel não passam pela restrição de rede, então a reabertura é sempre possível. Falta confirmar empiricamente se a restrição alcança o pooler além do host direto; a sondagem acima é o teste pronto para isso.
 
 ---
 
@@ -1264,7 +1308,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | | Ação | Onde |
 |---|---|---|
 | 7 | `pg_dump` cifrado agendado + **teste de restauração** | S-02 |
-| 8 | Restringir `dbAllowedCidrs`; ligar SSL enforcement; rotacionar senha do banco | S-03 |
+| 8 | ~~Ligar SSL enforcement~~ — **feito 31/07**. `dbAllowedCidrs` mantido aberto (IP dinâmico); rotação de senha pendente | S-03 |
 | 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
 | 10 | ~~SMTP próprio, `site_url` real, `uri_allow_list`, `REQUIRE_EMAIL_CONFIRMATION=true`~~ — **feito 31/07**, templates em português e verificado em produção | S-05 |
 | 11 | `supabase link` + `db pull` — realinhar migrations com o banco real | P-04 |
