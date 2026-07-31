@@ -19,7 +19,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | P-01 | Reivindicação de paciente-fantasma só por CPF, sem segundo fator de identidade | ~~**ALTO**~~ **CORRIGIDO 30/07/2026** |
 | S-02 | Sem backup restaurável — perda de dado clínico é irreversível | **ALTO** |
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** → **parcial 31/07** (SSL exigido; CIDR aberto por decisão) |
-| S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 30/07** |
+| S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 31/07** (o que sobra exige plano Pro ou código) |
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** |
 | S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → ver Parte 3 |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
@@ -303,6 +303,21 @@ Confirmado depois, lendo a trilha: às 17:47 saiu a primeira correção de **pac
 | **Verificação** | 14 no banco × 14 no repositório, zero divergência dos dois lados; varredura de tabelas, triggers, policies e views sem órfão |
 
 O diagnóstico de julho estava incompleto: o ledger não estava desatualizado, **não existia**. Detalhe, incluindo por que um `db push` às cegas falharia alto em vez de destruir dado, na seção P-04.
+
+---
+
+### 31/07/2026 — S-04: o que dava para fazer de graça, feito
+
+`jwt_exp` de 3600 s → **1800 s**. É a única peça do S-04 restante que o plano free permite mexer.
+
+O resto foi triado e **deliberadamente não implementado**, por decisão do responsável (só o que sai de graça):
+
+| Sobra | Natureza |
+|---|---|
+| Expiração de sessão · proteção contra senha vazada | **Plano Pro** — sem contorno no free |
+| Exigir MFA · captcha | **Código**, não configuração — o Pro não resolve |
+
+Registro do que fica descoberto até um eventual upgrade: **sessão do LAB-HUB não expira sozinha**. Detalhe e evidência do bloqueio de plano na seção S-04, em "O que sobra e por quê".
 
 ---
 
@@ -645,10 +660,12 @@ Se um dia isso for retomado, dois fatos poupam a investigação: (a) o fluxo de 
 
 ### S-04 — Autenticação frouxa para o tipo de dado — ~~**ALTO**~~ **PARCIALMENTE CORRIGIDO**
 
-> **STATUS 30/07/2026:** senha mínima, classes de caracteres e reautenticação na
-> troca de senha aplicadas, com o zod e a UI alinhados. Seguem abertos a
-> notificação de troca de senha ao titular, a exigência de MFA em ações sensíveis
-> e a expiração de sessão. Ver "Verificação pós-correção" no fim da seção.
+> **STATUS 31/07/2026:** senha mínima, classes de caracteres e reautenticação na
+> troca de senha aplicadas, com o zod e a UI alinhados; notificação de troca de
+> senha fechada junto com o S-05; `jwt_exp` reduzido para 30 min. Seguem abertas
+> a expiração de sessão e a proteção contra senha vazada — **as duas exigem plano
+> Pro**, não trabalho — e a exigência de MFA, que é código, não configuração.
+> Ver "Verificação pós-correção" e "O que sobra e por quê" no fim da seção.
 
 | Configuração | Valor atual | Problema |
 |---|---|---|
@@ -685,7 +702,7 @@ Aplicado pela Management API (`PATCH /v1/projects/{ref}/config/auth`), com a con
 
 A reautenticação era o item mais grave da seção e é o que efetivamente mudou: quem pega uma sessão aberta não troca mais a senha sem saber a atual.
 
-**O que continua aberto:** a sessão não expira sozinha. O paliativo é encurtar o `jwt_exp` (hoje 3600 s) — não expira a sessão, mas reduz a janela de um access token roubado.
+**O que continua aberto:** a sessão não expira sozinha. O paliativo é encurtar o `jwt_exp` (hoje 3600 s) — não expira a sessão, mas reduz a janela de um access token roubado. *(Aplicado em 31/07 — ver abaixo.)*
 
 **Alinhamento no código** (senão o zod aceita e o Auth recusa depois, com mensagem em inglês vinda da biblioteca):
 
@@ -695,6 +712,34 @@ A reautenticação era o item mais grave da seção e é o que efetivamente mudo
 - `apps/api/test/cadastro.test.ts` — 4 casos parametrizados de senha fraca, conferindo que a recusa é 400 e que **nenhuma** chamada ao banco acontece. Suíte da API em 209 testes.
 
 Note que a política do servidor vale para todos os caminhos — incluindo `/auth/v1/signup` direto e o reset de senha —, enquanto o zod cobre só o `POST /cadastro`. Os dois precisam concordar, mas quem manda é o servidor.
+
+#### `jwt_exp` reduzido (31/07/2026)
+
+| Configuração | Antes | Agora |
+|---|---|---|
+| `jwt_exp` | 3600 s (1 h) | **1800 s (30 min)** |
+
+Aplicado pela Management API. Não derruba ninguém: o refresh token continua válido, então a mudança só aparece na próxima renovação. O custo é o dobro de chamadas de refresh por sessão — irrelevante diante do `rate_limit_token_refresh = 150`.
+
+O que isto **não** é: expiração de sessão. Um access token roubado agora vale 30 min em vez de 60; um *refresh* token roubado continua valendo para sempre. É contenção de dano, não fechamento do buraco.
+
+#### O que sobra e por quê (triagem de 31/07/2026)
+
+O restante do S-04 se divide em duas naturezas diferentes, e confundir as duas leva a decisão errada:
+
+**Bloqueado por plano — o projeto está no `free` (org `apvsbdfkjatqzpccfjdr`), confirmado pela Management API:**
+
+| Item | Config | Requisito |
+|---|---|---|
+| Sessão que expira | `sessions_timebox`, `sessions_inactivity_timeout`, `sessions_single_per_user` (todos `0`/`false`) | *"This feature is only available on Pro Plans and up"* |
+| Senha vazada (HIBP) | `password_hibp_enabled = false` | *"Leaked password protection is available on the Pro Plan and above"* |
+
+Não há contorno no free — a Management API aceita o `PATCH`, mas o GoTrue ignora. O advisor de segurança segue avisando `auth_leaked_password_protection`; o WARN é legítimo e permanece até o upgrade. Consequência a registrar sem eufemismo: **hoje uma sessão do LAB-HUB não morre nunca**, e a rotação de refresh token (ligada, com `reuse_interval = 10`) detecta *reúso*, não *posse* — o ladrão que renova sozinho renova indefinidamente.
+
+**Não bloqueado por plano — é trabalho de aplicação, e assinar o Pro não adianta:**
+
+- **Exigir MFA.** `mfa_totp_enroll_enabled` e `verify` já estão `true` no plano free. O que falta é tela de cadastro do fator no `apps/web` e exigência de AAL2 nas ações sensíveis do `apps/api` (baixar laudo, trocar e-mail). O Pro só acrescenta MFA por SMS, que cobra por mensagem e não é o que a seção pede.
+- **Captcha.** `security_captcha_enabled = false`; é gratuito, mas depende de conta em provedor (hCaptcha/Turnstile) e de mudança no front. Relevante porque o `/cadastro` tem rate limit por IP, que não cobre enumeração distribuída.
 
 ---
 
