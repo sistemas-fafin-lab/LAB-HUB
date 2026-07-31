@@ -20,7 +20,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-02 | Sem backup restaurável — perda de dado clínico é irreversível | **ALTO** |
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** |
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 30/07** |
-| S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | **ALTO** |
+| S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | **ALTO** → **parcial 31/07** |
 | S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → ver Parte 3 |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | **MÉDIO** |
@@ -504,7 +504,7 @@ Duas coisas separadas:
 | `password_required_characters` | `null` | `123456` é uma senha válida hoje |
 | `security_update_password_require_reauthentication` | **false** | **quem rouba a sessão troca a senha sem saber a antiga** |
 | `mfa_totp_enroll_enabled` | true | disponível, mas **não exigido** |
-| `mailer_notifications_password_changed_enabled` | false | troca de senha não notifica o titular |
+| `mailer_notifications_password_changed_enabled` | false → **true 31/07** | troca de senha não notifica o titular (dependia de SMTP; ver S-05) |
 
 O item mais sério é a **reautenticação desligada**: um token vazado (XSS, dispositivo compartilhado, backup de browser) vira posse da conta, porque o atacante troca a senha sem conhecer a atual e o dono nem é avisado.
 
@@ -546,7 +546,11 @@ Note que a política do servidor vale para todos os caminhos — incluindo `/aut
 
 ---
 
-### S-05 — Configuração de e-mail incompatível com produção — **ALTO**
+### S-05 — Configuração de e-mail incompatível com produção — **ALTO** → **PARCIALMENTE CORRIGIDO**
+
+> **STATUS 31/07/2026:** SMTP próprio, `site_url` e `uri_allow_list` aplicados,
+> reaproveitando a conta do FlowLab. Falta o teste de entrega ponta a ponta e,
+> depois dele, `REQUIRE_EMAIL_CONFIRMATION=true`.
 
 ```
 site_url        = 'http://localhost:3000'
@@ -563,6 +567,41 @@ Três consequências:
 3. **Confirmação de e-mail desligada** (`email_confirm: !REQUIRE_EMAIL_CONFIRMATION` em `routes/cadastro.ts:49`) significa que **qualquer pessoa cria uma conta com o e-mail de outra** e já entra logada. Combinado com P-01 abaixo, é o caminho mais curto para assumir o registro de um paciente real. O `.env.example` documenta isso como decisão consciente de fase de teste — o registro aqui é para não passar batido no dia do deploy.
 
 **Correção:** configurar SMTP (Resend/SES/Postmark), `site_url` com o domínio real, `uri_allow_list` com os domínios de redirect legítimos (incluindo previews da Vercel, se usar), e `REQUIRE_EMAIL_CONFIRMATION=true` antes de qualquer paciente real entrar.
+
+#### Verificação pós-correção (31/07/2026) — **SMTP ligado, falta o teste de ponta a ponta**
+
+**Nada disso exigia plano pago.** Conferido na documentação e no projeto: SMTP próprio está disponível no plano free em todos os planos, e o único item de e-mail atrás do Pro é remover a marca "Supabase" do rodapé. O projeto está no **free** (`org: labhub@laboratoriolab.com.br's Org`). Quem é bloqueado por plano é o **S-02**: no free, backup automático e PITR aparecem como "não incluído" — o que a lista vazia de `backups` já mostrava.
+
+Reaproveitada a conta SMTP que o FlowLab já usa em produção. Onde ela estava: o `supabase/config.toml` do FlowLab tem o bloco `[auth.email.smtp]` **comentado** (é o exemplo de sendgrid que vem do CLI, não configuração real) — o SMTP de verdade é da aplicação, via nodemailer em `api/_lib/email.ts`, com as credenciais no `.env`. Google Workspace no domínio próprio.
+
+| Configuração | Antes | Agora |
+|---|---|---|
+| `site_url` | `http://localhost:3000` | `https://lab-hub-site.vercel.app` |
+| `uri_allow_list` | vazio | produção + previews da Vercel + `localhost:5173` |
+| `smtp_host` / `smtp_port` | nulos | `smtp.gmail.com` / **587** |
+| `smtp_user` | nulo | `sistemas@laboratoriolab.com.br` |
+| `smtp_sender_name` | nulo | `LAB-HUB` |
+| `smtp_admin_email` | nulo | `no-reply@laboratoriolab.com.br` |
+| `rate_limit_email_sent` | **2/hora** | **30/hora** |
+| `mailer_notifications_password_changed_enabled` | false | **true** |
+
+Quatro decisões que valem estar escritas:
+
+1. **Porta 587, e não os 465 do FlowLab.** As duas funcionam no Gmail. 465 é TLS implícito, que o nodemailer trata bem mas é o caminho menos exercitado no GoTrue; 587/STARTTLS é o que a documentação do Supabase exemplifica. Como o consumidor aqui é o GoTrue e não o nodemailer, seguir o caminho documentado custa nada.
+2. **`rate_limit_email_sent` de 2 para 30.** Os 2/hora são o teto do serviço embutido e são o motivo real de não dar para ligar a confirmação de e-mail: o terceiro paciente a se cadastrar na mesma hora ficaria sem receber e sem entrar. 30/hora é o valor que o próprio Supabase adota quando há SMTP próprio, e cabe folgado na cota do Workspace.
+3. **Nome de exibição `LAB-HUB`, não "Sistema FlowLab".** Mesma caixa e mesma credencial, nome próprio: o paciente pediu senha no LAB-HUB e precisa reconhecer o remetente. E-mail de recuperação com nome de outro sistema tem cara de phishing.
+4. **`mailer_notifications_password_changed_enabled` ligado junto.** É o item que o S-04 deixou explicitamente em aberto por depender de e-mail funcionando. Sem ele, quem troca a senha de uma sessão roubada faz isso em silêncio.
+
+**Credencial verificada sem enviar mensagem nenhuma:** conexão SMTP direta ao `smtp.gmail.com`, `STARTTLS` + `AUTH`, e desconexão antes de qualquer `MAIL FROM`. Passou nas **duas** portas (587 e 465), o que confirma que a senha de aplicativo do Workspace vale para este caminho e não só para o do FlowLab.
+
+O teste foi assim porque a base tem **2 usuários e nenhum interno** (`select count(*) … filter (where email like '%@laboratoriolab.com.br')` → 0): disparar recuperação de senha para descobrir se o SMTP funciona significaria mandar e-mail para conta de pessoa real.
+
+**O que continua faltando, e por quê:**
+
+- **Entrega de ponta a ponta não foi comprovada.** `AUTH OK` prova credencial e porta; não prova que o GoTrue monta e entrega a mensagem. Só um "esqueci minha senha" real fecha isso.
+- **O alias `no-reply@` pode ser reescrito.** O Gmail troca o `From` pelo endereço autenticado (`sistemas@`) a menos que `no-reply@laboratoriolab.com.br` esteja verificado como "enviar e-mail como" na conta. O FlowLab já envia com esse remetente, então provavelmente está — mas isso é inferência, e aparece no primeiro e-mail que chegar.
+- **`REQUIRE_EMAIL_CONFIRMATION` segue `false`** de propósito. Ligar antes de comprovar a entrega tranca o cadastro: o paciente cria a conta, não recebe o e-mail e não consegue entrar. É o último passo, depois do teste real.
+- **A caixa é compartilhada com o FlowLab.** Cota do Workspace e reputação de envio passam a ser dividas entre os dois sistemas; um pico num afeta o outro.
 
 ---
 
@@ -1168,7 +1207,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 7 | `pg_dump` cifrado agendado + **teste de restauração** | S-02 |
 | 8 | Restringir `dbAllowedCidrs`; ligar SSL enforcement; rotacionar senha do banco | S-03 |
 | 9 | ~~Senha mín. 12 + reautenticação~~ — **feito 30/07** | S-04 |
-| 10 | SMTP próprio, `site_url` real, `uri_allow_list`, `REQUIRE_EMAIL_CONFIRMATION=true` | S-05 |
+| 10 | ~~SMTP próprio, `site_url` real, `uri_allow_list`~~ — **feito 31/07**; falta testar a entrega e só então `REQUIRE_EMAIL_CONFIRMATION=true` | S-05 |
 | 11 | `supabase link` + `db pull` — realinhar migrations com o banco real | P-04 |
 | 12 | ~~Workflow de CI com `type-check`, `lint`, `test`, `audit --audit-level=high`~~ — **feito 30/07** (ESLint instalado e configurado no mesmo dia) | P-02 |
 
