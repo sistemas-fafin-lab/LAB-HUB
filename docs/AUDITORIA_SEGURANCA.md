@@ -935,6 +935,15 @@ O diagnóstico está certo e a rotina que ele pede não existe. Somando:
 
 ### S-10 — Higiene de configuração
 
+> **STATUS 31/07/2026 — o item do `search_path` está FECHADO.** Conferido no
+> catálogo, não no advisor: as quatro funções de `public` têm `proconfig`
+> definido — `corrigir_identidade_paciente`, `pacientes_bloqueia_troca_identidade`
+> e `set_atualizado_em` com `search_path=""`, e `rls_auto_enable` com
+> `pg_catalog` (precisa dele para enxergar os catálogos que consulta).
+> `set_updated_at` não existe mais — foi unificada. O advisor de segurança não
+> reporta mais `function_search_path_mutable`. O plano de ação dizia que faltava
+> `rls_auto_enable`; era falso positivo. Seguem abertos os outros dois bullets.
+
 - **`set_updated_at()` e `set_atualizado_em()` sem `search_path` fixo** (2 warnings do advisor). São triggers simples e não `SECURITY DEFINER`, então o risco real é baixo, mas o custo da correção é uma linha:
   ```sql
   alter function public.set_updated_at()     set search_path = '';
@@ -1540,7 +1549,7 @@ Onde encaixar no código atual, sem espalhar: `apps/api/src/lib/mappers.ts` já 
 | 1 | `revoke all` de `anon`/`authenticated` nas tabelas + `alter default privileges` | SQL — S-01 | **feito 30/07** |
 | 2 | Trigger que torna `cpf`/`data_nascimento`/`auth_user_id` imutáveis pós-claim | SQL — S-01 | **feito 30/07** |
 | 3 | Saída autorizada de correção (RPC + trilha + rota da recepção) | SQL + `routes/integracao.ts` — S-01 | **feito 30/07** |
-| 4 | Tela no FlowLab que consome `POST /integracao/pacientes/:id/correcao-identidade` | FlowLab | **feito 30/07** (e2e validado; falta aplicar no FlowLab de produção) |
+| 4 | Tela no FlowLab que consome `POST /integracao/pacientes/:id/correcao-identidade` | FlowLab | **feito 31/07** — publicado em produção e correção real registrada na trilha |
 | 5 | Conferir `data_nascimento` no claim do paciente-fantasma (erro genérico) | `routes/cadastro.ts` — P-01 | **feito 30/07** |
 | 6 | `npm audit fix` nos três workspaces | P-02 | **feito 30/07** (raiz desfeita — ver registro) |
 
@@ -1569,7 +1578,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | Índices faltantes + `(select auth.uid())` nas 5 policies | S-11 |
 | 19 | Migrar `anon key` e service role para o formato de chave revogável | S-10 |
-| 20 | `search_path = ''` nas funções (parcial: falta `rls_auto_enable`); ~~unificar `set_updated_at`/`set_atualizado_em`~~ — **feito 31/07** | S-10 / P-05 |
+| 20 | ~~`search_path` fixo nas funções~~ — **feito**; ~~unificar `set_updated_at`/`set_atualizado_em`~~ — **feito 31/07** | S-10 / P-05 |
 | 21 | ~~Alinhar TTL de signed URL em `resultados.ts` (3600 s → 300 s)~~ — **feito 31/07**, junto com o 404 mentiroso e a duplicata de `sanitizarNome` | P-05 |
 | 22 | ~~Limites do bucket `laudos` (10 MB + `application/pdf`)~~ — **feito 31/07** | P-05 |
 
