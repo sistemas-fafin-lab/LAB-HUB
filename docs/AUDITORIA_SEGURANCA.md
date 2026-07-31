@@ -28,7 +28,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-09 | Sem política de retenção/expurgo; `on delete cascade` deixa arquivos órfãos no Storage | **MÉDIO** |
 | P-03 | API sem cabeçalhos de segurança (helmet) e sem redação de PII nos logs | ~~**BAIXO**~~ **CORRIGIDO 30/07/2026** |
 | S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | **BAIXO** |
-| S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | **PERF** |
+| S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | ~~**PERF**~~ **CORRIGIDO 31/07/2026** |
 | P-06 | `FLOWLAB_API_KEY` de produção é `flowAPIKey1234567890`; sozinha, reescreve o CPF de qualquer paciente | **ALTO** (novo 31/07) |
 
 **Ordem de ataque recomendada:** ~~S-01~~ (feito) → ~~P-01~~ (feito) → **S-02**/~~S-03~~ (parcial)/~~S-04~~/~~S-05~~ → criptografia (Parte 3) → o resto.
@@ -318,6 +318,19 @@ O resto foi triado e **deliberadamente não implementado**, por decisão do resp
 | Exigir MFA · captcha | **Código**, não configuração — o Pro não resolve |
 
 Registro do que fica descoberto até um eventual upgrade: **sessão do LAB-HUB não expira sozinha**. Detalhe e evidência do bloqueio de plano na seção S-04, em "O que sobra e por quê".
+
+---
+
+### 31/07/2026 — S-11 fechado (índices e RLS)
+
+| | |
+|---|---|
+| **Migration** | `20260731160000_s11_indices_e_rls_initplan.sql`, aplicada e no ledger (15 local × 15 no banco) |
+| **Índices** | `idx_pacientes_auth_user`, `idx_resultados_paciente` |
+| **Policies** | as 5 passam a usar `(select auth.uid())`, via `alter policy` (sem janela sem policy) |
+| **Verificação** | advisor de performance zerado nos dois achados; suíte da API em 245 testes |
+
+Duas correções do próprio diagnóstico, feitas em vez de deixar a seção mentir: (1) o `auth_rls_initplan` **não** era custo de performance aqui — a API usa service_role, que ignora RLS, então as policies não rodam em caminho vivo; a reescrita é higiene para quando voltarem a valer. (2) Os índices ainda não são usados (`unused_index` no advisor) porque 8 linhas cabem num seq scan — o INFO é esperado e não deve ser "corrigido" apagando o índice.
 
 ---
 
@@ -957,7 +970,12 @@ O diagnóstico está certo e a rotina que ele pede não existe. Somando:
 
 ---
 
-### S-11 — Performance (advisor)
+### S-11 — Performance (advisor) — ~~**PERF**~~ **CORRIGIDO 31/07/2026**
+
+> **STATUS:** migration `20260731160000_s11_indices_e_rls_initplan.sql`, aplicada
+> em produção e registrada no ledger. O advisor de performance não reporta mais
+> `unindexed_foreign_keys` nem `auth_rls_initplan`. Ver "Verificação" no fim da
+> seção — inclusive por que metade desta correção **não** acelerou nada.
 
 | Achado | Impacto |
 |---|---|
@@ -982,6 +1000,22 @@ alter policy "paciente vê só seus agendamentos" on public.agendamentos
   with check (paciente_id = (select id from public.pacientes where auth_user_id = (select auth.uid())));
 -- idem para resultados, documentos e exam_results
 ```
+
+#### Verificação pós-correção (31/07/2026)
+
+| | Antes | Agora |
+|---|---|---|
+| `pacientes.auth_user_id` | sem índice | `idx_pacientes_auth_user` |
+| `resultados.paciente_id` | sem índice | `idx_resultados_paciente` |
+| `auth.uid()` nas 5 policies | por linha | `(select auth.uid())` — InitPlan |
+| Advisor de performance | 2 INFO + 5 WARN | **0 INFO + 0 WARN** dos achados acima |
+| Suíte da API | — | 245 testes, tudo verde |
+
+As 5 policies tiveram `qual` e `with_check` reescritos e **continuam idênticos entre si** (`count(*) filter (where qual is not distinct from with_check) = 5`). Usei `alter policy` em vez de drop/create: não existe instante em que a tabela fique sem policy, e nome, comando e roles são preservados sem depender de eu reescrevê-los certo.
+
+**O achado que a correção revelou — e que corrige o diagnóstico original desta seção.** O `auth_rls_initplan` foi listado aqui como custo de performance. Não é, neste projeto: a API fala com o banco pela **service_role** (`apps/api/src/lib/supabase.ts:8`), que ignora RLS, e desde o S-01 nem `anon` nem `authenticated` têm grant nestas tabelas. **Estas policies não executam em nenhum caminho vivo hoje.** Reescrevê-las é higiene — a hora de a policy estar certa é antes de ela voltar a ser o que segura o acesso (se alguém devolver grant ao PostgREST, ou se a API passar a usar o JWT do paciente), não depois. Ganho de velocidade hoje: zero. Vale fazer assim mesmo, mas não sob pretexto falso.
+
+Os índices, esses, valem — só que **ainda não**. O advisor agora reporta os dois como `unused_index`, e está certo: com 8 linhas o planner prefere seq scan, porque ler a tabela inteira é mais barato que o índice. Esse INFO é esperado e não deve ser "corrigido" removendo o índice. Ele deixa de aparecer quando a base crescer — e é justamente aí que não dá para estar sem, já que `auth_user_id` é consultado a cada requisição autenticada.
 
 ---
 
@@ -1576,7 +1610,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 15 | Estender a trilha append-only aos pontos de leitura de dado sensível | S-08 |
 | 16 | Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta | S-09 |
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
-| 18 | Índices faltantes + `(select auth.uid())` nas 5 policies | S-11 |
+| 18 | ~~Índices faltantes + `(select auth.uid())` nas 5 policies~~ — **feito 31/07** | S-11 |
 | 19 | Migrar `anon key` e service role para o formato de chave revogável | S-10 |
 | 20 | ~~`search_path` fixo nas funções~~ — **feito**; ~~unificar `set_updated_at`/`set_atualizado_em`~~ — **feito 31/07** | S-10 / P-05 |
 | 21 | ~~Alinhar TTL de signed URL em `resultados.ts` (3600 s → 300 s)~~ — **feito 31/07**, junto com o 404 mentiroso e a duplicata de `sanitizarNome` | P-05 |
