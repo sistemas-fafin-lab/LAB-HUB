@@ -23,15 +23,21 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** |
 | S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → ver Parte 3 |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
-| S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | **MÉDIO** |
+| S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** (junto com S-01; DDL capturada em 31/07 pelo P-04) |
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | **MÉDIO** |
 | S-09 | Sem política de retenção/expurgo; `on delete cascade` deixa arquivos órfãos no Storage | ~~**MÉDIO**~~ **CORRIGIDO 31/07/2026** |
 | P-03 | API sem cabeçalhos de segurança (helmet) e sem redação de PII nos logs | ~~**BAIXO**~~ **CORRIGIDO 30/07/2026** |
-| S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | ~~**BAIXO**~~ **parcial 31/07** (`search_path` feito; chaves: código pronto, produção pendente) |
+| S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | ~~**BAIXO**~~ **CORRIGIDO 03/08/2026** (chaves legadas desativadas) |
 | S-11 | RLS reavalia `auth.uid()` por linha; FKs sem índice de cobertura | ~~**PERF**~~ **CORRIGIDO 31/07/2026** |
 | P-06 | `FLOWLAB_API_KEY` de produção é `flowAPIKey1234567890`; sozinha, reescreve o CPF de qualquer paciente | **ALTO** (novo 31/07) |
 
 **Ordem de ataque recomendada:** ~~S-01~~ (feito) → ~~P-01~~ (feito) → **S-02**/~~S-03~~ (parcial)/~~S-04~~/~~S-05~~ → criptografia (Parte 3) → o resto.
+
+> **Estado em 03/08/2026:** 11 dos 15 achados fechados. Sobram **S-02** (backup —
+> único ALTO sem correção nenhuma), **S-06**/Parte 3 (criptografia de coluna),
+> **S-08** (trilha de leitura), e três riscos **aceitos por decisão explícita do
+> responsável**, não pendências esquecidas: P-06 (`FLOWLAB_API_KEY`), o CIDR aberto
+> do S-03 e o que o S-04 deixa descoberto no plano free.
 
 > Nota importante sobre a prioridade: **criptografar as colunas não resolve S-01 nem P-01.** Nos dois casos o atacante está autenticado e autorizado — a aplicação decifra o dado para ele de bom grado. Criptografia protege contra vazamento de *dump*, backup, réplica e acesso indevido ao painel. Controle de acesso protege contra o paciente do lado. São problemas diferentes e o segundo é o mais urgente.
 
@@ -351,7 +357,7 @@ Detalhe, tabela de comportamento medido e o efeito colateral no claim do P-01 na
 
 ---
 
-### 31/07/2026 — S-10: chaves revogáveis (código pronto, produção pendente)
+### 31/07/2026 — S-10: chaves revogáveis (código pronto; produção veio em 03/08)
 
 | | |
 |---|---|
@@ -359,11 +365,66 @@ Detalhe, tabela de comportamento medido e o efeito colateral no claim do P-01 na
 | **Testes** | 5 casos novos em `env.test.ts`; API em 261, web em 52 |
 | **Verificação** | as chaves `sb_publishable_`/`sb_secret_` foram exercitadas contra produção: a primeira mapeia para `anon` e apanha do revoke do S-01, a segunda ignora RLS igual à legada |
 
-**Isto não fecha o S-10.** O código aceita as chaves novas; produção continua usando as legadas até que a env mude no VPS e no host do front. Desativar as legadas agora derrubaria API e portal no mesmo segundo — é a última etapa, e é do responsável. Passo a passo na seção S-10.
+**Isto não fecha o S-10.** O código aceita as chaves novas; produção continua usando as legadas até que a env mude no VPS e no host do front. Desativar as legadas agora derrubaria API e portal no mesmo segundo — é a última etapa, e é do responsável. Passo a passo na seção S-10. *(As três etapas restantes saíram em 03/08/2026 — ver o registro daquele dia.)*
 
 O achado do `search_path`, que constava como pendente, já estava fechado — ver a correção do plano de ação no mesmo dia.
 
 ---
+
+### 03/08/2026 — S-10 fechado (as chaves legadas foram desativadas)
+
+| | |
+|---|---|
+| **Ação** | painel do Supabase → *Disable legacy API keys*; nenhuma mudança de código |
+| **Pré-requisito** | deploy no VPS (`git pull` + `docker compose up -d --build`), que faltava desde 31/07 |
+| **Verificação** | as duas chaves legadas recusadas pelo PostgREST **e** pelo GoTrue; `publishable` e `secret` intactas; portal e API no ar |
+
+**O que destravou o item foi um deploy, não uma decisão.** O código que aceita as
+chaves novas estava pronto desde 31/07 e no `origin`, mas o container do VPS rodava
+uma imagem anterior — mesmo sintoma do FlowLab em 30/07, e a mesma lição: neste
+sistema *publicado* e *implantado* são dois eventos, e o segundo não acontece
+sozinho. O mesmo `up -d --build` carregou de carona a correção dos laudos de
+`c26b56c`, cuja metade em banco (`20260803120000`) já estava aplicada havia horas —
+metade implantada é o estado que engana quem for depurar.
+
+Confirmação de que a API passou à chave nova: `docker compose logs api | grep
+'[env]'` **sem saída**. O aviso de `chaveSupabase()` só dispara quando o valor
+começa com `eyJ`, então silêncio ali não é ausência de log, é a asserção. E o
+`node dist/scripts/expurgo.js` do cron rodou com a chave nova, consultou a base e
+saiu limpo (`documentosRemovidos: 0`, `pacientesAfetados: 0`, `duracaoMs: 1288`) —
+prova de que o `service_role` novo lê e escreve, e de que o cron do S-09 está em
+operação com a versão do revert `b853ac0`, não com a que veio do VPS.
+
+**Estado depois de desativar**, medido contra produção:
+
+```
+legacy anon         → /rest/v1/pacientes   401  "Legacy API keys are disabled"
+legacy service_role → /rest/v1/pacientes   401  "Legacy API keys are disabled"
+legacy anon         → /auth/v1/health      401  "Legacy API keys are disabled"
+publishable         → /rest/v1/pacientes   401  42501 permission denied  (a parede do S-01)
+publishable         → /auth/v1/health      200  GoTrue v2.194.0
+secret              → /rest/v1/pacientes   200  devolveu linha
+```
+
+**A leitura desses dois 401 não é a mesma, e confundi-los custaria o achado.** Na
+primeira medição do dia — feita logo depois do clique no painel — a `anon` legada
+já devolvia 401, mas com `42501 permission denied for table pacientes`: isso é a
+chave sendo **aceita** e apanhando do revoke do S-01 um passo adiante, não chave
+desativada. Quem parasse no código HTTP concluiria "desativada" e estaria errado —
+a `service_role` legada, testada no mesmo instante, devolveu **200 com uma linha
+real de `pacientes`**. A desativação levou cerca de um minuto para propagar, e a
+única evidência que distingue os dois estados é o **corpo** da resposta
+(`"Legacy API keys are disabled"` × `42501`).
+
+**O que continua valendo depois da troca:** sessões de usuário não foram
+invalidadas — o segredo que assina os JWT de sessão é outro e não foi rotacionado;
+o que morreu foi a chave de *API*. Por isso `/auth/v1/health` com a `publishable`
+responde 200 e o portal segue de pé (`200`).
+
+Ganho concreto: a partir de agora cada chave é revogável isoladamente. Antes, um
+vazamento da `service_role` — o segredo mais valioso do sistema, o que ignora RLS —
+só se resolvia rotacionando o JWT secret do projeto inteiro, derrubando todas as
+sessões junto.
 
 # PARTE 1 — SUPABASE
 
@@ -922,8 +983,6 @@ Confirmei a estrutura de `exam_results.result`: array de laudos com as chaves `g
 
 O Supabase já cifra **disco** (at rest) e **trânsito** (TLS). O que falta é a camada que protege contra vazamento *lógico*: um `pg_dump`, um backup baixado, uma réplica, um acesso indevido ao Studio, ou um bug de RLS futuro. É esse o pedido do projeto e ele é legítimo — **ver Parte 3**, com plano completo.
 
----
-
 ### S-07 — `rls_auto_enable()` é `SECURITY DEFINER` e chamável por `anon`
 
 O advisor aponta que `public.rls_auto_enable()` é executável via `/rest/v1/rpc/rls_auto_enable` pelos roles `anon` e `authenticated`, rodando com privilégios do dono.
@@ -1046,10 +1105,11 @@ Os padrões erram para o lado de reter um pouco mais, que é o lado recuperável
 > reporta mais `function_search_path_mutable`. O plano de ação dizia que faltava
 > `rls_auto_enable`; era falso positivo.
 >
-> **O item das chaves está PELA METADE (31/07/2026):** o código já aceita as
-> chaves novas, e elas foram testadas contra produção. O que falta **não é
-> código** — é trocar a env no VPS e no host do front e desativar as legadas no
-> painel. Ver "Migração das chaves" no fim da seção.
+> **O item das chaves está FECHADO (03/08/2026).** O código passou a aceitar as
+> chaves novas em 31/07; a troca de env no front (Vercel) saiu em 03/08, a do VPS
+> no mesmo dia junto do rebuild, e as legadas foram desativadas no painel. As duas
+> são recusadas com `"Legacy API keys are disabled"` no PostgREST e no GoTrue. Ver
+> "Migração das chaves" no fim da seção e o registro de 03/08.
 
 - **`set_updated_at()` e `set_atualizado_em()` sem `search_path` fixo** (2 warnings do advisor). São triggers simples e não `SECURITY DEFINER`, então o risco real é baixo, mas o custo da correção é uma linha:
   ```sql
@@ -1062,7 +1122,7 @@ Os padrões erram para o lado de reter um pouco mais, que é o lado recuperável
 
 - **`max_rows = 1000` no PostgREST.** Depois do revoke de S-01 isso deixa de importar para `anon`/`authenticated`, mas mantenha em mente que é o teto por request.
 
-#### Migração das chaves (31/07/2026) — código pronto, produção pendente
+#### Migração das chaves (31/07 → 03/08/2026) — **concluída**
 
 **As chaves novas já existem** e nasceram com o projeto em 24/06/2026 — ninguém precisou criá-las:
 
@@ -1092,14 +1152,20 @@ Os dois lados ficam provados de uma vez: a `publishable` mapeia para `anon` e ba
 
 Aceitar os dois **não é indecisão** — é o que torna a troca reversível numa infra que não se implanta por push: a API roda em docker-compose num VPS, então deploy do código e ajuste do ambiente são dois atos separados, em momentos separados. Exigir os dois no mesmo instante criaria uma janela com a API sem chave válida. E para a migração não parar no meio e ser esquecida, `chaveSupabase()` avisa no boot enquanto o valor ainda for um JWT (`eyJ…`) — só nesse caso, para não incomodar quem já colocou a chave nova na variável de nome antigo.
 
-**O que falta, e é sua mão, não minha** (nesta ordem — a última etapa é a única irreversível):
+**A sequência, e como cada etapa terminou** (a ordem importava: a última é a única irreversível, e só era segura depois das outras três):
 
-1. Subir o código que entende os dois nomes.
-2. No VPS: `SUPABASE_SECRET_KEY=sb_secret_…` no `.env` do compose e recriar o container. Some o aviso no boot.
-3. No host do front: `VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_…` e **rebuild** — é env de build, não de runtime; trocar sem rebuildar não muda o bundle.
-4. Confirmar que os dois sobem, e só então desativar as legadas no painel.
+| | Etapa | Estado |
+|---|---|---|
+| 1 | Subir o código que entende os dois nomes | **feito 31/07** |
+| 2 | VPS: `SUPABASE_SECRET_KEY=sb_secret_…` no `.env` do compose e recriar o container | **feito 03/08** — sem `[env]` no boot |
+| 3 | Front: `VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_…` e **rebuild** (é env de build, não de runtime) | **feito 03/08** — bundle `index-ls2tQeOK.js`, zero JWT legado |
+| 4 | Desativar as legadas no painel | **feito 03/08** |
 
-**Não desativei as legadas.** Fazê-lo agora derrubaria a API e o portal no mesmo segundo, porque produção ainda usa a chave antiga. Essa etapa só é segura depois de (2) e (3), e é sua para dar.
+A etapa 3 tinha uma armadilha própria e ela chegou a acontecer: o deploy da Vercel ficou preso num commit antigo, e o sintoma era mudo — **o hash do bundle não mudar**. Sem olhar para isso, "trocar a env e rebuildar" parece feito quando não foi.
+
+Antes da etapa 4, o levantamento dos consumidores, para que o 401 não pegasse ninguém de surpresa: API (chave nova, confirmada), portal (bundle confirmado), `.env` de desenvolvimento local (já nas novas), `apps/mobile` (não usa Supabase — zero referências, e o app está parado) e FlowLab (fala com o LAB-HUB por `LABHUB_API_URL` + `FLOWLAB_API_KEY`, nunca com este Supabase). Nenhum ficou para trás.
+
+Verificação final e a distinção entre os dois tipos de 401: ver o registro de 03/08/2026.
 
 ---
 
@@ -1744,7 +1810,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | 16 | ~~Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta~~ — **feito 31/07** | S-09 |
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | ~~Índices faltantes + `(select auth.uid())` nas 5 policies~~ — **feito 31/07** | S-11 |
-| 19 | Migrar `anon key` e service role para o formato de chave revogável — **código feito 31/07**; falta trocar a env no VPS/front e desativar as legadas | S-10 |
+| 19 | ~~Migrar `anon key` e service role para o formato de chave revogável~~ — **feito 03/08** (código 31/07, envs e desativação das legadas 03/08) | S-10 |
 | 20 | ~~`search_path` fixo nas funções~~ — **feito**; ~~unificar `set_updated_at`/`set_atualizado_em`~~ — **feito 31/07** | S-10 / P-05 |
 | 21 | ~~Alinhar TTL de signed URL em `resultados.ts` (3600 s → 300 s)~~ — **feito 31/07**, junto com o 404 mentiroso e a duplicata de `sanitizarNome` | P-05 |
 | 22 | ~~Limites do bucket `laudos` (10 MB + `application/pdf`)~~ — **feito 31/07** | P-05 |
