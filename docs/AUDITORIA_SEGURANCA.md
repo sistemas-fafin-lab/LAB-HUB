@@ -460,7 +460,16 @@ Verificação, em quatro camadas — cada uma prova algo que a anterior não pro
 
 As duas últimas camadas existem separadas de propósito. GCM é cifra de fluxo, então o tamanho do ciphertext é igual ao do texto claro — conferir tamanho prova que o **conteúdo certo entrou**, e teria passado batido um erro de AAD. Só a decifragem prova que ele **sai**. Um AAD errado deixaria o tamanho perfeito e a página de resultados em 500.
 
-**Sobra a leitura pelo portal**, que é o caminho decifrado ponta a ponta e depende de um login de paciente — não alcançável da máquina de desenvolvimento.
+**A leitura pelo portal foi conferida no mesmo dia**, com login de paciente real — a única camada que não se alcança da máquina de desenvolvimento. As duas linhas apareceram na tela e o que estava cifrado bateu com o que foi exibido:
+
+| No banco | Na tela |
+|---|---|
+| `be4ba439` · `ready` · 3 marcadores · envelope 508 (345 B) | "TESTE RÁPIDO COMBO — COVID-19 / INFLUENZA A E B" · Liberado · 3 marcadores |
+| `f978576e` · `analyzing` · 0 marcadores · envelope 52 (`[]`) | "VITAMINA D — 25-HIDROXI" · Em análise · sem marcadores |
+
+O resumo exibido no detalhe ("Antígenos de SARS-CoV-2 e Influenza A/B não detectados na amostra") saiu de `resumo_enc`, decifrado em memória pela API — o banco não tem mais esse texto acessível a quem só tem o banco.
+
+**O que ainda não foi exercitado em produção:** a *escrita* cifrada de `exam_results.result`. A tabela segue com 0 linhas, então o caminho `saveResult` está provado só pelos testes; ele passa a valer na primeira busca de laudo que voltar dos LIS. Não é pendência — é consequência de a tabela ser cache e estar vazia.
 
 > **A chave nunca passou por esta auditoria, e não deve passar.** Foi gerada no
 > VPS (`openssl rand -base64 32`) e nenhuma conversa a viu. É a lição do S-03 com
