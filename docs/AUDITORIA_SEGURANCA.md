@@ -24,7 +24,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 NO AR 03/08** (dado clínico cifrado). `pacientes.*` = fase 2 |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** (junto com S-01; DDL capturada em 31/07 pelo P-04) |
-| S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | **MÉDIO** |
+| S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | ~~**MÉDIO**~~ **CORRIGIDO 03/08/2026** |
 | S-09 | Sem política de retenção/expurgo; `on delete cascade` deixa arquivos órfãos no Storage | ~~**MÉDIO**~~ **CORRIGIDO 31/07/2026** |
 | P-03 | API sem cabeçalhos de segurança (helmet) e sem redação de PII nos logs | ~~**BAIXO**~~ **CORRIGIDO 30/07/2026** |
 | S-10 | Funções sem `search_path` fixo; `anon key` no formato JWT legado (não revogável) | ~~**BAIXO**~~ **CORRIGIDO 03/08/2026** (chaves legadas desativadas) |
@@ -33,12 +33,12 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 
 **Ordem de ataque recomendada:** ~~S-01~~ (feito) → ~~P-01~~ (feito) → **S-02**/~~S-03~~ (parcial)/~~S-04~~/~~S-05~~ → criptografia (Parte 3) → o resto.
 
-> **Estado em 03/08/2026:** 11 dos 15 achados fechados, mais a **fase 1 do S-06**
-> (o dado clínico já é cifrado em produção; falta a fase 2, `pacientes.*`). Sobram
-> **S-02** (backup — único ALTO sem correção nenhuma), **S-08** (trilha de
-> leitura), e três riscos **aceitos por decisão explícita do responsável**, não
-> pendências esquecidas: P-06 (`FLOWLAB_API_KEY`), o CIDR aberto do S-03 e o que o
-> S-04 deixa descoberto no plano free.
+> **Estado em 03/08/2026:** 12 dos 15 achados fechados, mais a **fase 1 do S-06**
+> (o dado clínico já é cifrado em produção; falta a fase 2, `pacientes.*`). Sobra
+> **S-02** (backup — único ALTO sem correção nenhuma) e três riscos **aceitos por
+> decisão explícita do responsável**, não pendências esquecidas: P-06
+> (`FLOWLAB_API_KEY`), o CIDR aberto do S-03 e o que o S-04 deixa descoberto no
+> plano free.
 
 > Nota importante sobre a prioridade: **criptografar as colunas não resolve S-01 nem P-01.** Nos dois casos o atacante está autenticado e autorizado — a aplicação decifra o dado para ele de bom grado. Criptografia protege contra vazamento de *dump*, backup, réplica e acesso indevido ao painel. Controle de acesso protege contra o paciente do lado. São problemas diferentes e o segundo é o mais urgente.
 
@@ -484,6 +484,35 @@ O resumo exibido no detalhe ("Antígenos de SARS-CoV-2 e Influenza A/B não dete
 > trafegou por chat e por isso passou a exigir rotação; aqui, quem tem a chave lê
 > todo o histórico clínico do laboratório, e uma chave rotacionada depois de
 > vazar não desfaz o que já foi lido.
+
+---
+
+### 03/08/2026 — S-08 fechado (trilha de leitura de dado de saúde)
+
+| | |
+|---|---|
+| **Migration** | `20260803140000_s08_trilha_auditoria_acesso.sql` — **aplicada em produção**, ledger 19 × 19 |
+| **Código** | `lib/auditoria.ts` (novo), `routes/laudos.ts`, `routes/resultados.ts`, `routes/documentos.ts`, `routes/integracao.ts`, `server.ts` (`trustProxy`), `.env.example` |
+| **Testes** | `auditoria.test.ts` (novo, 9) + 15 nas rotas; `test/helpers.ts` ganhou `ilike`. API de 298 → **313 testes**; type-check limpo em `api`, `web` e `shared`; lint sem erro |
+| **Pendente** | **deploy da API no VPS** (`git pull && docker compose up -d --build`) — a tabela já existe, o código que a alimenta ainda não está no ar |
+
+O projeto já tinha duas trilhas append-only, e as duas registram **escrita**: `correcoes_identidade` (quem autorizou trocar um CPF) e `exclusoes_conta` (quem pediu exclusão). Faltava a de **leitura**, que é a que responde a pergunta do incidente — *quais registros de quais pacientes foram lidos, por quem e quando?* Sete pontos instrumentados: os quatro previstos no achado, mais `GET /resultados`, `GET /resultados/:id/declaracao` e `GET /integracao/pacientes/buscar` (esta última é por onde a `FLOWLAB_API_KEY` do P-06 varre a base — risco aceito, e risco aceito sem trilha é risco que ninguém verifica depois).
+
+**O achado dentro do achado.** O `ip` é um dos cinco campos que o S-08 pede e estava condenado a ser inútil: a API só é alcançada pelo túnel ngrok, então `request.ip` era o endereço do **container do ngrok**, idêntico para todo mundo. O `trustProxy` que corrige isso desenterrou um defeito que não era o assunto do achado — o rate-limit por IP usava a mesma chave, então **todos os pacientes dividiam um balde só**: o teto de 60/min do `GET /laudos` valia, na prática, para o portal inteiro. Passa a ser por cliente.
+
+Verificação em produção — catálogo e comportamento separados, porque ler o `information_schema` não prova que o `revoke` pega:
+
+| O quê | Como | Resultado |
+|---|---|---|
+| Estrutura | `information_schema` + `pg_class` | 10 colunas, RLS **on**, 0 policies, 4 índices, **0 foreign keys** |
+| Privilégio | `role_table_grants` | `service_role` = **INSERT, SELECT** (sem UPDATE/DELETE/TRUNCATE); `anon`/`authenticated` = nenhum |
+| Append-only de verdade | bloco `do $$` com `set role service_role` e `raise` final | `insert=OK update=bloqueado delete=bloqueado truncate=bloqueado` |
+| Vocabulário fechado | mesmo bloco, `ator_tipo='admin'` | recusado (`check_violation`) |
+| A coluna `inet` recusa lixo | mesmo bloco, `ip='nao-e-ip'` | recusado — é o motivo de a API validar antes |
+| Nada ficou gravado | `count(*)` depois do bloco | **0 linhas** |
+| Advisor de segurança | `/advisors/security` | nenhum WARN/ERROR novo; só o `rls_enabled_no_policy` **INFO**, que é o desenho — as outras duas ocorrências idênticas são as trilhas irmãs |
+
+O `set role service_role` no bloco de prova não é detalhe: sem ele o teste rodaria como `postgres`, que **pode** apagar, e teria provado o contrário do que se queria.
 
 ---
 
@@ -1095,7 +1124,13 @@ O `revoke all on all functions` de S-01 já cobre isso, mas deixo explícito por
 
 ---
 
-### S-08 — Sem trilha de auditoria de acesso a dado de saúde
+### S-08 — Sem trilha de auditoria de acesso a dado de saúde — ~~**MÉDIO**~~ **CORRIGIDO 03/08/2026**
+
+> **STATUS:** migration `20260803140000_s08_trilha_auditoria_acesso.sql` +
+> `lib/auditoria.ts` + 7 pontos de leitura instrumentados + `trustProxy` no
+> `server.ts`. Ver "Verificação pós-correção" no fim da seção — inclusive o
+> defeito que a correção desenterrou no rate-limit, que não era o assunto deste
+> achado.
 
 Não há tabela de log, nem trigger de auditoria, nem registro de "quem viu o laudo de quem e quando". Os logs da API (`Fastify` com pino, nível `info`) registram requisições HTTP, mas ficam onde o processo roda, sem retenção definida.
 
@@ -1108,6 +1143,47 @@ A LGPD (arts. 37 e 38) espera registro das operações de tratamento, e para dad
 > de dado clínico continua sem registro.
 
 **Correção mínima viável:** tabela `auditoria` append-only (sem UPDATE/DELETE para ninguém além do owner), alimentada pela API nos pontos de leitura de dado sensível — `GET /laudos`, `GET /laudos/:id`, `GET /documentos/:id/url`, `GET /integracao/agendamentos/:id/documentos` — registrando `ator` (paciente ou FlowLab), `ação`, `recurso_id`, `ip`, `timestamp`. Nunca o conteúdo.
+
+#### Verificação pós-correção (03/08/2026)
+
+A tabela é `auditoria_acesso` e segue o desenho acima, com três diferenças que valem registro.
+
+**Três pontos a mais que a lista mínima.** Os quatro previstos entraram, e mais três, cada um por um motivo próprio:
+
+| Rota | Ação | Por que entrou |
+|---|---|---|
+| `GET /resultados` | `resultados.listar` | Fonte alimentada pelo webhook do FlowLab; carrega `paineis` e `resumo` — as duas colunas que o S-06 achou valiosas o bastante para cifrar. Auditar o laudo do LIS e não este seria auditar o caminho, não o dado. |
+| `GET /resultados/:id/declaracao` | `resultado.declaracao` | Emite signed URL de PDF de laudo, exatamente como `GET /documentos/:id/url`, que estava na lista. |
+| `GET /integracao/pacientes/buscar` | `integracao.pacientes.buscar` | É por onde a `FLOWLAB_API_KEY` sozinha varre a base de pacientes — e essa chave é o **P-06**, fraca e aceita como risco por decisão explícita. Risco aceito sem trilha é risco que ninguém consegue verificar depois. |
+
+**Duas colunas que a lista mínima não previa e que fazem a trilha responder à pergunta certa.** `titular_id` (de quem era o dado) separado de `ator_id` (quem pediu): no canal do portal os dois são quase sempre iguais, e é justamente a linha em que eles **diferem** que é o alarme. E `quantidade`, que substitui o `recurso_id` nas listagens — os ids de laudo são sorteados a cada mapeamento (`laudos/service.ts`), então gravá-los não apontaria para nada meses depois; o que dá para saber de uma listagem é quantos registros saíram, e é a contagem que desenha a varredura.
+
+**O que a trilha registra e o que não registra.**
+
+- **Só o que foi entregue.** 404 e 500 não geram linha. Sem esse corte a tabela viraria um log de requisições e a pergunta que ela existe para responder — *o que vazou?* — ficaria enterrada nas tentativas que não expuseram nada. A exceção deliberada é a listagem vazia do canal do FlowLab (`quantidade: 0`): uma sequência de respostas vazias é o desenho de uma enumeração de ids, e auditar só o acerto deixaria a busca invisível.
+- **Nunca o conteúdo, nunca o termo buscado.** O termo do typeahead da recepção carrega nome ou CPF — é o que motiva a redação de query em `lib/http.ts` — e gravá-lo faria da trilha mais um lugar com PII em claro. Há teste que quebra se alguém acrescentar um campo fora do vocabulário de metadado.
+- **A emissão da signed URL é o acesso.** O download vai direto ao Storage e nunca volta a esta API, então a linha da emissão é o último ponto em que o sistema sabe quem pediu. É mais um motivo para o TTL curto do P-05: quanto mais longa a capability, mais a linha se distancia do acesso real.
+
+**Sem foreign key, de propósito** — a lição de `c26b56c`, que custou a trilha de exclusão inteira. `exclusoes_conta` nasceu com `on delete cascade` para `pacientes` e evaporou junto com 6 pacientes apagados: o caso em que a trilha mais importava era exatamente o caso em que ela sumia. `ator_id` e `titular_id` ficam como UUIDs opacos. É também o que reconcilia a trilha com o direito de exclusão do titular (art. 18 VI): depois da exclusão, `pacientes` está anonimizada e o UUID que sobra aqui identifica um registro que não existe mais, não uma pessoa.
+
+**Append-only de verdade:** `revoke update, delete, truncate ... from service_role`. É o ponto inteiro da tabela — uma trilha que o processo comprometido pode editar não prova nada, porque o primeiro movimento de quem entrou é apagar a linha que registra que ele entrou.
+
+**Falhar ao gravar não derruba a leitura.** A leitura estrita da LGPD diria que sem trilha não pode haver acesso; na prática isso amarra a disponibilidade do portal à da trilha, e negar cuidado de saúde é o dano maior. A escolha foi gravar de forma **aguardada** (não `void`: um insert solto some quando o processo reinicia entre a resposta e a escrita, e trilha com buraco é pior que trilha vazia, porque o buraco só aparece no dia em que se procura a linha) e, quando o insert falha, despejar o **registro inteiro** no `log.error`. A linha perdida não some: cai no log da API, que vira a trilha de reserva.
+
+**O defeito que a correção desenterrou, e que não era o assunto do achado.** O `ip` é um dos cinco campos que o S-08 pede, e ele estava condenado a ser inútil: a API só é alcançada pelo túnel ngrok do `docker-compose`, então `request.ip` era o endereço do **container do ngrok** — o mesmo valor para todo mundo, sempre. Corrigido com `trustProxy: TRUST_PROXY_HOPS` (padrão 1, a topologia real). O efeito colateral é o que interessa: o rate-limit por IP vinha usando essa mesma chave, ou seja, **todos os pacientes dividiam um balde só** — o teto de 60/min do `GET /laudos` era, na prática, 60/min para o portal inteiro. Passa a ser por cliente.
+
+O número de saltos é `1` e não `true` de propósito. Com `true` a API acreditaria na entrada mais à esquerda do `X-Forwarded-For`, que o cliente escreve; numa trilha de auditoria isso não seria um campo impreciso, seria um campo **plantado**. Com `1` vale a entrada que o túnel escreveu. A coluna é `inet` e a API valida o endereço antes de gravar (`ipDaRequisicao`), degradando para nulo em vez de derrubar a linha inteira quando o valor não é um IP.
+
+**Retenção: decisão em aberto, deliberadamente não automatizada.** O `ip` é dado pessoal, então guardar a trilha para sempre troca um problema de auditoria por um de minimização (art. 6º III). O expurgo automático não entrou junto por um motivo específico: o `DELETE` está revogado, e criar a exceção que permite apagar linha da trilha é exatamente o privilégio que a tabela existe para negar. Quando o prazo for definido — 6 meses cobre o ciclo típico de descoberta de incidente —, o caminho é uma rotina com papel próprio, **não** o `service_role` da API.
+
+**Dívida conhecida:** a busca de pacientes registra `quantidade`, não *quem* apareceu. É um typeahead, dispara por tecla digitada, e gravar os até 8 ids por tecla afogaria as linhas que importam. Se a granularidade "exatamente quem apareceu" passar a ser necessária, o caminho é uma coluna `titulares uuid[]` nessa ação específica.
+
+| | |
+|---|---|
+| **Migration** | `20260803140000_s08_trilha_auditoria_acesso.sql` |
+| **Código** | `lib/auditoria.ts` (novo), `routes/laudos.ts`, `routes/resultados.ts`, `routes/documentos.ts`, `routes/integracao.ts`, `server.ts`, `.env.example` |
+| **Testes** | `auditoria.test.ts` (novo, 9) + 15 nas rotas; `test/helpers.ts` ganhou `ilike` no mock (a rota de busca não tinha teste nenhum por causa dessa lacuna). API de 298 → **313 testes** |
+| **Verificação** | suíte inteira verde; type-check limpo em `api`, `web` e `shared`; lint sem erro |
 
 ---
 
@@ -1897,7 +1973,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 |---|---|---|
 | 13 | ~~Criptografia de coluna, começando por `exam_results.result` e `resultados.paineis`~~ — **fase 1 no ar 03/08** (migration, chave, deploy e backfill verificados). `pacientes.*` = fase 2 | Parte 3 |
 | 14 | Trocar o typeahead da recepção de nome para CPF (blind index) | §3.4 |
-| 15 | Estender a trilha append-only aos pontos de leitura de dado sensível | S-08 |
+| 15 | ~~Estender a trilha append-only aos pontos de leitura de dado sensível~~ — **feito 03/08** (migration aplicada e append-only provado em produção; 7 pontos instrumentados). Falta só o deploy da API no VPS | S-08 |
 | 16 | ~~Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta~~ — **feito 31/07** | S-09 |
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | ~~Índices faltantes + `(select auth.uid())` nas 5 policies~~ — **feito 31/07** | S-11 |
