@@ -21,7 +21,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** → **parcial 31/07** (SSL exigido; CIDR aberto por decisão) |
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 31/07** (o que sobra exige plano Pro ou código) |
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** |
-| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → ver Parte 3 |
+| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 em código 03/08** (dado clínico; falta produção). `pacientes.*` = fase 2 |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** (junto com S-01; DDL capturada em 31/07 pelo P-04) |
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | **MÉDIO** |
@@ -425,6 +425,35 @@ Ganho concreto: a partir de agora cada chave é revogável isoladamente. Antes, 
 vazamento da `service_role` — o segredo mais valioso do sistema, o que ignora RLS —
 só se resolvia rotacionando o JWT secret do projeto inteiro, derrubando todas as
 sessões junto.
+
+### 03/08/2026 — S-06 fase 1: o dado clínico passa a ser cifrado (código pronto, produção pendente)
+
+| | |
+|---|---|
+| **Código** | `lib/crypto.ts` (novo), `lib/backfillCripto.ts` (novo), `scripts/backfillCripto.ts` (novo, `npm run backfill-cripto`), `laudos/repository.ts`, `routes/laudos.ts`, `routes/webhooks.ts`, `lib/mappers.ts`, `server.ts`, `.env.example` |
+| **Migration** | `20260803130000_s06_colunas_cifradas.sql` — **não aplicada ainda** |
+| **Testes** | `crypto.test.ts` (novo, 19), `criptografiaColunas.test.ts` (novo, 7). API de 263 → **289 testes**; type-check e lint limpos; web em 52 |
+
+**Escopo desta fase: só o dado clínico** — `exam_results.result`, `resultados.paineis` e `resultados.resumo`. São as colunas que a Parte 3 chama de "zero atrito": nenhuma é filtrada, ordenada ou comparada em SQL, então cifrar não quebra consulta alguma. As colunas de `pacientes` ficaram de fora **por serem outro problema**, não por serem menos importantes: `cpf` e `data_nascimento` são comparados por igualdade pelo trigger de identidade e pela RPC de correção, e AES-GCM com IV aleatório faz o mesmo valor cifrar diferente a cada vez — cifrá-las sem antes migrar essas comparações para blind index quebraria o claim do `POST /cadastro` e o `PUT /pacientes/me` no mesmo deploy.
+
+**A janela que decidiu a ordem.** `exam_results` está com **0 linhas** — o cascade investigado em `c26b56c` levou as 55 que existiam. É a coluna de maior valor do achado (o laudo completo: analitos, valores, método, CRM) e hoje ela não tem nada para migrar. Some-se que a tabela é **cache**: o conteúdo é rebuscável nos LIS com `?refresh=true`. Cifrar essa coluna agora custa o mínimo que vai custar algum dia.
+
+Três decisões que o código carrega e valem registro:
+
+1. **AAD = `tabela:coluna:id_da_linha`.** É o detalhe que a Parte 3 destacou e que costuma ser omitido. Sem ele, quem tem escrita no banco **copia** o `result_enc` do paciente A para a linha do paciente B: a decifragem funciona, o prontuário aparece sob o dono errado e nada no sistema acusa. Com AAD, o GCM rejeita a linha movida. Há teste exercitando exatamente isso ponta a ponta — o envelope de outra linha devolve 500, não o laudo alheio.
+2. **Falha ao decifrar NÃO cai no texto puro.** O fallback para a coluna em claro vale só quando a cifrada está vazia (linha ainda não migrada). Um fallback silencioso em erro mascararia chave errada ou dado adulterado justamente no caso em que se precisa saber — e viraria um 500 surpresa no dia em que a coluna em claro fosse dropada.
+3. **Sem chave, em produção, o boot falha.** É o precedente do CORS (P-03) aplicado de novo: seguir de pé gravando laudo em claro é o "temos lint" desta base — um controle que todos acreditam existir e não existe. API fora do ar é ruidoso e se resolve em um minuto; laudo em claro por três meses é silencioso. Em desenvolvimento, sem chave, apenas avisa.
+
+**O que ainda não é verdade:** nada disso está em produção. Falta a migration, a chave no VPS e o deploy — passo a passo em S-06. Enquanto a escrita dupla não rodar, as colunas cifradas ficam vazias e a API continua lendo o que sempre leu.
+
+> **A chave de produção não pode passar por aqui.** Ela precisa ser gerada no
+> VPS (`openssl rand -base64 32`) e nunca ser colada nesta conversa nem em
+> nenhuma outra. É a mesma lição do S-03, com mais força: lá a senha do banco
+> trafegou por chat e por isso passou a exigir rotação; aqui, quem tem a chave lê
+> todo o histórico clínico do laboratório, e uma chave rotacionada depois de
+> vazar não desfaz o que já foi lido.
+
+---
 
 # PARTE 1 — SUPABASE
 
@@ -966,7 +995,14 @@ Limpeza conferida: paciente e usuário removidos, base de volta a **2 usuários 
 
 ---
 
-### S-06 — Dado clínico e identificadores em texto puro
+### S-06 — Dado clínico e identificadores em texto puro — **FASE 1 EM CÓDIGO 03/08/2026**
+
+> **STATUS 03/08/2026.** O dado **clínico** (`exam_results.result`,
+> `resultados.paineis`, `resultados.resumo`) já tem criptografia implementada e
+> testada — falta aplicar em produção, ver "Como colocar no ar" no fim da seção.
+> As colunas de `pacientes` e `documentos.nome_arquivo` seguem em texto puro e
+> são a **fase 2**, que depende do blind index e da decisão sobre o typeahead da
+> recepção (§ 3.4).
 
 Estado atual do dado sensível no banco:
 
@@ -982,6 +1018,29 @@ Estado atual do dado sensível no banco:
 Confirmei a estrutura de `exam_results.result`: array de laudos com as chaves `groups, panels, results, analitos, crm, doctor, laboratorio, material, metodo, exam_type, data_coleta, codigo_os, codigo_lis, summary…`. É o prontuário do exame, inteiro, em claro.
 
 O Supabase já cifra **disco** (at rest) e **trânsito** (TLS). O que falta é a camada que protege contra vazamento *lógico*: um `pg_dump`, um backup baixado, uma réplica, um acesso indevido ao Studio, ou um bug de RLS futuro. É esse o pedido do projeto e ele é legítimo — **ver Parte 3**, com plano completo.
+
+#### Como colocar a fase 1 no ar (03/08/2026)
+
+A ordem importa e não é a intuitiva. **Cada passo é seguro sozinho; invertê-los derruba a API.**
+
+| | Passo | Por que nesta ordem |
+|---|---|---|
+| 1 | Aplicar `20260803130000_s06_colunas_cifradas.sql` | Colunas novas e nullable: o código **em produção hoje** nem as enxerga. Fazer isto antes do deploy é o que evita o `select` novo bater em coluna inexistente. |
+| 2 | Gerar a chave **no VPS**: `openssl rand -base64 32` | Nunca nesta conversa nem em nenhum chat (lição do S-03). Quem tem a chave lê todo o histórico clínico. |
+| 3 | `PII_KEY_K1=…` no `.env` do compose, e **cópia em cofre separado do backup do banco** | Perder a chave = perder o dado. Se a cópia da chave viver junto do backup do banco, a criptografia não protege de nada. |
+| 4 | `git pull && docker compose up -d --build` | O boot **falha** se a chave não estiver lá — de propósito. É por isso que o passo 3 vem antes. |
+| 5 | `docker compose exec -T api node dist/scripts/backfillCripto.js` | Cifra o que já estava gravado em claro. Idempotente e re-executável; termina dizendo quantas linhas **sobraram** por migrar, e sai com código 1 se sobrar alguma. |
+| 6 | Observar dias, não horas | A coluna em claro continua lá. Até o passo 7, reverter é só voltar o deploy. |
+| 7 | *(depois)* Migration que dropa `result`, `paineis` e `resumo` em claro | Única etapa definitiva. Não é para hoje. |
+
+Verificação sugerida depois do passo 5, e que é o ponto inteiro do achado — o dado no banco deixa de ser legível para quem tem só o banco:
+
+```sql
+select id, left(result_enc, 24) || '…' as cifrado, result is not null as ainda_em_claro
+from exam_results limit 5;
+```
+
+---
 
 ### S-07 — `rls_auto_enable()` é `SECURITY DEFINER` e chamável por `anon`
 
@@ -1804,7 +1863,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 
 | | Ação | Onde |
 |---|---|---|
-| 13 | Criptografia de coluna, começando por `exam_results.result` e `resultados.paineis` | Parte 3 |
+| 13 | Criptografia de coluna, começando por `exam_results.result` e `resultados.paineis` — **fase 1 escrita e testada 03/08**; falta migration + chave no VPS + deploy. `pacientes.*` = fase 2 | Parte 3 |
 | 14 | Trocar o typeahead da recepção de nome para CPF (blind index) | §3.4 |
 | 15 | Estender a trilha append-only aos pontos de leitura de dado sensível | S-08 |
 | 16 | ~~Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta~~ — **feito 31/07** | S-09 |

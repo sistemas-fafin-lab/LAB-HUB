@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import type { Laudo } from '@lab-hub/shared'
 import { supabase } from '../lib/supabase.js'
 import { authenticate } from '../middlewares/auth.js'
 import { laudoService } from '../laudos/index.js'
+import { laudosDaLinha } from '../laudos/repository.js'
 import { filtraPorFonte } from '../laudos/service.js'
 import { DatabaseError, IntegrationError, ValidationError } from '../laudos/errors.js'
 
@@ -96,7 +96,7 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
 
     const { data, error } = await supabase
       .from('exam_results')
-      .select('result')
+      .select('id, result, result_enc')
       .eq('id', id)
       .eq('paciente_id', request.pacienteId)
       .maybeSingle()
@@ -104,11 +104,14 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
     if (error) {
       throw app.httpErrors.internalServerError('Falha ao consultar o laudo')
     }
-    if (!data?.result) {
+    if (!data?.result && !data?.result_enc) {
       throw app.httpErrors.notFound('Laudo não encontrado')
     }
-    // Linha anterior à mudança de granularidade guardava objeto único.
-    const laudos = (Array.isArray(data.result) ? data.result : [data.result]) as Laudo[]
+    // Decodifica pelo mesmo caminho do repositório — inclusive a normalização da
+    // linha antiga, que guardava objeto único em vez de lista. Duplicar isso
+    // aqui é como a duplicata de `sanitizarNome` do P-05 terminou: uma cópia
+    // esquece o AAD e a outra não, e a divergência só aparece em produção.
+    const laudos = laudosDaLinha(data as { id: string; result?: unknown; result_enc?: string | null })
 
     // O mesmo corte de fonte do GET /laudos — senão esta rota seria o buraco
     // por onde o laudo escondido da lista continuaria saindo. Linha que sobra

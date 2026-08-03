@@ -1,3 +1,4 @@
+import { aadDe, decifrar, decifrarJson } from './crypto.js'
 import type {
   Agendamento,
   AgendamentoStatus,
@@ -49,6 +50,10 @@ interface ResultadoRow {
   status: string
   resumo: string | null
   paineis: PainelResultado[] | null
+  // S-06: durante a migração o conteúdo clínico pode estar em qualquer uma das
+  // duas colunas. Opcionais porque nem todo select as traz.
+  resumo_enc?: string | null
+  paineis_enc?: string | null
   laudo_url: string | null
   declaracao_url: string | null
   liberado_em: string | null
@@ -56,6 +61,17 @@ interface ResultadoRow {
 }
 
 export function toResultado(row: ResultadoRow): Resultado {
+  // Decifra o que estiver cifrado (S-06). Só cai na coluna em claro quando a
+  // cifrada está VAZIA — falha de decifragem propaga em vez de virar fallback
+  // silencioso, senão chave errada apareceria como "tudo normal" até o dia em
+  // que a coluna em claro fosse dropada.
+  const resumo = row.resumo_enc
+    ? decifrar(row.resumo_enc, aadDe('resultados', 'resumo', row.id))
+    : row.resumo
+  const paineis = row.paineis_enc
+    ? decifrarJson<PainelResultado[]>(row.paineis_enc, aadDe('resultados', 'paineis', row.id))
+    : row.paineis
+
   return {
     id: row.id,
     pacienteId: row.paciente_id,
@@ -63,8 +79,8 @@ export function toResultado(row: ResultadoRow): Resultado {
     exameNome: row.exame_nome,
     ...(row.categoria ? { categoria: row.categoria } : {}),
     status: row.status as ResultadoStatus,
-    ...(row.resumo ? { resumo: row.resumo } : {}),
-    paineis: row.paineis ?? [],
+    ...(resumo ? { resumo } : {}),
+    paineis: paineis ?? [],
     ...(row.laudo_url ? { laudoUrl: row.laudo_url } : {}),
     ...(row.declaracao_url ? { declaracaoUrl: row.declaracao_url } : {}),
     ...(row.liberado_em ? { liberadoEm: row.liberado_em } : {}),

@@ -4,6 +4,7 @@ import sensible from '@fastify/sensible'
 import rateLimit from '@fastify/rate-limit'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
+import { validarCriptografia } from './lib/crypto.js'
 import {
   CAMPOS_REDIGIDOS,
   resolverCorsOrigin,
@@ -19,6 +20,12 @@ import { laudosRoutes } from './routes/laudos.js'
 import { documentosRoutes } from './routes/documentos.js'
 import { integracaoRoutes } from './routes/integracao.js'
 import { webhooksRoutes } from './routes/webhooks.js'
+
+// Chave da criptografia de coluna (S-06). Antes de abrir a porta, não na
+// primeira gravação de laudo: em produção a falta da chave derruba o boot, e é
+// melhor que apareça agora, no `docker compose up`, do que como laudo em texto
+// puro descoberto meses depois. Ver lib/crypto.ts.
+validarCriptografia()
 
 // O dado que trafega aqui é de saúde: a query da busca da recepção carrega nome
 // e CPF, então o log passa por `serializarRequest`/`redact` (ver lib/http.ts).

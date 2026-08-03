@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 import type { AgendamentoStatus } from '@lab-hub/shared'
+import { aadDe, cifrarJsonSeConfigurado, cifrarSeConfigurado } from '../lib/crypto.js'
 import { verifyHmac } from '../lib/hmac.js'
 import { requireEnv } from '../lib/env.js'
 import { resultadoWebhookSchema } from '../schemas/resultado.js'
@@ -78,7 +80,22 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(200).send({ ok: true, ignored: 'agendamento_nao_encontrado' })
     }
 
+    // O id sai daqui, e não do `gen_random_uuid()` do banco, porque o AAD da
+    // criptografia é `tabela:coluna:id` (S-06) — ele precisa existir ANTES de
+    // cifrar. É o preço de amarrar o texto cifrado à sua linha, e o que impede
+    // que alguém com escrita no banco mova o resultado de um paciente para a
+    // linha de outro sem que nada acuse.
+    const id = randomUUID()
+    const paineisEnc = cifrarJsonSeConfigurado(
+      payload.paineis,
+      aadDe('resultados', 'paineis', id),
+    )
+    const resumoEnc = payload.resumo
+      ? cifrarSeConfigurado(payload.resumo, aadDe('resultados', 'resumo', id))
+      : null
+
     const { error } = await supabase.from('resultados').insert({
+      id,
       paciente_id: agendamento.paciente_id,
       agendamento_id: agendamento.id,
       exame_nome: payload.exameNome,
@@ -86,6 +103,8 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       status: 'ready',
       resumo: payload.resumo ?? null,
       paineis: payload.paineis,
+      ...(paineisEnc ? { paineis_enc: paineisEnc } : {}),
+      ...(resumoEnc ? { resumo_enc: resumoEnc } : {}),
       laudo_url: payload.laudoUrl ?? null,
       declaracao_url: payload.declaracaoUrl ?? null,
       liberado_em: payload.liberadoEm,

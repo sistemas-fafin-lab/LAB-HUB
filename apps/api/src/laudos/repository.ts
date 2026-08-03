@@ -1,3 +1,4 @@
+import { aadDe, cifrarJsonSeConfigurado, decifrarJson } from '../lib/crypto.js'
 import { supabase } from '../lib/supabase.js'
 import { DatabaseError } from './errors.js'
 import { conferirCpf, deveBloquear } from './identidade.js'
@@ -8,6 +9,7 @@ import type { ExamResultRow, Laudo } from './types.js'
 // resolvido do token.
 
 const TABELA = 'exam_results'
+const COLUNAS = 'id, paciente_id, cpf, codigo_os, codigo_lis, result, result_enc, cached_at'
 
 // `result` no banco é a lista de laudos da linha (hoje um elemento: o pedido
 // consolidado; ver ExamResultRow). Linha gravada antes da mudança para lista
@@ -16,6 +18,54 @@ const TABELA = 'exam_results'
 function comoLaudos(result: unknown): Laudo[] {
   if (!result) return []
   return (Array.isArray(result) ? result : [result]) as Laudo[]
+}
+
+// Linha crua do banco, com as duas formas da coluna convivendo durante a
+// migração do S-06.
+interface LinhaComResult {
+  id: string
+  result?: unknown
+  result_enc?: string | null
+}
+
+/**
+ * Decodifica o laudo da linha, cifrado ou não (S-06).
+ *
+ * A criptografia acaba aqui: acima deste ponto o serviço enxerga `Laudo[]` e não
+ * sabe que existe envelope. É o mesmo motivo pelo qual a decifragem não fica nas
+ * rotas — cada ponto de leitura que soubesse do formato seria mais um lugar para
+ * a próxima pessoa esquecer o AAD.
+ *
+ * O fallback para a coluna em claro vale só quando a cifrada está VAZIA (linha
+ * antiga, ainda não migrada). Falha ao decifrar NÃO cai no texto puro: isso
+ * mascararia chave errada ou dado adulterado exatamente no caso em que se
+ * precisa saber, e o dado em claro vai desaparecer na fase 2 — o fallback
+ * silencioso passaria a ser um 500 surpresa lá na frente.
+ */
+export function laudosDaLinha(linha: LinhaComResult): Laudo[] {
+  if (linha.result_enc) {
+    return decifrarJson<Laudo[]>(linha.result_enc, aadDe(TABELA, 'result', linha.id))
+  }
+  return comoLaudos(linha.result)
+}
+
+/**
+ * Linha crua → `ExamResultRow`, decifrando e tirando `result_enc` do caminho.
+ *
+ * `result` continua distinguindo "sem resultado" (null) de "resultado vazio"
+ * ([]) como antes do S-06 — o serviço decide revalidar no LIS a partir dessa
+ * diferença, e achatá-la faria o cache reconsultar (ou deixar de reconsultar)
+ * sozinho.
+ */
+function comoExamResultRow(linha: Record<string, unknown>): ExamResultRow {
+  const { result_enc: _cifrado, ...resto } = linha
+  const bruta: LinhaComResult = {
+    id: linha.id as string,
+    result: linha.result,
+    result_enc: linha.result_enc as string | null,
+  }
+  const temConteudo = linha.result_enc != null || linha.result != null
+  return { ...resto, result: temConteudo ? laudosDaLinha(bruta) : null } as ExamResultRow
 }
 
 export interface IExamResultRepository {
@@ -45,11 +95,15 @@ export interface IExamResultRepository {
 
 export class ExamResultRepository implements IExamResultRepository {
   async findByPaciente(pacienteId: string, cpf: string): Promise<Laudo[]> {
+    // `id` entrou no select por causa do S-06: ele compõe o AAD e sem ele não há
+    // como decifrar. `or(...)` porque durante a migração o conteúdo pode estar
+    // em qualquer uma das duas colunas — filtrar só por `result` esconderia a
+    // linha já migrada.
     const { data, error } = await supabase
       .from(TABELA)
-      .select('cpf, result, cached_at')
+      .select('id, cpf, result, result_enc, cached_at')
       .eq('paciente_id', pacienteId)
-      .not('result', 'is', null)
+      .or('result.not.is.null,result_enc.not.is.null')
 
     if (error) {
       throw new DatabaseError('Falha ao buscar laudos do paciente', { pacienteId, cause: error })
@@ -69,7 +123,7 @@ export class ExamResultRepository implements IExamResultRepository {
     return (data ?? [])
       .filter((row) => !deveBloquear(conferirCpf(cpf, row.cpf as string)))
       .flatMap((row) =>
-        comoLaudos(row.result).map((l) => ({
+        laudosDaLinha(row as LinhaComResult).map((l) => ({
           ...l,
           ...(row.cached_at ? { cached_at: row.cached_at as string } : {}),
         })),
@@ -80,23 +134,20 @@ export class ExamResultRepository implements IExamResultRepository {
   async findAllRows(pacienteId: string): Promise<ExamResultRow[]> {
     const { data, error } = await supabase
       .from(TABELA)
-      .select('id, paciente_id, cpf, codigo_os, codigo_lis, result, cached_at')
+      .select(COLUNAS)
       .eq('paciente_id', pacienteId)
       .order('criado_em', { ascending: false })
 
     if (error) {
       throw new DatabaseError('Falha ao listar linhas de laudo', { pacienteId, cause: error })
     }
-    return (data ?? []).map((r) => ({
-      ...r,
-      result: r.result ? comoLaudos(r.result) : null,
-    })) as ExamResultRow[]
+    return (data ?? []).map((r) => comoExamResultRow(r as Record<string, unknown>))
   }
 
   async findByCodigoLis(pacienteId: string, codigoLis: string): Promise<ExamResultRow | null> {
     const { data, error } = await supabase
       .from(TABELA)
-      .select('id, paciente_id, cpf, codigo_os, codigo_lis, result, cached_at')
+      .select(COLUNAS)
       .eq('paciente_id', pacienteId)
       .eq('codigo_lis', codigoLis)
       .maybeSingle()
@@ -109,13 +160,13 @@ export class ExamResultRepository implements IExamResultRepository {
       })
     }
     if (!data) return null
-    return { ...data, result: data.result ? comoLaudos(data.result) : null } as ExamResultRow
+    return comoExamResultRow(data as Record<string, unknown>)
   }
 
   async findByCodigoOs(pacienteId: string, codigoOs: string): Promise<ExamResultRow | null> {
     const { data, error } = await supabase
       .from(TABELA)
-      .select('id, paciente_id, cpf, codigo_os, codigo_lis, result, cached_at')
+      .select(COLUNAS)
       .eq('paciente_id', pacienteId)
       .eq('codigo_os', codigoOs)
       .maybeSingle()
@@ -128,7 +179,7 @@ export class ExamResultRepository implements IExamResultRepository {
       })
     }
     if (!data) return null
-    return { ...data, result: data.result ? comoLaudos(data.result) : null } as ExamResultRow
+    return comoExamResultRow(data as Record<string, unknown>)
   }
 
   async insertAwaiting(
@@ -176,9 +227,19 @@ export class ExamResultRepository implements IExamResultRepository {
   // inseria uma linha nova a cada revalidação. Nesta altura do fluxo a linha
   // sempre existe (foi criada por insertAwaiting ou já veio do banco).
   async saveResult(id: string, result: Laudo[]): Promise<void> {
+    // Escrita dupla (S-06, fase 1): claro + cifrado. Enquanto as duas colunas
+    // convivem, reverter o deploy não perde nada — é o que torna a migração
+    // segura sem janela de indisponibilidade. Na fase 2 sai o `result` daqui e
+    // a coluna em claro é dropada.
+    const enc = cifrarJsonSeConfigurado(result, aadDe(TABELA, 'result', id))
+
     const { error } = await supabase
       .from(TABELA)
-      .update({ result, cached_at: new Date().toISOString() })
+      .update({
+        result,
+        ...(enc ? { result_enc: enc } : {}),
+        cached_at: new Date().toISOString(),
+      })
       .eq('id', id)
 
     if (error) {

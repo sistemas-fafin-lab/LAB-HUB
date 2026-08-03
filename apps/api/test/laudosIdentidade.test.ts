@@ -56,8 +56,10 @@ function supaHandler(cenario: Cenario = {}): SupaHandler {
     if (call.table === 'exam_results') {
       if (call.op === 'insert') return cenario.insert ?? { error: null }
       if (call.op === 'update') return { error: null }
-      // findByPaciente é a única leitura que filtra por `result is not null`.
-      if ('result__not_is' in call.filters) return { data: cenario.cacheadas ?? [], error: null }
+      // findByPaciente é a única leitura que filtra por "tem conteúdo". Desde o
+      // S-06 o conteúdo pode estar na coluna em claro OU na cifrada, então o
+      // filtro virou um `or` — daí a âncora ser `__or` e não `result__not_is`.
+      if ('__or' in call.filters) return { data: cenario.cacheadas ?? [], error: null }
       // findByCodigoLis / findByCodigoOs terminam em maybeSingle.
       if (call.filters.codigo_lis || call.filters.codigo_os) return { data: null, error: null }
       return { data: cenario.linhas ?? [], error: null }
