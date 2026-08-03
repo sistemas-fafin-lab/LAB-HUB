@@ -202,6 +202,104 @@ describe('GET /integracao/agendamentos/:labhubId/documentos', () => {
   })
 })
 
+// ── Trilha de auditoria do canal do FlowLab (S-08) ──────────────────────────────
+
+describe('trilha de auditoria de acesso pelo FlowLab (S-08)', () => {
+  const trilha = (mock: ReturnType<typeof setup>) =>
+    mock.calls.filter((c) => c.table === 'auditoria_acesso' && c.op === 'insert')
+
+  it('registra o titular do agendamento, sem ator_id — o FlowLab é sistema, não pessoa', async () => {
+    const mock = setup()
+    app = await buildApp(integracaoRoutes)
+
+    await app.inject({ method: 'GET', url: URL_DOCS, headers: CHAVE })
+
+    expect(trilha(mock)[0]?.payload).toMatchObject({
+      ator_tipo: 'flowlab',
+      ator_id: null,
+      titular_id: 'pac-1',
+      acao: 'integracao.documentos.listar',
+      recurso_tipo: 'agendamento',
+      recurso_id: AG_ID,
+      quantidade: 2,
+    })
+  })
+
+  it('conta o que SAIU: documento cuja assinatura falhou não entra na quantidade', async () => {
+    const mock = setup({}, (call) => {
+      if (call.op !== 'createSignedUrls') return { data: null, error: null }
+      return {
+        data: [
+          { path: `pac-1/${DOC_COLETA}.jpg`, signedUrl: `https://signed.test/pac-1/${DOC_COLETA}.jpg`, error: null },
+          { path: `pac-1/${DOC_PERENE}.jpg`, signedUrl: null, error: 'falhou' },
+        ],
+        error: null,
+      }
+    })
+    app = await buildApp(integracaoRoutes)
+
+    await app.inject({ method: 'GET', url: URL_DOCS, headers: CHAVE })
+
+    expect(trilha(mock)[0]?.payload).toMatchObject({ quantidade: 1 })
+  })
+
+  it('agendamento sem documento também vira linha — é a varredura de ids que se quer ver', async () => {
+    // Uma sequência de respostas vazias é o desenho de uma enumeração. Auditar
+    // só o acerto deixaria justamente a busca invisível.
+    const mock = setup({ documentos: { data: [], error: null } })
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({ method: 'GET', url: URL_DOCS, headers: CHAVE })
+
+    expect(res.statusCode).toBe(200)
+    expect(trilha(mock)[0]?.payload).toMatchObject({
+      acao: 'integracao.documentos.listar',
+      recurso_id: AG_ID,
+      quantidade: 0,
+    })
+  })
+
+  it('401 não gera linha: sem chave válida a requisição nem chega ao banco', async () => {
+    const mock = setup()
+    app = await buildApp(integracaoRoutes)
+
+    await app.inject({ method: 'GET', url: URL_DOCS, headers: { 'x-api-key': 'errada' } })
+
+    expect(trilha(mock)).toHaveLength(0)
+  })
+
+  it('a busca de pacientes registra a quantidade e NÃO o termo digitado', async () => {
+    // A rota por onde a FLOWLAB_API_KEY (o P-06, risco aceito) varre a base. O
+    // termo carrega nome ou CPF — gravá-lo faria da trilha mais um lugar com PII
+    // em claro, que é exatamente o que lib/http.ts já evita no log.
+    const mock = createSupabaseMock({
+      handler: (call) =>
+        call.table === 'pacientes'
+          ? { data: [{ id: 'pac-1', nome: 'Maria Souza', cpf: '52998224725', data_nascimento: '1990-01-01' }], error: null }
+          : { data: null, error: null },
+    })
+    h.setSb(mock.client)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/integracao/pacientes/buscar?q=Maria',
+      headers: CHAVE,
+    })
+
+    expect(res.statusCode).toBe(200)
+    const payload = trilha(mock)[0]?.payload as Record<string, unknown>
+    expect(payload).toMatchObject({
+      ator_tipo: 'flowlab',
+      acao: 'integracao.pacientes.buscar',
+      recurso_tipo: 'paciente',
+      quantidade: 1,
+      titular_id: null,
+    })
+    expect(JSON.stringify(payload)).not.toContain('Maria')
+  })
+})
+
 // ── POST (upload da recepção do FlowLab) ────────────────────────────────────────
 
 // Magic bytes REAIS de JPEG (detectarTipoArquivo confere os bytes, não a extensão

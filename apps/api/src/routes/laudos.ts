@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 import { authenticate } from '../middlewares/auth.js'
+import { registrarAcesso } from '../lib/auditoria.js'
 import { laudoService } from '../laudos/index.js'
 import { laudosDaLinha } from '../laudos/repository.js'
 import { filtraPorFonte } from '../laudos/service.js'
@@ -73,8 +74,9 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
       const { refresh } = request.query as { refresh?: string }
       const { cpf, nascimento, sexo } = await dadosDoPaciente(request.pacienteId)
 
+      let resposta: Awaited<ReturnType<typeof laudoService.fetchAndCacheExams>>
       try {
-        return await laudoService.fetchAndCacheExams(
+        resposta = await laudoService.fetchAndCacheExams(
           request.pacienteId,
           cpf,
           refresh === 'true',
@@ -84,6 +86,22 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         throw comoHttpError(err)
       }
+
+      // Registrado DEPOIS do sucesso e antes do return: a trilha conta o que foi
+      // entregue, não o que foi tentado. A revalidação em background do caminho
+      // SWR não gera linha nenhuma — ela não devolve nada a ninguém, e uma
+      // trilha que registra o que o servidor faz sozinho enterra o que as
+      // pessoas fizeram.
+      await registrarAcesso(request, {
+        atorTipo: 'paciente',
+        atorId: request.pacienteId,
+        titularId: request.pacienteId,
+        acao: 'laudos.listar',
+        recursoTipo: 'exam_result',
+        quantidade: resposta.exams.length,
+      })
+
+      return resposta
     },
   )
 
@@ -120,6 +138,20 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
     if (visiveis.length === 0) {
       throw app.httpErrors.notFound('Laudo não encontrado')
     }
+
+    // `recursoId` é o id da LINHA do cache (o `:id` da URL), estável no banco —
+    // e não o id de cada laudo mapeado, que é sorteado a cada mapeamento
+    // (laudos/service.ts) e não apontaria para nada meses depois.
+    await registrarAcesso(request, {
+      atorTipo: 'paciente',
+      atorId: request.pacienteId,
+      titularId: request.pacienteId,
+      acao: 'laudos.ler',
+      recursoTipo: 'exam_result',
+      recursoId: id,
+      quantidade: visiveis.length,
+    })
+
     return visiveis
   })
 }

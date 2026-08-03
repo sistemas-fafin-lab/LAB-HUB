@@ -397,6 +397,34 @@ describe('GET /documentos/:id/url', () => {
     expect(new Date(res.json().expiraEm).getTime()).toBeGreaterThan(Date.now())
     expect(mock.storageCalls[0]).toMatchObject({ bucket: 'documentos', op: 'createSignedUrl' })
   })
+
+  it('registra a emissão da URL na trilha de auditoria (S-08)', async () => {
+    // O acesso auditável é a EMISSÃO: o download vai direto ao Storage e nunca
+    // volta a esta API, então esta é a última vez que o sistema sabe quem pediu.
+    const mock = setup()
+    app = await buildApp(documentosRoutes)
+
+    await app.inject({ method: 'GET', url: `/documentos/${DOC_ID}/url`, headers: AUTH })
+
+    const linha = mock.calls.find((c) => c.table === 'auditoria_acesso' && c.op === 'insert')
+    expect(linha?.payload).toMatchObject({
+      ator_tipo: 'paciente',
+      ator_id: 'pac-1',
+      titular_id: 'pac-1',
+      acao: 'documento.url',
+      recurso_tipo: 'documento',
+      recurso_id: DOC_ID,
+    })
+  })
+
+  it('o 404 de documento alheio não gera linha na trilha', async () => {
+    const mock = setup({ load: { data: null, error: null } })
+    app = await buildApp(documentosRoutes)
+
+    await app.inject({ method: 'GET', url: `/documentos/${DOC_ID}/url`, headers: AUTH })
+
+    expect(mock.calls.filter((c) => c.table === 'auditoria_acesso')).toHaveLength(0)
+  })
 })
 
 describe('DELETE /documentos/:id', () => {

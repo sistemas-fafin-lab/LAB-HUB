@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 import { authenticate } from '../middlewares/auth.js'
+import { registrarAcesso } from '../lib/auditoria.js'
 import { toResultado } from '../lib/mappers.js'
 
 // Mesmo TTL de documentos.ts, e pela mesma razão: signed URL é capability ao
@@ -21,7 +22,23 @@ export async function resultadosRoutes(app: FastifyInstance): Promise<void> {
     if (error) {
       throw app.httpErrors.internalServerError('Falha ao listar resultados')
     }
-    return (data ?? []).map(toResultado)
+    const resultados = (data ?? []).map(toResultado)
+
+    // Fora da lista mínima do § S-08, e entra pelo mesmo critério dos que estão
+    // nela: `resultados` é a fonte alimentada pelo webhook do FlowLab e carrega
+    // painel e resumo clínico — os dois campos que o S-06 achou valiosos o
+    // bastante para cifrar. Auditar o laudo do LIS e não este seria auditar o
+    // caminho, não o dado.
+    await registrarAcesso(request, {
+      atorTipo: 'paciente',
+      atorId: request.pacienteId,
+      titularId: request.pacienteId,
+      acao: 'resultados.listar',
+      recursoTipo: 'resultado',
+      quantidade: resultados.length,
+    })
+
+    return resultados
   })
 
   // GET /resultados/:id/declaracao — gera signed URL do PDF no bucket privado.
@@ -57,6 +74,18 @@ export async function resultadosRoutes(app: FastifyInstance): Promise<void> {
     if (signedError || !signed) {
       throw app.httpErrors.internalServerError('Falha ao gerar URL assinada')
     }
+
+    // Mesma emissão-de-capability do GET /documentos/:id/url, sobre um PDF de
+    // laudo: o download acontece no Storage e nunca volta a esta API, então a
+    // linha daqui é o único registro que vai existir.
+    await registrarAcesso(request, {
+      atorTipo: 'paciente',
+      atorId: request.pacienteId,
+      titularId: request.pacienteId,
+      acao: 'resultado.declaracao',
+      recursoTipo: 'resultado',
+      recursoId: id,
+    })
 
     return { url: signed.signedUrl }
   })

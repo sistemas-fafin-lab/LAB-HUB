@@ -461,3 +461,78 @@ describe('GET /laudos/:id', () => {
     expect(consulta?.filters.paciente_id).toBe('pac-1')
   })
 })
+
+describe('trilha de auditoria de acesso (S-08)', () => {
+  // O mock precisa ser alcançável para inspecionar a trilha, e `build()` não o
+  // devolve — daí a montagem local.
+  async function buildComMock(handler: SupaHandler) {
+    const mock = createSupabaseMock({ handler })
+    h.setSb(mock.client)
+    app = await buildApp(laudosRoutes)
+    return { mock, server: app }
+  }
+  const trilha = (mock: ReturnType<typeof createSupabaseMock>) =>
+    mock.calls.filter((c) => c.table === 'auditoria_acesso' && c.op === 'insert')
+
+  it('a listagem registra quantos laudos foram entregues', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const { mock, server } = await buildComMock(
+      supaHandler({
+        examResults: {
+          data: [{ result: [laudo(), laudo({ name: 'Glicemia' })], cached_at: new Date().toISOString() }],
+          error: null,
+        },
+      }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: '/laudos', headers: auth })
+
+    expect(res.statusCode).toBe(200)
+    expect(trilha(mock)[0]?.payload).toMatchObject({
+      ator_tipo: 'paciente',
+      ator_id: 'pac-1',
+      titular_id: 'pac-1',
+      acao: 'laudos.listar',
+      quantidade: 2,
+    })
+  })
+
+  it('a leitura registra o id da LINHA do cache, não o id sorteado do laudo', async () => {
+    // `laudo().id` é regerado a cada mapeamento; gravá-lo produziria um
+    // recurso_id que não aponta para nada quando a trilha for consultada depois.
+    const { mock, server } = await buildComMock(
+      supaHandler({ examResults: { data: { result: [laudo()] }, error: null } }),
+    )
+
+    await server.inject({ method: 'GET', url: `/laudos/${LAUDO_ID}`, headers: auth })
+
+    expect(trilha(mock)[0]?.payload).toMatchObject({
+      acao: 'laudos.ler',
+      recurso_tipo: 'exam_result',
+      recurso_id: LAUDO_ID,
+      quantidade: 1,
+    })
+  })
+
+  it('o 404 do laudo de outro paciente não vira linha na trilha', async () => {
+    const { mock, server } = await buildComMock(
+      supaHandler({ examResults: { data: null, error: null } }),
+    )
+
+    expect((await server.inject({ method: 'GET', url: `/laudos/${LAUDO_ID}`, headers: auth })).statusCode).toBe(404)
+    expect(trilha(mock)).toHaveLength(0)
+  })
+
+  it('trilha indisponível não derruba o laudo do paciente', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const { mock, server } = await buildComMock((call) => {
+      if (call.table === 'auditoria_acesso') return { data: null, error: { message: 'permission denied' } }
+      return supaHandler({ examResults: { data: { result: [laudo()] }, error: null } })(call)
+    })
+
+    const res = await server.inject({ method: 'GET', url: `/laudos/${LAUDO_ID}`, headers: auth })
+
+    expect(res.statusCode).toBe(200)
+    expect(trilha(mock)).toHaveLength(1) // tentou gravar, e a falha ficou no log
+  })
+})

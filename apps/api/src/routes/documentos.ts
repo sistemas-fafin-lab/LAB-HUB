@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 import { flowlab } from '../lib/flowlab.js'
 import { authenticate } from '../middlewares/auth.js'
+import { registrarAcesso } from '../lib/auditoria.js'
 import { detectarTipoArquivo } from '../lib/fileType.js'
 import { sanitizarNome } from '../lib/nomeArquivo.js'
 import { toDocumento, type DocumentoRow } from '../lib/mappers.js'
@@ -227,6 +228,20 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
     if (signedError || !signed) {
       throw app.httpErrors.internalServerError('Falha ao gerar URL assinada')
     }
+
+    // O acesso é a EMISSÃO da URL, não o download. A trilha não tem como ver o
+    // GET no Storage — ele vai direto para o Supabase, sem passar por esta API —,
+    // então este é o último ponto em que o sistema ainda sabe quem pediu. É
+    // também por isso que o TTL curto acima importa: quanto mais longa a
+    // capability, mais a linha daqui se distancia do acesso real.
+    await registrarAcesso(request, {
+      atorTipo: 'paciente',
+      atorId: request.pacienteId,
+      titularId: request.pacienteId,
+      acao: 'documento.url',
+      recursoTipo: 'documento',
+      recursoId: parsed.data.id,
+    })
 
     return {
       url: signed.signedUrl,

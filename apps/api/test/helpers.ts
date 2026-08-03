@@ -141,6 +141,10 @@ export function createSupabaseMock(opts: {
       update: (p: unknown) => ((state.op = 'update'), (state.payload = p), builder),
       delete: () => ((state.op = 'delete'), builder),
       eq: (c: string, v: unknown) => ((state.filters[c] = v), builder),
+      // Guardado com sufixo próprio: o teste do typeahead da recepção precisa
+      // conferir o PADRÃO que chegou ao banco (é onde os curingas do LIKE são
+      // escapados), e fundi-lo com o `eq` esconderia justamente essa diferença.
+      ilike: (c: string, v: unknown) => ((state.filters[`${c}__ilike`] = v), builder),
       is: (c: string, v: unknown) => ((state.filters[c] = v), builder),
       not: (c: string, op: string, v: unknown) => ((state.filters[`${c}__not_${op}`] = v), builder),
       lt: (c: string, v: unknown) => ((state.filters[`${c}__lt`] = v), builder),

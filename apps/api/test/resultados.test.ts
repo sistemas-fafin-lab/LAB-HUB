@@ -186,3 +186,71 @@ describe('GET /resultados', () => {
     expect(mock.calls).toHaveLength(0)
   })
 })
+
+describe('trilha de auditoria de acesso (S-08)', () => {
+  const trilha = (mock: ReturnType<typeof setup>) =>
+    mock.calls.filter((c) => c.table === 'auditoria_acesso' && c.op === 'insert')
+
+  it('a listagem registra o acesso com a quantidade exposta', async () => {
+    const mock = setup({ resultados: { data: [resultadoRow(), resultadoRow()], error: null } })
+    app = await buildApp(resultadosRoutes)
+
+    await app.inject({ method: 'GET', url: '/resultados', headers: AUTH })
+
+    expect(trilha(mock)[0]?.payload).toMatchObject({
+      ator_tipo: 'paciente',
+      ator_id: 'pac-1',
+      titular_id: 'pac-1',
+      acao: 'resultados.listar',
+      quantidade: 2,
+    })
+  })
+
+  it('a declaração registra o id do resultado', async () => {
+    const mock = setup()
+    app = await buildApp(resultadosRoutes)
+
+    await pedirDeclaracao()
+
+    expect(trilha(mock)[0]?.payload).toMatchObject({
+      acao: 'resultado.declaracao',
+      recurso_tipo: 'resultado',
+      recurso_id: RES_ID,
+    })
+  })
+
+  it('404 e 500 não geram linha: a trilha conta o que saiu, não o que se tentou', async () => {
+    // Sem este corte, a trilha viraria um log de requisições — e a pergunta que
+    // ela existe para responder ("o que vazou?") ficaria enterrada nas
+    // tentativas que não expuseram nada.
+    const semDeclaracao = setup({ resultados: { data: resultadoRow({ declaracao_url: null }), error: null } })
+    app = await buildApp(resultadosRoutes)
+    expect((await pedirDeclaracao()).statusCode).toBe(404)
+    expect(trilha(semDeclaracao)).toHaveLength(0)
+    await app.close()
+
+    const falha = setup({ resultados: { data: null, error: { message: 'timeout' } } })
+    app = await buildApp(resultadosRoutes)
+    expect((await pedirDeclaracao()).statusCode).toBe(500)
+    expect(trilha(falha)).toHaveLength(0)
+  })
+
+  it('trilha indisponível não derruba a leitura do paciente', async () => {
+    // A escolha do § S-08: negar o laudo porque a auditoria caiu seria o dano
+    // maior. A linha perdida vai para o log da API (ver test/auditoria.test.ts).
+    const mock = createSupabaseMock({
+      handler: (call) => {
+        if (call.table === 'auditoria_acesso') return { data: null, error: { message: 'permission denied' } }
+        if (call.table === 'pacientes') return { data: { id: 'pac-1' }, error: null }
+        return { data: [resultadoRow()], error: null }
+      },
+    })
+    h.setSb(mock.client)
+    app = await buildApp(resultadosRoutes)
+
+    const res = await app.inject({ method: 'GET', url: '/resultados', headers: AUTH })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toHaveLength(1)
+  })
+})

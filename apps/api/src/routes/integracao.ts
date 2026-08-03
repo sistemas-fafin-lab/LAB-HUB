@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase.js'
 import { flowlab } from '../lib/flowlab.js'
 import { sincronizarAgendamento, type AgendamentoSyncRow } from '../lib/agendamentoSync.js'
 import { autenticarFlowlab } from '../middlewares/apiKey.js'
+import { registrarAcesso } from '../lib/auditoria.js'
 import { detectarTipoArquivo } from '../lib/fileType.js'
 import { sanitizarNome } from '../lib/nomeArquivo.js'
 import { mensagemZod } from '../lib/validacao.js'
@@ -116,7 +117,29 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
         throw app.httpErrors.internalServerError('Falha ao buscar pacientes')
       }
 
-      return { pacientes: (data ?? []).map((r) => toPacienteBuscaItem(r as PacienteBuscaRow)) }
+      const pacientes = (data ?? []).map((r) => toPacienteBuscaItem(r as PacienteBuscaRow))
+
+      // Fora da lista mínima do § S-08 e o mais importante dos que entraram por
+      // fora dela: esta é a rota por onde a `FLOWLAB_API_KEY` sozinha varre a
+      // base de pacientes, e essa chave é o P-06 — fraca, conhecida e aceita
+      // como risco por decisão explícita. Risco aceito sem trilha é risco que
+      // ninguém consegue verificar depois; com trilha, dá para ver a varredura.
+      //
+      // Sem `titularId` e sem o termo buscado, de propósito. O termo carrega
+      // nome ou CPF (é o que motiva a redação de query em lib/http.ts) e gravá-lo
+      // faria da trilha mais um lugar com PII em claro. Os ids dos até 8
+      // pacientes devolvidos também ficam de fora: é um typeahead, dispara por
+      // tecla digitada, e o volume afogaria as linhas que importam. Fica o
+      // `quantidade`, que é o que revela a varredura — e a granularidade
+      // "exatamente quem apareceu" é a dívida conhecida deste registro.
+      await registrarAcesso(request, {
+        atorTipo: 'flowlab',
+        acao: 'integracao.pacientes.buscar',
+        recursoTipo: 'paciente',
+        quantidade: pacientes.length,
+      })
+
+      return { pacientes }
     },
   )
 
@@ -414,8 +437,25 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const docs = (data ?? []) as DocumentoRow[]
+
+      // O acesso do FlowLab a um agendamento fica registrado mesmo quando não há
+      // documento nenhum. A resposta vazia ainda conta uma coisa a quem
+      // perguntou — que aquele agendamento existe —, e é justamente a sequência
+      // de respostas vazias que desenha uma varredura de ids. Omitir o caso
+      // vazio deixaria a varredura invisível e só o acerto visível.
+      const auditar = async (quantidade: number): Promise<void> =>
+        registrarAcesso(request, {
+          atorTipo: 'flowlab',
+          titularId: ag.paciente_id as string,
+          acao: 'integracao.documentos.listar',
+          recursoTipo: 'agendamento',
+          recursoId: ag.id as string,
+          quantidade,
+        })
+
       // Curto-circuito: createSignedUrls([]) é uma ida ao Storage sem propósito.
       if (docs.length === 0) {
+        await auditar(0)
         return { agendamentoLabhubId: ag.id as string, documentos: [] }
       }
 
@@ -457,6 +497,10 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
           },
         ]
       })
+
+      // `documentos.length` e não `docs.length`: o flatMap acima descarta o
+      // documento cuja assinatura falhou, e a trilha conta o que saiu daqui.
+      await auditar(documentos.length)
 
       return { agendamentoLabhubId: ag.id as string, documentos }
     },
