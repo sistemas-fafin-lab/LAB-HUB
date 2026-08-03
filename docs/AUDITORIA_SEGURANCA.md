@@ -494,7 +494,7 @@ O resumo exibido no detalhe ("Antígenos de SARS-CoV-2 e Influenza A/B não dete
 | **Migration** | `20260803140000_s08_trilha_auditoria_acesso.sql` — **aplicada em produção**, ledger 19 × 19 |
 | **Código** | `lib/auditoria.ts` (novo), `routes/laudos.ts`, `routes/resultados.ts`, `routes/documentos.ts`, `routes/integracao.ts`, `server.ts` (`trustProxy`), `.env.example` |
 | **Testes** | `auditoria.test.ts` (novo, 9) + 15 nas rotas; `test/helpers.ts` ganhou `ilike`. API de 298 → **313 testes**; type-check limpo em `api`, `web` e `shared`; lint sem erro |
-| **Pendente** | **deploy da API no VPS** (`git pull && docker compose up -d --build`) — a tabela já existe, o código que a alimenta ainda não está no ar |
+| **Produção** | migration aplicada, **deploy feito no VPS** e trilha gravando — verificada com uma leitura real pelo canal do FlowLab |
 
 O projeto já tinha duas trilhas append-only, e as duas registram **escrita**: `correcoes_identidade` (quem autorizou trocar um CPF) e `exclusoes_conta` (quem pediu exclusão). Faltava a de **leitura**, que é a que responde a pergunta do incidente — *quais registros de quais pacientes foram lidos, por quem e quando?* Sete pontos instrumentados: os quatro previstos no achado, mais `GET /resultados`, `GET /resultados/:id/declaracao` e `GET /integracao/pacientes/buscar` (esta última é por onde a `FLOWLAB_API_KEY` do P-06 varre a base — risco aceito, e risco aceito sem trilha é risco que ninguém verifica depois).
 
@@ -513,6 +513,26 @@ Verificação em produção — catálogo e comportamento separados, porque ler 
 | Advisor de segurança | `/advisors/security` | nenhum WARN/ERROR novo; só o `rls_enabled_no_policy` **INFO**, que é o desenho — as outras duas ocorrências idênticas são as trilhas irmãs |
 
 O `set role service_role` no bloco de prova não é detalhe: sem ele o teste rodaria como `postgres`, que **pode** apagar, e teria provado o contrário do que se queria.
+
+**Depois do deploy — a camada que só existe com o código no ar.** `/ping` responder 200 não prova build novo: se o build falhasse, o container antigo seguiria de pé respondendo igual (foi o laço que segurou o S-10 por três dias, e voltou no S-06). O teste decisivo foi exercitar um caminho auditado e ver se a linha aparece — `GET /integracao/pacientes/buscar` com um termo que **não casa com ninguém**, escolhido de propósito: a resposta é idêntica nas duas versões do código (`{"pacientes":[]}`, 200), então quem decide é a trilha, e nenhum dado de paciente é lido para fazer o teste.
+
+| Campo | Gravado | O que prova |
+|---|---|---|
+| `acao` | `integracao.pacientes.buscar` | o código novo está no ar — a versão anterior não escreveria linha nenhuma |
+| `ator_tipo` / `ator_id` | `flowlab` / `null` | o canal foi distinguido; o FlowLab entra como sistema, não como pessoa |
+| `quantidade` | `0` | a listagem vazia vira linha, como desenhado — é o que torna uma enumeração visível |
+| `ip` | **`177.185.111.221`** | endereço **público**, não o `172.x` interno do container do ngrok: o `trustProxy` funciona ponta a ponta |
+
+A última linha é a que não tinha como ser verificada antes do deploy — em teste, `request.ip` nunca passa por um proxy real. Era também o campo que estava condenado a nascer inútil.
+
+> A primeira linha da trilha de produção é **esta verificação**, não uma busca real
+> da recepção. Fica registrada aqui para que quem investigar um incidente mais
+> tarde não a interprete como acesso do laboratório. Ela **não foi apagada de
+> propósito**: apagar linha de trilha append-only é exatamente a operação que a
+> tabela existe para negar, e abrir a exceção "só desta vez" é como esse tipo de
+> controle costuma morrer.
+
+**O que ainda não foi exercitado em produção:** o canal do **paciente** (`laudos.*`, `resultados.*`, `documento.url`). Precisa de login de paciente real — mesma limitação da verificação do S-06, e o mesmo caminho para fechá-la.
 
 ---
 
@@ -1184,6 +1204,7 @@ O número de saltos é `1` e não `true` de propósito. Com `true` a API acredit
 | **Código** | `lib/auditoria.ts` (novo), `routes/laudos.ts`, `routes/resultados.ts`, `routes/documentos.ts`, `routes/integracao.ts`, `server.ts`, `.env.example` |
 | **Testes** | `auditoria.test.ts` (novo, 9) + 15 nas rotas; `test/helpers.ts` ganhou `ilike` no mock (a rota de busca não tinha teste nenhum por causa dessa lacuna). API de 298 → **313 testes** |
 | **Verificação** | suíte inteira verde; type-check limpo em `api`, `web` e `shared`; lint sem erro |
+| **Produção** | migration aplicada, **deploy feito** e trilha gravando: primeira linha com `ip` **público** (`177.185.111.221`), provando o `trustProxy` ponta a ponta. Falta o canal do paciente, que exige login real |
 
 ---
 
@@ -1973,7 +1994,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 |---|---|---|
 | 13 | ~~Criptografia de coluna, começando por `exam_results.result` e `resultados.paineis`~~ — **fase 1 no ar 03/08** (migration, chave, deploy e backfill verificados). `pacientes.*` = fase 2 | Parte 3 |
 | 14 | Trocar o typeahead da recepção de nome para CPF (blind index) | §3.4 |
-| 15 | ~~Estender a trilha append-only aos pontos de leitura de dado sensível~~ — **feito 03/08** (migration aplicada e append-only provado em produção; 7 pontos instrumentados). Falta só o deploy da API no VPS | S-08 |
+| 15 | ~~Estender a trilha append-only aos pontos de leitura de dado sensível~~ — **feito e no ar 03/08** (migration, deploy e trilha gravando em produção; append-only provado com `set role`). Falta exercitar o canal do paciente, que exige login real | S-08 |
 | 16 | ~~Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta~~ — **feito 31/07** | S-09 |
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | ~~Índices faltantes + `(select auth.uid())` nas 5 policies~~ — **feito 31/07** | S-11 |
