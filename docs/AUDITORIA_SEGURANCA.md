@@ -532,7 +532,19 @@ A última linha é a que não tinha como ser verificada antes do deploy — em t
 > tabela existe para negar, e abrir a exceção "só desta vez" é como esse tipo de
 > controle costuma morrer.
 
-**O que ainda não foi exercitado em produção:** o canal do **paciente** (`laudos.*`, `resultados.*`, `documento.url`). Precisa de login de paciente real — mesma limitação da verificação do S-06, e o mesmo caminho para fechá-la.
+**Canal do paciente, conferido no mesmo dia com login real.** Três leituras da tela de resultados gravaram `resultados.listar` com `ator_id = titular_id` (`dd011e0d…`), `quantidade: 2` — batendo com as duas linhas que o S-06 já conhecia — e o mesmo `ip` público. Nenhuma linha com `ator ≠ titular` no canal do portal, que é o alarme para o qual essas duas colunas existem separadas.
+
+**A trilha também capturou tráfego real não provocado**, o que fecha a verificação melhor do que qualquer teste dirigido: `integracao.pacientes.buscar` vindo de `54.146.208.74` (faixa AWS — a Vercel do FlowLab) e três `integracao.documentos.listar` de `100.54.221.169` sobre dois agendamentos reais, um deles devolvendo 1 documento, com `titular_id` e `recurso_id` corretos.
+
+**E encontrou uma falha silenciosa no primeiro dia — que não é dela.** `useResultados` (`apps/web/src/lib/useResultados.ts:93-94`) chama `/resultados` **e** `/laudos`; a trilha registrou as três chamadas do primeiro e **nenhuma** do segundo. Como só se grava o que foi entregue, a ausência era o sintoma. Os logs da API confirmaram: `GET /laudos` devolveu **502 nas três vezes**, com `AOL orders/status: falha de rede (fetch failed)` — o ApLIS respondeu (`total: 0`), o Álvaro não. Como o portal só exibe laudo com valor do Álvaro (`LAUDOS_SOMENTE_ALVARO`), a tela mostrou os `resultados` e nenhum laudo, sem erro visível.
+
+O host da AOL responde normalmente **de fora** (DNS → `191.239.240.111`, `brazlpwaf0.brazilsouth.cloudapp.azure.com`; TLS em 94 ms; `401` sem credencial), então não é indisponibilidade do fornecedor — é alcance a partir do VPS. Fica aberto como item de infraestrutura, **não** como pendência do S-08: a falha é de rede de saída dentro de `AolService.listOrders`, e a mudança desta seção só acrescentou escrita de trilha após o sucesso.
+
+> Vale o registro pelo que ilustra: a página não quebra quando `/laudos` falha, ela
+> só mostra menos — e a ausência de uma linha na trilha foi o primeiro sinal de que
+> algo não estava chegando ao paciente. É o argumento do S-08 em miniatura, no
+> primeiro dia: sem trilha, "não sabemos" não é uma resposta que se dá só à ANPD; é
+> o que se sabe sobre o próprio sistema.
 
 ---
 
@@ -1204,7 +1216,7 @@ O número de saltos é `1` e não `true` de propósito. Com `true` a API acredit
 | **Código** | `lib/auditoria.ts` (novo), `routes/laudos.ts`, `routes/resultados.ts`, `routes/documentos.ts`, `routes/integracao.ts`, `server.ts`, `.env.example` |
 | **Testes** | `auditoria.test.ts` (novo, 9) + 15 nas rotas; `test/helpers.ts` ganhou `ilike` no mock (a rota de busca não tinha teste nenhum por causa dessa lacuna). API de 298 → **313 testes** |
 | **Verificação** | suíte inteira verde; type-check limpo em `api`, `web` e `shared`; lint sem erro |
-| **Produção** | migration aplicada, **deploy feito** e trilha gravando: primeira linha com `ip` **público** (`177.185.111.221`), provando o `trustProxy` ponta a ponta. Falta o canal do paciente, que exige login real |
+| **Produção** | migration aplicada, **deploy feito** e trilha gravando nos **dois canais** — paciente (`resultados.listar`, `ator_id = titular_id`) e FlowLab, este último já com tráfego real não provocado. `ip` **público** em todas as linhas, provando o `trustProxy` ponta a ponta |
 
 ---
 
@@ -1994,7 +2006,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 |---|---|---|
 | 13 | ~~Criptografia de coluna, começando por `exam_results.result` e `resultados.paineis`~~ — **fase 1 no ar 03/08** (migration, chave, deploy e backfill verificados). `pacientes.*` = fase 2 | Parte 3 |
 | 14 | Trocar o typeahead da recepção de nome para CPF (blind index) | §3.4 |
-| 15 | ~~Estender a trilha append-only aos pontos de leitura de dado sensível~~ — **feito e no ar 03/08** (migration, deploy e trilha gravando em produção; append-only provado com `set role`). Falta exercitar o canal do paciente, que exige login real | S-08 |
+| 15 | ~~Estender a trilha append-only aos pontos de leitura de dado sensível~~ — **fechado 03/08**: migration, deploy e trilha gravando nos dois canais em produção, append-only provado com `set role`, `trustProxy` confirmado com IP público | S-08 |
 | 16 | ~~Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta~~ — **feito 31/07** | S-09 |
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
 | 18 | ~~Índices faltantes + `(select auth.uid())` nas 5 policies~~ — **feito 31/07** | S-11 |
