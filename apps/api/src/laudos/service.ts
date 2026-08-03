@@ -206,12 +206,21 @@ export class LaudoService {
       }
     }
 
-    return {
-      exams: filtraPorFonte(
-        fundirPedidosPorColeta(await this.#buscarAoVivo(pacienteId, cpf, perfil, log)),
-      ),
-      source: 'live',
-    }
+    const { laudos, falha } = await this.#buscarAoVivo(pacienteId, cpf, perfil, log)
+    const exams = filtraPorFonte(fundirPedidosPorColeta(laudos))
+
+    // A checagem vem DEPOIS do corte de fonte, e não dentro do #buscarAoVivo,
+    // porque é aqui que se sabe o que o paciente realmente vai ver.
+    //
+    // O caso que motivou isto: a AOL fora do ar não zera a busca — o ApLIS
+    // responde e os laudos saem com `source: 'aplis'`. Só que o corte de fonte
+    // (LAUDOS_SOMENTE_ALVARO, ligado por padrão) descarta tudo que não é da
+    // AOL, e a lista chegava vazia à tela SEM erro nenhum. O portal afirmava
+    // "você não tem exames" quando o certo era "não conseguimos consultar".
+    // Pior que o 502: o 502 pelo menos pede para tentar de novo.
+    if (exams.length === 0 && falha) throw falha
+
+    return { exams, source: 'live' }
   }
 
   // A resposta já foi enviada quando isto roda: falha aqui não pode derrubar a
@@ -222,17 +231,31 @@ export class LaudoService {
     perfil?: PerfilPaciente,
     log?: FastifyBaseLogger,
   ): void {
-    this.#buscarAoVivo(pacienteId, cpf, perfil, log).catch((err) => {
-      log?.error({ pacienteId, err }, 'Revalidação de laudos em background falhou')
-    })
+    this.#buscarAoVivo(pacienteId, cpf, perfil, log)
+      .then(({ falha }) => {
+        // A resposta já saiu; a falha aqui não vira HTTP, mas some do log se
+        // ninguém olhar — e é ela que explica um cache que nunca enriquece.
+        if (falha) log?.warn({ pacienteId, err: falha }, 'Revalidação de laudos: LIS falhou')
+      })
+      .catch((err) => {
+        log?.error({ pacienteId, err }, 'Revalidação de laudos em background falhou')
+      })
   }
 
+  /**
+   * Busca ao vivo nos dois LIS.
+   *
+   * Devolve os laudos E a falha de integração, se houve — em vez de lançar. Quem
+   * decide se a falha vira erro HTTP é `fetchAndCacheExams`, que é onde o corte
+   * de fonte já foi aplicado e portanto onde se sabe se sobrou algo para o
+   * paciente ver. Engolir a falha aqui foi o que produziu a tela vazia mentirosa.
+   */
   async #buscarAoVivo(
     pacienteId: string,
     cpf: string,
     perfil?: PerfilPaciente,
     log?: FastifyBaseLogger,
-  ): Promise<Laudo[]> {
+  ): Promise<{ laudos: Laudo[]; falha: unknown }> {
     // A mesma janela vale para as duas fontes: capa no ApLIS, valores na AOL.
     const hoje = new Date()
     const inicio = new Date()
@@ -277,6 +300,7 @@ export class LaudoService {
     //  - CPF do paciente → linha própria, só-AOL. Se a coleta bater com a
     //    dtaColeta de exatamente uma requisição, o card se funde ao do pedido na
     //    hora de servir (fundirPedidosPorColeta) — a linha continua separada.
+    let falhaAol: unknown = null
     try {
       const ordens = await this.aol.listOrders(periodoIni, periodoFim)
       const codigosDoPaciente = new Set(requisicoes.map((r) => r.cod_requisicao))
@@ -314,6 +338,10 @@ export class LaudoService {
       }
       log?.info({ pacienteId, total: ordens.length, doPaciente }, 'AOL orders/status OK')
     } catch (err) {
+      // A AOL é a fonte que SOBREVIVE ao corte de LAUDOS_SOMENTE_ALVARO. Se ela
+      // cair, o paciente pode acabar com a lista vazia mesmo tendo laudo no
+      // ApLIS — por isso a falha é guardada, não só logada.
+      falhaAol = err
       log?.warn({ pacienteId, err }, 'AOL orders/status falhou — descoberta de OS pulada')
     }
 
@@ -337,12 +365,14 @@ export class LaudoService {
       await this.#gravarSeMudou(linha, grupo, log)
     }
 
-    // Nada a mostrar E o ApLIS falhou: devolver lista vazia aqui seria afirmar
-    // que o paciente não tem exames, quando na verdade não conseguimos perguntar.
-    if (laudos.length === 0 && falhaNaListagem) throw falhaNaListagem
-
-    // Mesma ordenação do caminho cacheado (findByPaciente): mais recente primeiro.
-    return laudos.sort((a, b) => (b.data_emissao ?? '').localeCompare(a.data_emissao ?? ''))
+    // A falha do ApLIS vem primeiro: sem a listagem dele não há nem o que
+    // enriquecer, então ela explica melhor uma tela vazia do que a da AOL.
+    // Quem transforma isto em erro HTTP é fetchAndCacheExams — ver lá o porquê.
+    return {
+      // Mesma ordenação do caminho cacheado (findByPaciente): mais recente primeiro.
+      laudos: laudos.sort((a, b) => (b.data_emissao ?? '').localeCompare(a.data_emissao ?? '')),
+      falha: falhaNaListagem ?? falhaAol,
+    }
   }
 
   // Caminho ApLIS puro — hoje o mais comum: a requisição não tem OS na AOL.

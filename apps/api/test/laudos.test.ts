@@ -284,6 +284,127 @@ describe('corte de fonte (LAUDOS_SOMENTE_ALVARO)', () => {
     expect(nomes).toEqual(['Só no ApLIS', 'Veio do Álvaro'])
   })
 
+  it('502 — e não lista vazia — quando a AOL cai e o corte esvazia o resultado', async () => {
+    // O buraco que este teste fecha: a AOL fora do ar NÃO zera a busca (o ApLIS
+    // responde), então os laudos existem — mas saem todos como `source: 'aplis'`
+    // e o corte de fonte descarta cada um. Antes, a tela recebia [] com HTTP 200
+    // e afirmava "você não tem exames", quando o certo era "não conseguimos
+    // consultar". Repare que a flag fica no PADRÃO (ligada): é a configuração de
+    // produção que produzia a mentira.
+    const fetchSpy = vi.fn().mockImplementation((url: string, init?: { body?: string }) => {
+      // Só a AOL cai — é ela que sobrevive ao corte de fonte.
+      if (String(url).includes('aol.test')) {
+        return Promise.reject(new Error('read ECONNRESET'))
+      }
+
+      const { cmd } = JSON.parse(init?.body ?? '{}') as { cmd: string }
+      if (cmd === 'requisicaoListar') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              dat: { sucesso: 1, qtdPaginas: 1, lista: [{ CodRequisicao: 'REQ-1', CPF: CPF, NomExame: 'TSH' }] },
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            dat: {
+              sucesso: 1,
+              codRequisicao: 'REQ-1',
+              dtaColeta: '12/05/2026',
+              dtaSaida: '18/05/2026',
+              nomExame: 'TSH',
+              paciente: { nome: 'Fulano', cpf: CPF },
+              procedimentos: [{ nome: 'TSH', resultado: '2,1', unidade: 'mUI/L', referencia: '0,4 - 4,0' }],
+              localOrigem: { nome: 'CLAF' },
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    // `result: null` → nada exibível em cache, então cai no caminho ao vivo.
+    const server = await build(
+      supaHandler({
+        examResults: {
+          data: [
+            { id: 'row-1', paciente_id: 'pac-1', cpf: CPF, codigo_os: null, codigo_lis: 'REQ-1', result: null, cached_at: null },
+          ],
+          error: null,
+        },
+      }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: '/laudos', headers: auth })
+
+    expect(res.statusCode).toBe(502)
+  })
+
+  it('200 com lista vazia quando a AOL responde e o paciente é mesmo só-ApLIS', async () => {
+    // O contraponto do teste acima, e o que prova que o 502 de lá vem da AOL e
+    // não de um efeito colateral do cenário: MESMO caminho ao vivo, MESMO laudo
+    // ApLIS-only descartado pelo corte — mas com a AOL respondendo. Sem falha de
+    // integração, lista vazia é a verdade (o paciente não tem laudo do Álvaro),
+    // e a resposta certa é 200. A diferença entre "não tem" e "não sei" é
+    // exatamente o que a correção passou a enxergar.
+    const fetchSpy = vi.fn().mockImplementation((url: string, init?: { body?: string }) => {
+      if (String(url).includes('aol.test')) {
+        return Promise.resolve(new Response(JSON.stringify({ data: [], hasNext: false }), { status: 200 }))
+      }
+
+      const { cmd } = JSON.parse(init?.body ?? '{}') as { cmd: string }
+      if (cmd === 'requisicaoListar') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              dat: { sucesso: 1, qtdPaginas: 1, lista: [{ CodRequisicao: 'REQ-1', CPF: CPF, NomExame: 'TSH' }] },
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            dat: {
+              sucesso: 1,
+              codRequisicao: 'REQ-1',
+              dtaColeta: '12/05/2026',
+              dtaSaida: '18/05/2026',
+              nomExame: 'TSH',
+              paciente: { nome: 'Fulano', cpf: CPF },
+              procedimentos: [{ nome: 'TSH', resultado: '2,1', unidade: 'mUI/L', referencia: '0,4 - 4,0' }],
+              localOrigem: { nome: 'CLAF' },
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const server = await build(
+      supaHandler({
+        examResults: {
+          data: [
+            { id: 'row-1', paciente_id: 'pac-1', cpf: CPF, codigo_os: null, codigo_lis: 'REQ-1', result: null, cached_at: null },
+          ],
+          error: null,
+        },
+      }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: '/laudos', headers: auth })
+
+    expect(res.statusCode).toBe(200)
+    expect((res.json() as { exams: unknown[] }).exams).toEqual([])
+  })
+
   it('404 no GET /laudos/:id de uma linha só-ApLIS — senão ela sairia por aqui', async () => {
     const server = await build(
       supaHandler({
