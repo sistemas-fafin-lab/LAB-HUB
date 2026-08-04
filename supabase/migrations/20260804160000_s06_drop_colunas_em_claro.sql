@@ -2,7 +2,7 @@
 -- S-06 — o drop: as sete colunas em claro somem. É AQUI que a criptografia
 -- passa a proteger alguma coisa.
 --
--- ⚠ NÃO APLICADA AINDA — depende de deploy. Ver PRÉ-REQUISITO abaixo.
+-- ✔ APLICADA em 04/08/2026 — ledger 24. Irreversível.
 --
 -- Até esta migration, "dado clínico cifrado" era meia verdade: a coluna cifrada
 -- existia, e ao lado dela o texto puro continuava gravado. Um `pg_dump`, uma
@@ -10,26 +10,36 @@
 -- em claro, cifra ou não. As fases 1 (03/08) e 2a (04/08) construíram a
 -- fechadura; esta migration é a que tira a chave de baixo do tapete.
 --
--- PRÉ-REQUISITO — e não é conservadorismo, é sequência
+-- PRÉ-REQUISITO — e não era conservadorismo, era sequência
 --
--- O código precisa ter PARADO DE LER estas colunas. Não basta ter parado de
--- escrever: `laudos/repository.ts` E `routes/laudos.ts` nomeiam as colunas no
--- `select` do PostgREST, e coluna inexistente ali não é campo vazio — é **400,
--- com a rota `/laudos` inteira fora do ar**. Aplicar isto antes do deploy
--- derruba o portal de laudos no mesmo segundo.
+-- O código precisava ter PARADO DE LER estas colunas. Não bastava ter parado de
+-- escrever: `laudos/repository.ts`, `routes/laudos.ts` E `routes/webhooks.ts`
+-- nomeavam as colunas no `select` do PostgREST, e coluna inexistente ali não é
+-- campo vazio — é 400, com a rota inteira fora do ar.
 --
---   1. deploy do corte de escrita e leitura no repositório   ← FEITO 04/08
---   2. deploy da correção de `routes/laudos.ts` e            ← FALTA
---      `routes/webhooks.ts`
+--   1. deploy do corte de escrita e leitura no repositório   ← feito 04/08
+--   2. deploy da correção de `routes/laudos.ts` e
+--      `routes/webhooks.ts` (`cf464ab`)                      ← feito 04/08
 --        (essas rotas têm `select` próprio, fora do repositório, e
 --         ainda nomeavam `result` e `exames`. A primeira foi achada na
 --         conferência com login real; a segunda, pelo teste de varredura
 --         em criptografiaColunas.test.ts, que existe por causa dela.)
---   3. observar produção alguns dias                         ← FALTA
---   4. esta migration
+--   3. build confirmado dentro do container, não pelo /ping    ← feito 04/08
+--   4. escrita e leitura exercitadas em produção nas três
+--      tabelas que ainda têm caminho vivo                     ← feito 04/08
+--   5. esta migration
 --
--- O passo 2 existe porque daqui não há volta: reverter o deploy depois deste
--- drop não traz o dado de volta, ele deixou de existir em claro.
+-- Não houve "observar alguns dias": enquanto as colunas existiam, todo `select`
+-- que as nomeava funcionava, então a espera não detectaria a falha que este drop
+-- causaria. Quem detectou foram o inventário e o teste de varredura. O que
+-- substituiu a espera foram os três disparos deliberados do passo 4.
+--
+-- A GUARDA NÃO FOI ESTE ARQUIVO. Na aplicação, os sete `drop` foram precedidos,
+-- no MESMO batch, por um bloco `do $$` que levanta exceção se qualquer coluna
+-- tiver linha em claro sem par cifrado. Multi-statement roda em transação
+-- implícita: se a guarda dispara, nada é dropado. Conferir antes e dropar
+-- depois, em duas chamadas, deixaria uma janela entre a foto e o tiro.
+-- Quem reaplicar isto em outro ambiente deve refazer essa guarda.
 --
 -- ESTADO DOS DADOS, conferido em 04/08/2026 (antes de escrever)
 --

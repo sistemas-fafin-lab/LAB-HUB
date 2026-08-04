@@ -21,7 +21,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** → **parcial 31/07** (SSL exigido; CIDR aberto por decisão) |
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 31/07** (o que sobra exige plano Pro ou código) |
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** |
-| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 NO AR 03/08** (valores) + **fase 2a 04/08** (rótulos: nome do exame, `documentos.nome_arquivo`, `exam_results.cpf`). Falta a **2b** (`pacientes.*`) e, nas duas, derrubar as colunas em claro — o bloqueio disso saiu em 04/08 (`uq_resultado_flowlab`), falta o deploy do FlowLab |
+| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 NO AR 03/08** (valores) + **fase 2a 04/08** (rótulos) + **DROP das sete colunas em claro aplicado 04/08** — é daí que a cifra passa a proteger de dump. Sobra `resultados.exame_nome` (sai com a troca da unicidade, esperando entrega real do FlowLab com o id opaco) e a fase **2b** (`pacientes.cpf/email/data_nascimento`, depende de blind index) |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** (junto com S-01; DDL capturada em 31/07 pelo P-04) |
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | ~~**MÉDIO**~~ **CORRIGIDO 03/08/2026** |
@@ -878,6 +878,49 @@ verificação deliberada, não dado real.
 de escrita depende da AOL, inalcançável do VPS. O drop leva `result` e `cpf` de lá sem
 dado a perder, mas o código que grava e lê essas duas colunas segue conferido só por
 teste até o IP ser liberado.
+
+### 04/08/2026 — o drop: sete colunas em claro deixaram de existir — **APLICADO**
+
+| | |
+|---|---|
+| **Migration** | `20260804160000_s06_drop_colunas_em_claro.sql` — **aplicada**, ledger 24 × 25 (a 25ª é a `140000`, retida) |
+| **Irreversível** | sim. Reverter o deploy não traz o dado de volta; ele deixou de existir em claro |
+| **Sobrou em claro** | só `resultados.exame_nome` |
+
+Até aqui "dado clínico cifrado" era meia verdade: a coluna cifrada existia e ao lado
+dela o texto puro continuava gravado. Um `pg_dump`, uma réplica, um staging populado
+com dado real ou um bug de RLS entregavam tudo em claro, cifra ou não. **É esta
+migration que faz a criptografia proteger alguma coisa** — as fases 1 e 2a construíram
+a fechadura, esta tirou a chave de baixo do tapete.
+
+**A guarda não ficou no arquivo, ficou no batch.** Os sete `drop` foram precedidos, na
+mesma execução, por um `do $$` que levanta exceção se qualquer coluna tiver linha em
+claro sem par cifrado. Multi-statement roda em transação implícita: se a guarda
+disparasse, nada seria dropado. Conferir numa chamada e dropar em outra deixaria uma
+janela entre a foto e o tiro — pequena, e do tamanho exato de um webhook chegando.
+
+**Conferido depois, contra o banco sem as colunas:**
+
+| | |
+|---|---|
+| Leituras | `/resultados`, `/agendamentos`, `/documentos`, `/pacientes/me` 200; `/laudos/:id` 404; `/laudos` 502 (AOL, como antes) |
+| `insert` em `resultados` | reentrega colidiu na unique → `idempotency: ignored`. Se a lista de colunas citasse uma dropada, o PostgREST devolveria `PGRST204`, não 23505 — então o `ignored` prova o insert contra o schema novo, **sem criar linha** |
+| `update` em `agendamentos` | `coletado` → `realizado`, `exames_enc` regravado |
+| `insert` em `documentos` | upload 201 + `DELETE` 204 |
+| Envelopes | 3 `paineis_enc`, 3 `exame_nome_enc`, 1 `exames_enc`, 16 `nome_arquivo_enc` — intactos |
+
+**A `20260804140000` NÃO subiu junto, e a razão apareceu na hora de decidir.** Ela faz
+`exame_flowlab_id` virar `NOT NULL`. O commit do FlowLab está pushado, mas das três
+linhas de `resultados` a única que carrega o id opaco **é a sonda deste documento** —
+nenhum webhook real jamais mandou o campo. Pushado não é implantado, e aplicar a
+`140000` faria todo resultado real passar a falhar com 23502. Ela espera uma entrega
+real com o campo preenchido, não um commit no `origin`.
+
+**A partir daqui a chave é o dado.** Perder `PII_KEY_K1` deixou de ser incidente
+operacional e passou a ser perda irreversível de resultado clínico: o backup do banco
+não salva, porque o que ele guarda agora é o envelope. A chave precisa de cópia em
+cofre **separado** de onde o banco vive. É custódia de chave — assunto diferente do
+S-02, e criado por esta migration, não por ele.
 
 ### 03/08/2026 — retenção da trilha definida em 6 meses (fecha a pendência do S-08)
 
