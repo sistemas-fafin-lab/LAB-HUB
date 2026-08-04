@@ -114,7 +114,10 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
 
     const { data, error } = await supabase
       .from('exam_results')
-      .select('id, result, result_enc')
+      // Sem `result`: a coluna em claro sai no drop do S-06, e nomear coluna
+      // inexistente no PostgREST não devolve campo vazio — é 400, esta rota
+      // inteira fora do ar. O envelope é a única fonte.
+      .select('id, result_enc')
       .eq('id', id)
       .eq('paciente_id', request.pacienteId)
       .maybeSingle()
@@ -122,14 +125,14 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
     if (error) {
       throw app.httpErrors.internalServerError('Falha ao consultar o laudo')
     }
-    if (!data?.result && !data?.result_enc) {
+    if (!data?.result_enc) {
       throw app.httpErrors.notFound('Laudo não encontrado')
     }
     // Decodifica pelo mesmo caminho do repositório — inclusive a normalização da
     // linha antiga, que guardava objeto único em vez de lista. Duplicar isso
     // aqui é como a duplicata de `sanitizarNome` do P-05 terminou: uma cópia
     // esquece o AAD e a outra não, e a divergência só aparece em produção.
-    const laudos = laudosDaLinha(data as { id: string; result?: unknown; result_enc?: string | null })
+    const laudos = laudosDaLinha(data as { id: string; result_enc?: string | null })
 
     // O mesmo corte de fonte do GET /laudos — senão esta rota seria o buraco
     // por onde o laudo escondido da lista continuaria saindo. Linha que sobra

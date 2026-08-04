@@ -687,7 +687,7 @@ Até o passo 4, essa linha de log é o único rastro que existe da diferença.
 | **Migration** | `20260804130000_s06_corte_colunas_em_claro.sql` — **aplicada**, ledger 23 × 24 (a 24ª é a `140000`, retida de propósito) |
 | **Código** | `webhooks.ts`, `documentos.ts`, `integracao.ts`, `laudos/repository.ts`, `lib/crypto.ts`, `lib/mappers.ts`, `lib/backfillCripto.ts` |
 | **Testes** | API 340 → **341**; type-check limpo |
-| **Falta** | deploy no VPS, observar, e a migration do `drop column` |
+| **Falta** | deploy feito e conferido em 04/08 (registro abaixo), mas **um resto apareceu na conferência** — falta subir a correção de `routes/laudos.ts`, observar, e aplicar o `drop column` |
 
 Ao conferir a nullability das colunas para escrever isto, apareceu que a premissa
 anterior estava errada. Eu vinha tratando "derrubar o texto puro" como um bloco
@@ -774,6 +774,65 @@ tiveram de ser convertidas para a forma cifrada (`laudos`, `laudosIdentidade`,
 `documentos`, `integracao`). Dois testes foram substituídos em vez de
 consertados: eles afirmavam o fallback para o texto puro, que passou a ser
 comportamento removido de propósito. **341 testes**, tsc e eslint limpos.
+
+### 04/08/2026 — conferência do corte em produção, e a oitava coluna que o `select` ainda nomeava
+
+Deploy feito, conferido com **login real** no portal (`teste@gmail.com`, paciente
+`dd011e0d…`), pelas rotas de verdade e não pelo `/ping`.
+
+| Rota | Resultado | O que prova |
+|---|---|---|
+| `GET /resultados` | 200, 2 laudos | `paineis_enc`, `resumo_enc`, `categoria_enc` decifrados com a chave de produção |
+| `GET /agendamentos` | 200, 2 | `exames_enc` |
+| `GET /documentos` | 200, 2 | `nome_arquivo_enc` — nome do arquivo saiu legível |
+| `GET /pacientes/me` | 200 | — |
+| `GET /laudos` | **502** | LIS fora de alcance; ver abaixo |
+| `GET /laudos/:id` (uuid inexistente) | 404 | o `select` da rota não bate em coluna faltante |
+
+**O `/laudos` não pôde ser exercitado, e isso não é falha do corte.** `exam_results`
+tem **0 linhas** — o cache está vazio porque a AOL não responde do VPS (pendência do
+Álvaro). Sem cache, `fetchAndCacheExams` cai no caminho ao vivo, o LIS não responde e
+o serviço levanta `IntegrationError` → 502, **antes** de qualquer decifragem. Não há
+como fazer esse caminho decifrar alguma coisa daqui: seria preciso uma linha cifrada
+em `exam_results`, e forjá-la exigiria a `PII_KEY_K1`, que vive só no VPS.
+
+O que dá para afirmar é o que as outras quatro rotas mostram: a mesma
+`decifrar`/`decifrarJson` com o mesmo esquema de AAD funciona em produção sobre dado
+real. O trecho específico de `exam_results` fica sem prova de ponta a ponta até a AOL
+voltar — registrado como tal, não como conferido.
+
+**A conferência achou um resto.** `routes/laudos.ts` tinha o próprio `select`, fora do
+repositório, ainda nomeando `result`:
+
+```ts
+.select('id, result, result_enc')   // → 400 depois do drop
+```
+
+Passou pela varredura porque a linha **também** contém `result_enc`, e o filtro que eu
+usei para separar coluna clara de cifrada descartava a linha inteira por isso. O
+sintoma seria o mesmo que o cabeçalho da migration do drop descreve — `GET /laudos/:id`
+inteira em 400 —, só que numa rota que o repositório não cobre.
+
+A lição: procurar a coluna clara com um filtro que exclui `_enc` esconde exatamente o
+caso perigoso, que é a linha onde as duas aparecem juntas.
+
+**Então a varredura virou teste**, em `criptografiaColunas.test.ts`. Ele lê o
+código-fonte de `src/` inteiro, casa cada `.select()` com o `.from()` mais próximo
+acima (resolvendo o `COLUNAS` do repositório pelo `const` do arquivo) e falha se
+alguma coluna dropada for nomeada. Por tabela, porque `cpf` é ambíguo:
+`exam_results.cpf` já saiu, `pacientes.cpf` continua de pé.
+
+Nenhum teste de comportamento pegaria isso — o mock do Supabase aceita qualquer string
+em `.select()`, então o defeito fica verde na suíte e só aparece como 400 em produção.
+
+**E o teste achou um segundo caso, que a leitura manual não tinha visto:**
+`routes/webhooks.ts` selecionava `id, status, exames, exames_enc` no agendamento. Esse
+é pior que o do `/laudos`: seria **400 no webhook de coleta**, em toda entrega, e o
+FlowLab retentaria para sempre. Corrigido junto, e o `agendamento.exames == null` da
+guarda de reconciliação virou só o envelope.
+
+**Os dois commits precisam estar no ar antes da `20260804160000`** — o deploy conferido
+acima ainda tem os dois defeitos. **342 testes**, tsc e eslint limpos.
 
 ### 03/08/2026 — retenção da trilha definida em 6 meses (fecha a pendência do S-08)
 

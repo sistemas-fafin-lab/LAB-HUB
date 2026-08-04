@@ -182,7 +182,10 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
     // encontrado" de falha transitória (mesma razão do /webhooks/resultados).
     const { data: agendamento, error: agendamentoError } = await supabase
       .from('agendamentos')
-      .select('id, status, exames, exames_enc')
+      // Sem `exames`: a coluna em claro sai no drop do S-06, e nomeá-la aqui
+      // depois disso é 400 do PostgREST — o webhook de coleta passaria a falhar
+      // em toda entrega, e o FlowLab retentaria para sempre.
+      .select('id, status, exames_enc')
       .eq('id', payload.agendamentoLabhubId)
       .maybeSingle()
     if (agendamentoError) {
@@ -216,10 +219,9 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       // Status já é o alvo. Ainda assim, uma reentrega/reconciliação pode trazer os
       // exames que faltavam (ex.: curl no deliver-coleta sobre uma coleta já
       // 'realizado' cujo snapshot ficou null). Grava só os exames nesse caso.
-      // "Ainda não tem snapshot" passa a olhar as DUAS colunas (S-06 fase 2a):
-      // checar só a em claro faria esta reconciliação sobrescrever um snapshot
-      // que já existe cifrado.
-      if (temExames && agendamento.exames == null && agendamento.exames_enc == null) {
+      // "Ainda não tem snapshot" olha só o envelope: desde o corte do S-06 é a
+      // única coluna escrita, e a em claro deixou de ser lida (sai no drop).
+      if (temExames && agendamento.exames_enc == null) {
         const { error } = await supabase
           .from('agendamentos')
           .update({

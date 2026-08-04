@@ -14,6 +14,9 @@ const h = vi.hoisted(() => {
 vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 
 import { createHmac } from 'node:crypto'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { ExamResultRepository } from '../src/laudos/repository.js'
 import { laudosRoutes } from '../src/routes/laudos.js'
 import { resultadosRoutes } from '../src/routes/resultados.js'
@@ -503,5 +506,82 @@ describe('fase 2a — rótulos e identificadores', () => {
     const laudos = await new ExamResultRepository().findByPaciente('pac-1', '52998224725')
 
     expect(laudos).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A varredura que os testes de comportamento não fazem
+// ---------------------------------------------------------------------------
+
+// Este bloco lê o CÓDIGO-FONTE, e não o comportamento. Existe porque a falha que
+// ele procura é invisível para todo o resto da suíte: o mock do Supabase aceita
+// qualquer string em `.select()`, então um `select` que nomeia coluna dropada
+// passa verde aqui e vira **400 do PostgREST** em produção — coluna inexistente
+// não é campo vazio, é a rota inteira fora do ar.
+//
+// Foi o que aconteceu em 04/08: `routes/laudos.ts` tinha o próprio `select`,
+// separado do repositório, ainda nomeando `result`. A varredura manual não o
+// pegou porque a mesma linha continha `result_enc`, e o filtro usado para achar
+// "coluna em claro" descartava a linha por causa do sufixo.
+describe('nenhum select nomeia coluna em claro que já foi (ou vai ser) dropada', () => {
+  // Por tabela, porque `cpf` é ambíguo: `exam_results.cpf` foi dropada,
+  // `pacientes.cpf` continua de pé (fase 2b do S-06 ainda não aconteceu).
+  const DROPADAS: Record<string, string[]> = {
+    exam_results: ['result', 'cpf'],
+    resultados: ['paineis', 'resumo', 'categoria'],
+    agendamentos: ['exames'],
+    documentos: ['nome_arquivo'],
+  }
+
+  function arquivosTs(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const caminho = join(dir, e.name)
+      if (e.isDirectory()) return arquivosTs(caminho)
+      return e.name.endsWith('.ts') ? [caminho] : []
+    })
+  }
+
+  // Cada `.select(...)` herda a tabela do `.from('...')` mais próximo acima dele —
+  // que é como o query builder encadeia. Argumento que não é literal (o `COLUNAS`
+  // do repositório) é resolvido pelo `const` do mesmo arquivo.
+  function selectsPorTabela(fonte: string): Array<{ tabela: string; colunas: string }> {
+    const constantes = new Map<string, string>()
+    for (const m of fonte.matchAll(/const\s+(\w+)\s*=\s*'([^']*)'/g)) {
+      constantes.set(m[1]!, m[2]!)
+    }
+
+    const achados: Array<{ tabela: string; colunas: string }> = []
+    let tabela = ''
+    for (const m of fonte.matchAll(/\.from\('([^']+)'\)|\.select\(\s*(?:'([^']*)'|(\w+))/g)) {
+      if (m[1] !== undefined) {
+        tabela = m[1]
+        continue
+      }
+      const colunas = m[2] ?? constantes.get(m[3]!) ?? ''
+      if (tabela) achados.push({ tabela, colunas })
+    }
+    return achados
+  }
+
+  it('varre src/ inteiro', () => {
+    const raiz = fileURLToPath(new URL('../src', import.meta.url))
+    const problemas: string[] = []
+
+    for (const arquivo of arquivosTs(raiz)) {
+      for (const { tabela, colunas } of selectsPorTabela(readFileSync(arquivo, 'utf8'))) {
+        const proibidas = DROPADAS[tabela]
+        if (!proibidas) continue
+        // Comparação por token exato: `result_enc` e `cpf_enc` são colunas
+        // legítimas e não podem casar com `result` / `cpf`.
+        const nomeadas = colunas.split(',').map((c) => c.trim())
+        for (const col of proibidas) {
+          if (nomeadas.includes(col)) {
+            problemas.push(`${relative(raiz, arquivo)}: select em '${tabela}' nomeia '${col}'`)
+          }
+        }
+      }
+    }
+
+    expect(problemas).toEqual([])
   })
 })

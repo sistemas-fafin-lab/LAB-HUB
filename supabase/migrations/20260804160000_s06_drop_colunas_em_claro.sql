@@ -12,15 +12,21 @@
 --
 -- PRÉ-REQUISITO — e não é conservadorismo, é sequência
 --
--- O código precisa ter PARADO DE LER estas colunas, e esse deploy ainda não
--- subiu. Não basta ter parado de escrever: `laudos/repository.ts` nomeia as
--- colunas no `select` do PostgREST, e coluna inexistente ali não é campo vazio —
--- é **400, com a rota `/laudos` inteira fora do ar**. Aplicar isto antes do
--- deploy derruba o portal de laudos no mesmo segundo.
+-- O código precisa ter PARADO DE LER estas colunas. Não basta ter parado de
+-- escrever: `laudos/repository.ts` E `routes/laudos.ts` nomeiam as colunas no
+-- `select` do PostgREST, e coluna inexistente ali não é campo vazio — é **400,
+-- com a rota `/laudos` inteira fora do ar**. Aplicar isto antes do deploy
+-- derruba o portal de laudos no mesmo segundo.
 --
---   1. deploy do LAB-HUB que para de escrever E de ler as sete   ← FALTA
---   2. observar produção alguns dias                             ← FALTA
---   3. esta migration
+--   1. deploy do corte de escrita e leitura no repositório   ← FEITO 04/08
+--   2. deploy da correção de `routes/laudos.ts` e            ← FALTA
+--      `routes/webhooks.ts`
+--        (essas rotas têm `select` próprio, fora do repositório, e
+--         ainda nomeavam `result` e `exames`. A primeira foi achada na
+--         conferência com login real; a segunda, pelo teste de varredura
+--         em criptografiaColunas.test.ts, que existe por causa dela.)
+--   3. observar produção alguns dias                         ← FALTA
+--   4. esta migration
 --
 -- O passo 2 existe porque daqui não há volta: reverter o deploy depois deste
 -- drop não traz o dado de volta, ele deixou de existir em claro.
