@@ -272,6 +272,10 @@ export interface CorrigirIdentidadeResposta {
 // Payload recebido do FlowLab via webhook de resultado (D1)
 export interface ResultadoWebhookPayload {
   agendamentoLabhubId: string
+  // `ac_resultados.id` no FlowLab. Opcional só enquanto o FlowLab no ar ainda
+  // não manda o campo — é a identidade opaca que vai substituir o
+  // (agendamento, exame_nome) na unicidade e liberar cifrar o rótulo.
+  exameFlowlabId?: string
   exameNome: string
   categoria?: string
   resumo?: string

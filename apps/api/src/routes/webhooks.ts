@@ -107,6 +107,7 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       id,
       paciente_id: agendamento.paciente_id,
       agendamento_id: agendamento.id,
+      exame_flowlab_id: payload.exameFlowlabId ?? null,
       exame_nome: payload.exameNome,
       categoria: payload.categoria ?? null,
       status: 'ready',
@@ -126,6 +127,22 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       // Tratamos como idempotente — o resultado já foi gravado, então respondemos OK
       // para o FlowLab parar de reenviar.
       if (error.code === '23505') {
+        // Loga porque nem toda colisão é reentrega. O FlowLab NÃO tem unicidade
+        // em (agendamento_id, exame_nome) do lado dele: um resultado corrigido
+        // ou reliberado colide aqui, recebe este 200 e é marcado como entregue
+        // lá — descartado sem que ninguém veja. Enquanto a unicidade não migra
+        // para o `exame_flowlab_id`, esta linha é o único rastro do descarte.
+        request.log.warn(
+          {
+            agendamentoLabhubId: payload.agendamentoLabhubId,
+            exameFlowlabId: payload.exameFlowlabId ?? null,
+            // Qual constraint bateu: `uq_resultado_flowlab` é reentrega de
+            // verdade (mesmo id); `uq_resultado_agendamento_exame` pode ser o
+            // descarte silencioso descrito acima. `details` não carrega PII.
+            detalhe: error.details ?? null,
+          },
+          'Resultado colidiu com uma unique — tratado como reentrega',
+        )
         return reply.code(200).send({ ok: true, idempotency: 'ignored' })
       }
       throw app.httpErrors.internalServerError('Falha ao gravar resultado')

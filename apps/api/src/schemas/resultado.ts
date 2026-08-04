@@ -13,6 +13,11 @@ export const painelResultadoSchema = z.object({
 // Payload do webhook FlowLab → LAB-HUB (D1: inclui painéis estruturados).
 export const resultadoWebhookSchema = z.object({
   agendamentoLabhubId: z.string().uuid(),
+  // Id do resultado no FlowLab (`ac_resultados.id`). Opcional porque o FlowLab
+  // já entrega sem ele hoje — exigir quebraria a integração no ar. É a chave
+  // que permitirá trocar a unicidade de (agendamento, exame_nome) por uma
+  // opaca, e com isso derrubar o `exame_nome` em claro (S-06).
+  exameFlowlabId: z.string().uuid().optional(),
   exameNome: z.string().min(1),
   categoria: z.string().optional(),
   resumo: z.string().optional(),

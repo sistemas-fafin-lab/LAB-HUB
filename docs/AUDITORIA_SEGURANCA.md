@@ -21,7 +21,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** → **parcial 31/07** (SSL exigido; CIDR aberto por decisão) |
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 31/07** (o que sobra exige plano Pro ou código) |
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** |
-| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 NO AR 03/08** (valores) + **fase 2a 04/08** (rótulos: nome do exame, `documentos.nome_arquivo`, `exam_results.cpf`). Falta a **2b** (`pacientes.*`) e, nas duas, derrubar as colunas em claro |
+| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 NO AR 03/08** (valores) + **fase 2a 04/08** (rótulos: nome do exame, `documentos.nome_arquivo`, `exam_results.cpf`). Falta a **2b** (`pacientes.*`) e, nas duas, derrubar as colunas em claro — o bloqueio disso saiu em 04/08 (`uq_resultado_flowlab`), falta o deploy do FlowLab |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** (junto com S-01; DDL capturada em 31/07 pelo P-04) |
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | ~~**MÉDIO**~~ **CORRIGIDO 03/08/2026** |
@@ -575,6 +575,76 @@ A terceira linha usa o fato de o GCM ser cifra de fluxo: o tamanho do envelope �
 **E prova o deploy de quebra.** O log do backfill traz as chaves `rotulos`, `agendamentos`, `documentos` e `examResultsCpf`, que só existem no build novo — o container antigo nem teria o script com esses contadores. Vale mais que `/ping`, que responde 200 igual nas duas versões (o laço que segurou o S-10 por três dias).
 
 **O que esta migration NÃO resolve, e está dito nela:** `uq_resultado_agendamento_exame UNIQUE (agendamento_id, exame_nome)` é o que torna o webhook de resultado idempotente — o FlowLab entrega at-least-once e a reentrega bate no 23505. Sobre coluna cifrada essa unicidade não existe (IV aleatório), então **derrubar `exame_nome` sem substituir a chave transforma cada reentrega num resultado duplicado na tela do paciente**. Dois caminhos, e a escolha não era desta migration: usar `exame_flowlab_id` (a coluna já existe e está sem uso; depende de o FlowLab passar a enviá-la) ou um índice cego `hmac(chave, agendamento_id || nome)` — com o `agendamento_id` **dentro da mensagem**, senão a contagem por hash entrega o catálogo por análise de frequência.
+
+> **Resolvido pela metade em 04/08** — ver o registro seguinte. O caminho escolhido foi o `exame_flowlab_id`: o FlowLab já tinha o id e já o carregava no handler. O índice cego ficou de fora por não ser mais necessário.
+
+### 04/08/2026 — a identidade opaca do resultado (o passo que destrava cifrar o rótulo de verdade)
+
+| | |
+|---|---|
+| **Migration** | `20260804120000_uq_resultado_flowlab_id.sql` — **aplicada em produção**, ledger 22 × 22 |
+| **Código (LAB-HUB)** | `schemas/resultado.ts` (`exameFlowlabId` opcional), `routes/webhooks.ts` (grava a coluna + loga a colisão), `packages/shared` |
+| **Código (FlowLab)** | `api/_lib/handlers/deliver-resultado.ts` — uma linha no payload. **Não implantado**: depende de deploy na Vercel |
+| **Testes** | +3 em `webhooks.test.ts`. API de 326 → **329 testes**; type-check limpo nos dois repositórios |
+
+A pergunta do registro anterior era se o FlowLab conseguiria mandar um id estável
+do exame. A resposta, ao ler o repositório: **ele já tem e já está com o id na
+mão**. `ac_resultados.id` é `uuid primary key default gen_random_uuid()`, e o
+handler que monta o webhook carrega a linha por esse id (`.eq('id', resultadoId)`)
+e o usa de novo no fim para marcar `entregue_ao_labhub`. Faltava só pôr no
+payload. Nenhuma mudança de schema do lado de lá.
+
+**E a análise achou um defeito de integração que não era o que se procurava.** O
+FlowLab **não** tem unicidade em `(agendamento_id, exame_nome)`; só o LAB-HUB tem.
+Quer dizer: o destino impõe uma regra que a origem desconhece. Um resultado
+corrigido, reliberado ou recoletado do mesmo exame chega aqui, bate no 23505,
+recebe `200 {"idempotency":"ignored"}` — e o `deliver-resultado` trata qualquer
+`resp.ok` como sucesso e grava `entregue_ao_labhub = true`. **O resultado
+corrigido é descartado e registrado como entregue.** Nenhum erro em lugar nenhum:
+é a mesma forma da falha do `/laudos` que a trilha do S-08 denunciou pela
+ausência de linha. Hoje é latente — nada no FlowLab insere em `ac_resultados`,
+não há UI de liberação — e é por isso que este é o momento barato de consertar.
+
+**Por que a migration só faz metade do caminho.** Ela cria
+`uq_resultado_flowlab` (unique parcial em `exame_flowlab_id`) e **não** derruba a
+`uq_resultado_agendamento_exame` nem torna a coluna `NOT NULL`. O FlowLab em
+produção ainda não manda o campo; se a unicidade migrasse hoje, todo resultado
+chegaria com `null` — e em unique do Postgres **null é distinto de null**, então
+a constraint nunca dispararia e a idempotência do webhook sumiria por inteiro.
+Retry de rede viraria resultado duplicado na tela do paciente. O que foi aplicado
+é estritamente aditivo: pega a reentrega verdadeira (mesmo id) desde já e não
+remove nenhuma garantia.
+
+A unique é **global**, não por agendamento: `ac_resultados.id` é PK do outro
+lado, então id repetido só pode ser reentrega do mesmo resultado. Restringi-la ao
+agendamento deixaria passar um payload apontando o mesmo resultado do FlowLab
+para dois agendamentos diferentes — precisamente o embaralhamento que não se quer
+em dado clínico.
+
+**Backfill: não há.** As 2 linhas de `resultados` em produção têm
+`agendamento_id` null, então não vieram do webhook (a rota sempre grava o
+agendamento resolvido) — foram semeadas. Não existe `ac_resultados.id`
+correspondente para preencher. De quebra, elas nunca estiveram cobertas pela
+unique antiga: `(null, exame_nome)` não colide com nada.
+
+**O que falta, em ordem, e o que cada item exige:**
+
+| # | Passo | Depende de |
+|---|---|---|
+| 1 | Deploy do FlowLab mandando `exameFlowlabId` | push + Vercel |
+| 2 | Conferir que todo resultado novo chega com o id | observação em produção |
+| 3 | **Decisão de produto** | com a unique antiga fora, um segundo resultado genuíno do mesmo exame passa a ser aceito e aparece **duas vezes** no portal. Exibir as duas? A nova substitui? Marcar a antiga como retificada? |
+| 4 | `exame_flowlab_id NOT NULL`, drop da `uq_resultado_agendamento_exame`, parar de escrever `exame_nome` em claro e derrubar a coluna | os três acima |
+
+O passo 3 é o único que não é técnico, e é o que segura o resto: trocar a
+constraint sem respondê-lo troca um bug silencioso por um comportamento de tela
+indefinido.
+
+Enquanto isso, o 23505 passou a ser **logado** (`request.log.warn` com o
+`details` do Postgres, que diz qual constraint bateu e não carrega PII). Colisão
+em `uq_resultado_flowlab` é reentrega de verdade; colisão em
+`uq_resultado_agendamento_exame` pode ser o descarte silencioso descrito acima.
+Até o passo 4, essa linha de log é o único rastro que existe da diferença.
 
 ### 03/08/2026 — retenção da trilha definida em 6 meses (fecha a pendência do S-08)
 

@@ -17,6 +17,9 @@ import { webhooksRoutes } from '../src/routes/webhooks.js'
 import { buildApp, createSupabaseMock, signHmac, type SupaHandler } from './helpers.js'
 
 const AG_ID = '11111111-1111-1111-1111-111111111111'
+// `ac_resultados.id` do lado do FlowLab — id estável do resultado, não do exame
+// no catálogo.
+const FLOWLAB_RES_ID = '22222222-2222-2222-2222-222222222222'
 
 function validPayload(): Record<string, unknown> {
   return {
@@ -96,6 +99,49 @@ describe('POST /webhooks/resultados', () => {
     const { status, body } = await postWebhook(app, JSON.stringify(validPayload()))
     expect(status).toBe(201)
     expect(body.ok).toBe(true)
+  })
+
+  it('grava o exame_flowlab_id quando o FlowLab manda', async () => {
+    const supa = await setup((call) => {
+      if (call.table === 'agendamentos') {
+        return { data: { id: AG_ID, paciente_id: 'pac-1' }, error: null }
+      }
+      if (call.table === 'resultados') return { error: null }
+      return { data: null, error: null }
+    })
+    const raw = JSON.stringify({ ...validPayload(), exameFlowlabId: FLOWLAB_RES_ID })
+    const { status } = await postWebhook(app, raw)
+    expect(status).toBe(201)
+    const ins = supa.calls.find((c) => c.table === 'resultados' && c.op === 'insert')
+    expect((ins?.payload as { exame_flowlab_id?: string })?.exame_flowlab_id).toBe(FLOWLAB_RES_ID)
+  })
+
+  // O FlowLab no ar ainda não manda o campo. Se o schema o exigisse, todo
+  // resultado passaria a tomar 400 no instante do deploy desta versão.
+  it('aceita o payload sem exame_flowlab_id e grava null', async () => {
+    const supa = await setup((call) => {
+      if (call.table === 'agendamentos') {
+        return { data: { id: AG_ID, paciente_id: 'pac-1' }, error: null }
+      }
+      if (call.table === 'resultados') return { error: null }
+      return { data: null, error: null }
+    })
+    const { status } = await postWebhook(app, JSON.stringify(validPayload()))
+    expect(status).toBe(201)
+    const ins = supa.calls.find((c) => c.table === 'resultados' && c.op === 'insert')
+    expect((ins?.payload as { exame_flowlab_id?: string | null })?.exame_flowlab_id).toBeNull()
+  })
+
+  it('rejeita exame_flowlab_id que não é uuid com 400', async () => {
+    await setup((call) => {
+      if (call.table === 'agendamentos') {
+        return { data: { id: AG_ID, paciente_id: 'pac-1' }, error: null }
+      }
+      return { data: null, error: null }
+    })
+    const raw = JSON.stringify({ ...validPayload(), exameFlowlabId: 'nao-e-uuid' })
+    const { status } = await postWebhook(app, raw)
+    expect(status).toBe(400)
   })
 
   it('trata reentrega duplicada (23505) como idempotente: 200 sem erro', async () => {
