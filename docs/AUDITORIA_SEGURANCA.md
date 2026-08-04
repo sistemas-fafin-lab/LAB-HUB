@@ -546,6 +546,44 @@ O host da AOL responde normalmente **de fora** (DNS → `191.239.240.111`, `braz
 > primeiro dia: sem trilha, "não sabemos" não é uma resposta que se dá só à ANPD; é
 > o que se sabe sobre o próprio sistema.
 
+### 03/08/2026 — retenção da trilha definida em 6 meses (fecha a pendência do S-08)
+
+| | |
+|---|---|
+| **Migration** | `20260803160000_s08_retencao_auditoria.sql` — **aplicada em produção**, ledger 20 × 20 |
+| **Código** | `lib/expurgo.ts` (`expurgarTrilhaAuditoria`), `scripts/expurgo.ts` |
+| **Testes** | +5 em `expurgo.test.ts`. API de 313 → **318 testes**; type-check limpo |
+| **Cron** | nenhuma mudança no VPS: entra na rotina que o S-09 já agenda (`docker compose exec -T api node dist/scripts/expurgo.js`). **Precisa do deploy** para valer |
+
+A decisão que faltava era o prazo; o problema real era como apagar sem desfazer o
+que a tabela garante. Devolver `DELETE` ao `service_role` reabriria exatamente o
+buraco que o S-08 fechou, e um segundo papel com senha própria seria mais uma
+credencial para o cron do VPS carregar. A saída é uma função `security definer`
+com o corte **fixo no corpo** — o `service_role` não ganha "apagar da trilha",
+ganha "apagar o que já venceu". Se o corte fosse parâmetro, uma chave comprometida
+chamaria a função com `interval '0 seconds'` e teria o mesmo estrago do `DELETE`
+revogado, por outra porta.
+
+`auditoria_retencao` entra junto porque **um buraco precisa ser explicável**:
+retenção e adulteração deixam a mesma marca — linhas que não estão lá. O registro
+é gravado na mesma transação do delete, e é append-only pelo mesmo motivo que a
+trilha.
+
+| O quê | Como | Resultado |
+|---|---|---|
+| Privilégio da função | `pg_proc.proacl` | `postgres=X`, `service_role=X` — `anon`/`authenticated` **sem** EXECUTE (o `revoke ... from public` não é formalidade numa `security definer`) |
+| `search_path` fixo | `pg_proc.proconfig` | `public, pg_temp` — exigência do S-10 e, aqui, o que impede o caller de escolher por qual `auditoria_acesso` a função passa |
+| `DELETE` direto ainda proibido | bloco `do $$` com `set role service_role` | `bloqueado` — a função não abriu porta de trás |
+| O corte respeita os dois lados | linha de 7 meses e linha de 5 meses plantadas no mesmo bloco | `removidas=1`; a **vencida saiu**, a **de dentro do prazo ficou** |
+| A execução fica registrada | `auditoria_retencao` no mesmo bloco | linha presente, com o corte |
+| O registro do expurgo é imutável | `update` nele, como `service_role` | `bloqueado` |
+| Nada de teste ficou gravado | `count(*)` depois do bloco | trilha **intacta**, 10 linhas |
+| Caminho real ponta a ponta | `POST /rest/v1/rpc/expurgar_auditoria_acesso` com a chave de serviço | `200 {"removidas":0, "corte":"2026-02-03…"}` — nada tem 6 meses ainda, e é a resposta certa |
+
+A última linha é a que o bloco SQL não alcança: função nova não aparece no
+PostgREST até o `notify pgrst, 'reload schema'`, e a rotina chama por RPC. Sem
+esse teste, o primeiro sinal de falha seria um cron mudo daqui a seis meses.
+
 ---
 
 # PARTE 1 — SUPABASE
@@ -1206,15 +1244,25 @@ A tabela é `auditoria_acesso` e segue o desenho acima, com três diferenças qu
 
 O número de saltos é `1` e não `true` de propósito. Com `true` a API acreditaria na entrada mais à esquerda do `X-Forwarded-For`, que o cliente escreve; numa trilha de auditoria isso não seria um campo impreciso, seria um campo **plantado**. Com `1` vale a entrada que o túnel escreveu. A coluna é `inet` e a API valida o endereço antes de gravar (`ipDaRequisicao`), degradando para nulo em vez de derrubar a linha inteira quando o valor não é um IP.
 
-**Retenção: decisão em aberto, deliberadamente não automatizada.** O `ip` é dado pessoal, então guardar a trilha para sempre troca um problema de auditoria por um de minimização (art. 6º III). O expurgo automático não entrou junto por um motivo específico: o `DELETE` está revogado, e criar a exceção que permite apagar linha da trilha é exatamente o privilégio que a tabela existe para negar. Quando o prazo for definido — 6 meses cobre o ciclo típico de descoberta de incidente —, o caminho é uma rotina com papel próprio, **não** o `service_role` da API.
+**Retenção: ~~decisão em aberto~~ 6 meses, fechada em 03/08/2026.** O `ip` é dado pessoal, então guardar a trilha para sempre troca um problema de auditoria por um de minimização (art. 6º III). O prazo escolhido cobre o ciclo típico de descoberta de incidente — o intervalo entre o acesso indevido e alguém perceber —, que é a única finalidade desta tabela; passado ele, a linha não responde mais a pergunta nenhuma que já não tenha sido feita e vira um `inet` guardado sem propósito.
+
+O impasse era como apagar sem reabrir o buraco: o `DELETE` está revogado, e criar a exceção que permite apagar linha da trilha é o privilégio que a tabela existe para negar. A saída (migration `20260803160000`) **não** é devolver `DELETE` ao `service_role` nem criar um segundo papel com senha própria — que seria mais uma credencial para vazar, carregada pelo cron do VPS. É uma função `security definer` cujo corte está **fixo no corpo**:
+
+- **o corte não é parâmetro.** Se fosse, uma chave de serviço comprometida chamaria a função com `interval '0 seconds'` e a trilha inteira sumiria — o mesmo estrago do `DELETE` revogado, por outra porta;
+- mudar o prazo exige migration, que é o certo: 6 meses é decisão de conformidade documentada, não um botão de operação;
+- o que o `service_role` ganha não é *"apagar da trilha"*, é *"apagar o que já venceu"*. Quem entrar na API hoje continua sem conseguir remover a linha que registra que ele entrou, que é a propriedade toda.
+
+**`auditoria_retencao` existe porque um buraco precisa ser explicável.** Retenção e adulteração deixam a mesma marca: linhas que não estão lá. A tabela registra cada execução (corte, quantas saíram, os extremos do que saiu) e é gravada **na mesma transação** do delete — ou a trilha perde as linhas *e* fica dito por quê, ou não perde nada. Ela é append-only pelo mesmo motivo que a trilha: quem reescreve o registro do expurgo forja a explicação de um apagamento.
+
+A rotina roda no mesmo cron do S-09 (`scripts/expurgo.js`), depois dos documentos e sem poder derrubá-los — finalidades diferentes, e reter a trilha um dia a mais é o lado recuperável do erro.
 
 **Dívida conhecida:** a busca de pacientes registra `quantidade`, não *quem* apareceu. É um typeahead, dispara por tecla digitada, e gravar os até 8 ids por tecla afogaria as linhas que importam. Se a granularidade "exatamente quem apareceu" passar a ser necessária, o caminho é uma coluna `titulares uuid[]` nessa ação específica.
 
 | | |
 |---|---|
-| **Migration** | `20260803140000_s08_trilha_auditoria_acesso.sql` |
-| **Código** | `lib/auditoria.ts` (novo), `routes/laudos.ts`, `routes/resultados.ts`, `routes/documentos.ts`, `routes/integracao.ts`, `server.ts`, `.env.example` |
-| **Testes** | `auditoria.test.ts` (novo, 9) + 15 nas rotas; `test/helpers.ts` ganhou `ilike` no mock (a rota de busca não tinha teste nenhum por causa dessa lacuna). API de 298 → **313 testes** |
+| **Migrations** | `20260803140000_s08_trilha_auditoria_acesso.sql`<br>`20260803160000_s08_retencao_auditoria.sql` (retenção de 6 meses) |
+| **Código** | `lib/auditoria.ts` (novo), `routes/laudos.ts`, `routes/resultados.ts`, `routes/documentos.ts`, `routes/integracao.ts`, `server.ts`, `.env.example`, `lib/expurgo.ts` + `scripts/expurgo.ts` (retenção) |
+| **Testes** | `auditoria.test.ts` (novo, 9) + 15 nas rotas; `test/helpers.ts` ganhou `ilike` no mock (a rota de busca não tinha teste nenhum por causa dessa lacuna); +5 em `expurgo.test.ts` para a retenção. API de 298 → **318 testes** |
 | **Verificação** | suíte inteira verde; type-check limpo em `api`, `web` e `shared`; lint sem erro |
 | **Produção** | migration aplicada, **deploy feito** e trilha gravando nos **dois canais** — paciente (`resultados.listar`, `ator_id = titular_id`) e FlowLab, este último já com tráfego real não provocado. `ip` **público** em todas as linhas, provando o `trustProxy` ponta a ponta |
 

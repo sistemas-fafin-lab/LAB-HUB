@@ -15,6 +15,7 @@ vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 import {
   excluirContaPaciente,
   expurgarDocumentosVencidos,
+  expurgarTrilhaAuditoria,
   type Log,
 } from '../src/lib/expurgo.js'
 import { createSupabaseMock, type StorageHandler, type SupaHandler, type SupaResult } from './helpers.js'
@@ -219,5 +220,78 @@ describe('excluirContaPaciente', () => {
     expect(log.erros.some((e) => 'exclusaoId' in e)).toBe(true)
     // A trilha fica ABERTA (auth_removido_em null) — é o sinal de pendência.
     expect(mock.calls.some((c) => c.table === 'exclusoes_conta')).toBe(false)
+  })
+})
+
+describe('expurgarTrilhaAuditoria', () => {
+  function montar(rpc?: (c: { fn: string; args: Record<string, unknown> }) => SupaResult) {
+    const mock = createSupabaseMock({
+      handler: () => ({ data: [], error: null }),
+      rpc:
+        rpc ??
+        (() => ({
+          data: {
+            removidas: 3,
+            corte: '2026-02-03T00:00:00.000Z',
+            mais_antiga: '2026-01-02T10:00:00.000Z',
+            mais_recente: '2026-02-02T23:00:00.000Z',
+          },
+          error: null,
+        })),
+    })
+    h.setSb(mock.client)
+    return mock
+  }
+
+  // A asserção mais importante do arquivo: se um dia alguém transformar o corte
+  // em argumento "para facilitar o teste", este teste quebra — e deve quebrar.
+  // Corte parametrizável = este processo consegue zerar a trilha inteira, que é
+  // o estrago que o revoke do DELETE (migration 20260803140000) existe p/ negar.
+  it('chama a RPC SEM argumentos — o prazo mora no banco, não em quem chama', async () => {
+    const mock = montar()
+
+    await expurgarTrilhaAuditoria(criarLog())
+
+    expect(mock.rpcCalls).toHaveLength(1)
+    expect(mock.rpcCalls[0]?.fn).toBe('expurgar_auditoria_acesso')
+    expect(Object.keys(mock.rpcCalls[0]?.args ?? {})).toEqual([])
+  })
+
+  it('devolve o que saiu, para o cron ter o que registrar', async () => {
+    montar()
+
+    await expect(expurgarTrilhaAuditoria(criarLog())).resolves.toEqual({
+      removidas: 3,
+      corte: '2026-02-03T00:00:00.000Z',
+    })
+  })
+
+  it('execução que não acha nada é sucesso, não silêncio', async () => {
+    montar(() => ({
+      data: { removidas: 0, corte: '2026-02-03T00:00:00.000Z', mais_antiga: null, mais_recente: null },
+      error: null,
+    }))
+
+    const r = await expurgarTrilhaAuditoria(criarLog())
+    expect(r?.removidas).toBe(0)
+  })
+
+  // Falhar aqui não pode escalar: o script roda a retenção DEPOIS dos documentos
+  // e um throw faria o cron reportar falha de uma rotina que já concluiu a parte
+  // irreversível. Reter a trilha um dia a mais é o lado recuperável.
+  it('não lança quando a RPC falha — só registra', async () => {
+    montar(() => ({ data: null, error: { message: 'permission denied' } }))
+    const log = criarLog()
+
+    await expect(expurgarTrilhaAuditoria(log)).resolves.toBeNull()
+    expect(log.erros).toHaveLength(1)
+  })
+
+  it('trata resposta vazia sem erro como falha, e não como zero removidas', async () => {
+    montar(() => ({ data: null, error: null }))
+    const log = criarLog()
+
+    await expect(expurgarTrilhaAuditoria(log)).resolves.toBeNull()
+    expect(log.erros).toHaveLength(1)
   })
 })

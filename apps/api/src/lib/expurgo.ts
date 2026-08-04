@@ -185,6 +185,50 @@ export async function expurgarDocumentosVencidos(log: Log): Promise<ResultadoExp
   return { documentosRemovidos, pacientesAfetados: pacientes.size }
 }
 
+export interface ResultadoRetencaoAuditoria {
+  removidas: number
+  corte: string
+}
+
+/**
+ * Retenção da trilha de auditoria de acesso — 6 meses (S-08).
+ *
+ * Toda a decisão mora na migration 20260803160000: o prazo é fixo dentro da
+ * função `security definer` e não passa por aqui. É de propósito, e é o que
+ * separa esta chamada de um DELETE: se o corte fosse argumento, este processo —
+ * que roda com a chave de serviço, num container, a partir de um cron —
+ * conseguiria zerar a trilha inteira, que é exatamente o que o revoke da
+ * migration anterior existe para impedir.
+ *
+ * Falha aqui NÃO derruba o expurgo de documentos: são finalidades diferentes
+ * (art. 15/16 nos dois casos, mas dados e riscos distintos), e reter trilha um
+ * dia a mais é o lado recuperável do erro.
+ */
+export async function expurgarTrilhaAuditoria(log: Log): Promise<ResultadoRetencaoAuditoria | null> {
+  const { data, error } = await supabase.rpc('expurgar_auditoria_acesso').single()
+  if (error || !data) {
+    log.error({ err: error }, 'Retenção da trilha de auditoria falhou')
+    return null
+  }
+
+  const linha = data as {
+    removidas: number
+    corte: string
+    mais_antiga: string | null
+    mais_recente: string | null
+  }
+  log.info(
+    {
+      removidas: linha.removidas,
+      corte: linha.corte,
+      maisAntiga: linha.mais_antiga,
+      maisRecente: linha.mais_recente,
+    },
+    'Retenção da trilha de auditoria concluída',
+  )
+  return { removidas: linha.removidas, corte: linha.corte }
+}
+
 /**
  * Exclusão de conta a pedido do titular (LGPD art. 18, VI).
  *

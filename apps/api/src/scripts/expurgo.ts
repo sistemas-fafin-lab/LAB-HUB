@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import pino from 'pino'
 import { CAMPOS_REDIGIDOS, serializarErro } from '../lib/http.js'
-import { expurgarDocumentosVencidos } from '../lib/expurgo.js'
+import { expurgarDocumentosVencidos, expurgarTrilhaAuditoria } from '../lib/expurgo.js'
 
 // Rotina de retenção, para rodar por cron do sistema:
 //
@@ -26,7 +26,21 @@ const log = pino({
 async function main(): Promise<void> {
   const inicio = Date.now()
   const resultado = await expurgarDocumentosVencidos(log)
-  log.info({ ...resultado, duracaoMs: Date.now() - inicio }, 'Rotina de expurgo finalizada')
+
+  // Depois dos documentos, e sem poder derrubá-los: a trilha de auditoria tem
+  // prazo próprio (6 meses, S-08) e a única coisa que ela compartilha com o
+  // expurgo de documentos é o agendador. `expurgarTrilhaAuditoria` já loga a
+  // própria falha e devolve null em vez de lançar.
+  const auditoria = await expurgarTrilhaAuditoria(log)
+
+  log.info(
+    {
+      ...resultado,
+      auditoriaRemovidas: auditoria?.removidas ?? null,
+      duracaoMs: Date.now() - inicio,
+    },
+    'Rotina de expurgo finalizada',
+  )
 }
 
 main().catch((err: unknown) => {
