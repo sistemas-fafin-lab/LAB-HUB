@@ -53,6 +53,30 @@ function laudo(over: Record<string, unknown> = {}): Record<string, unknown> {
   }
 }
 
+/**
+ * Completa as linhas de `exam_results` dos cenários com `id` e `cpf`.
+ *
+ * Os testes daqui são sobre cache, fusão de fontes e corte de fonte, e por isso
+ * escrevem a linha com o mínimo que a asserção precisa. Só que uma linha real
+ * SEMPRE tem as duas colunas — `cpf` é a segunda chave que impede servir o laudo
+ * de outra pessoa —, e desde o corte do S-06 o repositório lança quando não acha
+ * o CPF em nenhuma das duas colunas, em vez de seguir com `undefined`. Preencher
+ * aqui mantém cada teste no seu assunto sem deixar a suíte exercitar uma linha
+ * que o banco não produz.
+ */
+function completarExamResults(res: SupaResult): SupaResult {
+  const completar = (linha: unknown, i: number): unknown =>
+    linha && typeof linha === 'object'
+      ? { id: `row-${i + 1}`, cpf: CPF, ...(linha as Record<string, unknown>) }
+      : linha
+
+  // O cenário é UM valor para todas as chamadas à tabela, mas o repositório usa
+  // tanto `select` de lista quanto `maybeSingle` — daí as duas formas.
+  if (Array.isArray(res.data)) return { ...res, data: res.data.map(completar) }
+  if (res.data && typeof res.data === 'object') return { ...res, data: completar(res.data, 0) }
+  return res
+}
+
 // Roteia as queries das rotas de laudo pelo cenário do teste.
 function supaHandler(
   scenario: { paciente?: SupaResult; examResults?: SupaResult } = {},
@@ -67,7 +91,7 @@ function supaHandler(
       )
     }
     if (call.table === 'exam_results') {
-      return scenario.examResults ?? { data: [], error: null }
+      return completarExamResults(scenario.examResults ?? { data: [], error: null })
     }
     return { data: null, error: null }
   }

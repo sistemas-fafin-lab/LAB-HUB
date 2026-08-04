@@ -21,6 +21,7 @@ vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 vi.mock('../src/lib/flowlab.js', () => ({ flowlab: h.flProxy }))
 
 import { documentosRoutes } from '../src/routes/documentos.js'
+import { aadDe, decifrar } from '../src/lib/crypto.js'
 import {
   buildApp,
   createSupabaseMock,
@@ -167,6 +168,39 @@ describe('POST /documentos', () => {
     expect(upload?.options).toMatchObject({ contentType: 'image/jpeg' })
     // Extensão vem do sniff, não do nome enviado.
     expect(upload?.paths[0]).toMatch(/\.jpg$/)
+  })
+
+  // O corte do S-06 só protege se NENHUM caminho de escrita continuar
+  // preenchendo a coluna em claro. Um que sobrasse manteria a base populada e a
+  // migration do drop perderia dado — é o furo que a fase 1 teve por três meses
+  // sem ninguém notar.
+  it('grava o nome do arquivo SÓ na coluna cifrada', async () => {
+    const mock = setup()
+    app = await buildApp(documentosRoutes)
+
+    const { payload, headers } = multipart({
+      buffer: JPEG,
+      filename: 'pedido_medico_hemograma.jpg',
+      contentType: 'image/jpeg',
+      tipo: 'pedido_medico',
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/documentos',
+      payload,
+      headers: { ...headers, ...AUTH },
+    })
+
+    expect(res.statusCode).toBe(201)
+    const gravado = mock.calls.find((c) => c.table === 'documentos' && c.op === 'insert')
+      ?.payload as Record<string, unknown>
+    expect(gravado).not.toHaveProperty('nome_arquivo')
+    expect(
+      decifrar(
+        gravado.nome_arquivo_enc as string,
+        aadDe('documentos', 'nome_arquivo', gravado.id as string),
+      ),
+    ).toBe('pedido_medico_hemograma.jpg')
   })
 
   it('deriva o path como {pacienteId}/{uuid}.{ext}', async () => {

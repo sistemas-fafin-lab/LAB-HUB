@@ -8,7 +8,7 @@ import { registrarAcesso } from '../lib/auditoria.js'
 import { detectarTipoArquivo } from '../lib/fileType.js'
 import { sanitizarNome } from '../lib/nomeArquivo.js'
 import { nomeArquivoDe, toDocumento, type DocumentoRow } from '../lib/mappers.js'
-import { aadDe, cifrarSeConfigurado } from '../lib/crypto.js'
+import { aadDe, cifrar } from '../lib/crypto.js'
 import {
   documentoIdParamSchema,
   listarDocumentosSchema,
@@ -125,10 +125,6 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
       // já existia antes do insert — é o mesmo que nomeia o objeto no Storage —,
       // então o AAD sai de graça.
       const nomeArquivo = sanitizarNome(parte.filename, formato.extensao)
-      const nomeArquivoEnc = cifrarSeConfigurado(
-        nomeArquivo,
-        aadDe('documentos', 'nome_arquivo', documentoId),
-      )
 
       const { data, error } = await supabase
         .from('documentos')
@@ -137,8 +133,9 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
           paciente_id: request.pacienteId,
           agendamento_id: agendamentoId ?? null,
           tipo,
-          nome_arquivo: nomeArquivo,
-          ...(nomeArquivoEnc ? { nome_arquivo_enc: nomeArquivoEnc } : {}),
+          // Só cifrado (S-06, o corte). Sem chave, `cifrar` lança em vez de
+          // gravar a linha sem nome nenhum.
+          nome_arquivo_enc: cifrar(nomeArquivo, aadDe('documentos', 'nome_arquivo', documentoId)),
           storage_path: storagePath,
           mime_type: formato.mimeType,
           tamanho_bytes: buffer.length,

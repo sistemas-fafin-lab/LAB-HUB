@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 import type { AgendamentoStatus } from '@lab-hub/shared'
-import { aadDe, cifrarJsonSeConfigurado, cifrarSeConfigurado } from '../lib/crypto.js'
+import { aadDe, cifrar, cifrarJson, cifrarSeConfigurado } from '../lib/crypto.js'
 import { verifyHmac } from '../lib/hmac.js'
 import { requireEnv } from '../lib/env.js'
 import { resultadoWebhookSchema } from '../schemas/resultado.js'
@@ -86,22 +86,17 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
     // que alguém com escrita no banco mova o resultado de um paciente para a
     // linha de outro sem que nada acuse.
     const id = randomUUID()
-    const paineisEnc = cifrarJsonSeConfigurado(
-      payload.paineis,
-      aadDe('resultados', 'paineis', id),
-    )
-    const resumoEnc = payload.resumo
-      ? cifrarSeConfigurado(payload.resumo, aadDe('resultados', 'resumo', id))
-      : null
     // Fase 2a: o rótulo vale tanto quanto o valor. "TESTE RÁPIDO COVID-19" ao
     // lado do nome do paciente já é a revelação, sem nenhum painel medido.
+    //
+    // `exame_nome` é a ÚNICA que ainda vai em claro junto da cifrada: ele
+    // participa de `uq_resultado_agendamento_exame`, e unicidade não existe
+    // sobre coluna cifrada com IV aleatório. Sai quando a migration
+    // 20260804140000 trocar a chave para o `exame_flowlab_id`.
     const exameNomeEnc = cifrarSeConfigurado(
       payload.exameNome,
       aadDe('resultados', 'exame_nome', id),
     )
-    const categoriaEnc = payload.categoria
-      ? cifrarSeConfigurado(payload.categoria, aadDe('resultados', 'categoria', id))
-      : null
 
     const { error } = await supabase.from('resultados').insert({
       id,
@@ -109,14 +104,19 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       agendamento_id: agendamento.id,
       exame_flowlab_id: payload.exameFlowlabId ?? null,
       exame_nome: payload.exameNome,
-      categoria: payload.categoria ?? null,
       status: 'ready',
-      resumo: payload.resumo ?? null,
-      paineis: payload.paineis,
-      ...(paineisEnc ? { paineis_enc: paineisEnc } : {}),
-      ...(resumoEnc ? { resumo_enc: resumoEnc } : {}),
+      // Só cifrado (S-06, o corte). `cifrar`/`cifrarJson` em vez das versões
+      // tolerantes: sem chave elas devolviam null, e agora isso significaria
+      // gravar o resultado sem painel e sem resumo em lugar nenhum. Em produção
+      // é inalcançável — `validarCriptografia()` derruba o boot sem a chave.
+      paineis_enc: cifrarJson(payload.paineis, aadDe('resultados', 'paineis', id)),
+      ...(payload.resumo
+        ? { resumo_enc: cifrar(payload.resumo, aadDe('resultados', 'resumo', id)) }
+        : {}),
+      ...(payload.categoria
+        ? { categoria_enc: cifrar(payload.categoria, aadDe('resultados', 'categoria', id)) }
+        : {}),
       ...(exameNomeEnc ? { exame_nome_enc: exameNomeEnc } : {}),
-      ...(categoriaEnc ? { categoria_enc: categoriaEnc } : {}),
       laudo_url: payload.laudoUrl ?? null,
       declaracao_url: payload.declaracaoUrl ?? null,
       liberado_em: payload.liberadoEm,
@@ -220,15 +220,10 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       // checar só a em claro faria esta reconciliação sobrescrever um snapshot
       // que já existe cifrado.
       if (temExames && agendamento.exames == null && agendamento.exames_enc == null) {
-        const examesEnc = cifrarJsonSeConfigurado(
-          exames,
-          aadDe('agendamentos', 'exames', agendamento.id as string),
-        )
         const { error } = await supabase
           .from('agendamentos')
           .update({
-            exames,
-            ...(examesEnc ? { exames_enc: examesEnc } : {}),
+            exames_enc: cifrarJson(exames, aadDe('agendamentos', 'exames', agendamento.id as string)),
             atualizado_em: new Date().toISOString(),
           })
           .eq('id', agendamento.id)
@@ -245,12 +240,7 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       atualizado_em: new Date().toISOString(),
     }
     if (temExames) {
-      patch.exames = exames
-      const examesEnc = cifrarJsonSeConfigurado(
-        exames,
-        aadDe('agendamentos', 'exames', agendamento.id as string),
-      )
-      if (examesEnc) patch.exames_enc = examesEnc
+      patch.exames_enc = cifrarJson(exames, aadDe('agendamentos', 'exames', agendamento.id as string))
     }
 
     const { error } = await supabase.from('agendamentos').update(patch).eq('id', agendamento.id)

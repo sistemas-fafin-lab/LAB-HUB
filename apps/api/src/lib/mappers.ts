@@ -24,6 +24,7 @@ interface AgendamentoRow {
   status: string
   flowlab_id: string | null
   criado_em: string
+  // Anulável desde o corte do S-06: linha nova só tem a cifrada.
   exames: ExameColeta[] | null
   // S-06 fase 2a: quais exames a pessoa vai fazer é a mesma revelação que o
   // resultado. Opcional porque nem todo select traz a coluna.
@@ -55,6 +56,7 @@ interface ResultadoRow {
   exame_nome: string
   categoria: string | null
   status: string
+  // Anuláveis desde o corte do S-06: linha nova só tem as cifradas.
   resumo: string | null
   paineis: PainelResultado[] | null
   // S-06: durante a migração o conteúdo clínico pode estar em qualquer uma das
@@ -110,7 +112,8 @@ export interface DocumentoRow {
   paciente_id: string
   agendamento_id: string | null
   tipo: string
-  nome_arquivo: string
+  // Anulável desde o corte do S-06: linha nova só tem `nome_arquivo_enc`.
+  nome_arquivo: string | null
   storage_path: string
   mime_type: string
   tamanho_bytes: number
@@ -122,9 +125,16 @@ export interface DocumentoRow {
 
 /** Nome do arquivo já decifrado (S-06). Usado também fora do `toDocumento`. */
 export function nomeArquivoDe(row: Pick<DocumentoRow, 'id' | 'nome_arquivo' | 'nome_arquivo_enc'>): string {
-  return row.nome_arquivo_enc
-    ? decifrar(row.nome_arquivo_enc, aadDe('documentos', 'nome_arquivo', row.id))
-    : row.nome_arquivo
+  if (row.nome_arquivo_enc) {
+    return decifrar(row.nome_arquivo_enc, aadDe('documentos', 'nome_arquivo', row.id))
+  }
+  // Linha anterior ao corte (S-06): só a coluna em claro existe. Depois que ela
+  // for dropada, este caminho some junto.
+  if (row.nome_arquivo != null) return row.nome_arquivo
+  // As duas vazias é linha corrompida, não linha antiga. Lançar em vez de
+  // devolver string vazia: um `Content-Disposition` com nome vazio seria um
+  // download quebrado que ninguém liga ao banco.
+  throw new Error(`Documento ${row.id} não tem nome de arquivo em nenhuma das duas colunas`)
 }
 
 // storage_path fica DE FORA de propósito: é detalhe interno e o cliente lê o

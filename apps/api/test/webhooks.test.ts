@@ -14,6 +14,7 @@ const h = vi.hoisted(() => {
 vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 
 import { webhooksRoutes } from '../src/routes/webhooks.js'
+import { aadDe, decifrarJson } from '../src/lib/crypto.js'
 import { buildApp, createSupabaseMock, signHmac, type SupaHandler } from './helpers.js'
 
 const AG_ID = '11111111-1111-1111-1111-111111111111'
@@ -310,9 +311,12 @@ describe('POST /webhooks/coletas', () => {
     expect(status).toBe(200)
     expect(body.status).toBe('realizado')
     const upd = supa.calls.find((c) => c.table === 'agendamentos' && c.op === 'update')
-    const payload = upd?.payload as { status?: string; exames?: unknown[] }
+    const payload = upd?.payload as { status?: string; exames?: unknown; exames_enc?: string }
     expect(payload?.status).toBe('realizado')
-    expect(payload?.exames).toEqual(EXAMES)
+    // Corte do S-06: o snapshot vai SÓ cifrado. Conferir que a coluna em claro
+    // não aparece no payload é o ponto — é o que a migration do drop assume.
+    expect(payload).not.toHaveProperty('exames')
+    expect(decifrarJson(payload!.exames_enc!, aadDe('agendamentos', 'exames', AG_ID))).toEqual(EXAMES)
   })
 
   it("não grava exames quando o 'coletado' vem sem a lista", async () => {
@@ -330,8 +334,9 @@ describe('POST /webhooks/coletas', () => {
     expect(status).toBe(200)
     expect(body.exames).toBe(EXAMES.length)
     const upd = supa.calls.find((c) => c.table === 'agendamentos' && c.op === 'update')
-    const payload = upd?.payload as { status?: string; exames?: unknown[] }
-    expect(payload?.exames).toEqual(EXAMES)
+    const payload = upd?.payload as { status?: string; exames?: unknown; exames_enc?: string }
+    expect(payload).not.toHaveProperty('exames')
+    expect(decifrarJson(payload!.exames_enc!, aadDe('agendamentos', 'exames', AG_ID))).toEqual(EXAMES)
     // Update só de exames — não mexe no status.
     expect(payload?.status).toBeUndefined()
   })

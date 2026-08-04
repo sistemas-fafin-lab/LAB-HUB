@@ -100,6 +100,10 @@ async function backfillResultados(log: Logger): Promise<number> {
       .from('resultados')
       .select('id, paineis, resumo')
       .is('paineis_enc', null)
+      // Depois do corte (S-06) linha nova nasce só cifrada, então "sem `_enc`"
+      // deixou de significar "falta cifrar" — sem este guarda, uma linha com as
+      // duas colunas vazias seria lida para sempre e o laço nunca esvaziaria.
+      .not('paineis', 'is', null)
       .limit(LOTE)
 
     if (error) throw new Error(`Falha ao ler resultados: ${error.message}`)
@@ -138,6 +142,7 @@ async function backfillRotulos(log: Logger): Promise<number> {
       .from('resultados')
       .select('id, exame_nome, categoria')
       .is('exame_nome_enc', null)
+      .not('exame_nome', 'is', null)
       .limit(LOTE)
 
     if (error) throw new Error(`Falha ao ler rótulos de resultados: ${error.message}`)
@@ -214,6 +219,7 @@ async function backfillDocumentos(log: Logger): Promise<number> {
       .from('documentos')
       .select('id, nome_arquivo')
       .is('nome_arquivo_enc', null)
+      .not('nome_arquivo', 'is', null)
       .limit(LOTE)
 
     if (error) throw new Error(`Falha ao ler documentos: ${error.message}`)
@@ -252,6 +258,7 @@ async function backfillExamResultsCpf(log: Logger): Promise<number> {
       .from('exam_results')
       .select('id, cpf')
       .is('cpf_enc', null)
+      .not('cpf', 'is', null)
       .limit(LOTE)
 
     if (error) throw new Error(`Falha ao ler cpf de exam_results: ${error.message}`)
@@ -299,6 +306,7 @@ export async function verificarBackfill(): Promise<{
     .from('resultados')
     .select('id', { count: 'exact', head: true })
     .is('paineis_enc', null)
+    .not('paineis', 'is', null)
   if (e2) throw new Error(`Falha ao verificar resultados: ${e2.message}`)
 
   const pendentes = async (
@@ -316,9 +324,9 @@ export async function verificarBackfill(): Promise<{
   return {
     examResults: examResults ?? 0,
     resultados: resultados ?? 0,
-    rotulos: await pendentes('resultados', 'exame_nome_enc'),
+    rotulos: await pendentes('resultados', 'exame_nome_enc', 'exame_nome'),
     agendamentos: await pendentes('agendamentos', 'exames_enc', 'exames'),
-    documentos: await pendentes('documentos', 'nome_arquivo_enc'),
-    examResultsCpf: await pendentes('exam_results', 'cpf_enc'),
+    documentos: await pendentes('documentos', 'nome_arquivo_enc', 'nome_arquivo'),
+    examResultsCpf: await pendentes('exam_results', 'cpf_enc', 'cpf'),
   }
 }

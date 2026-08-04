@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { aadDe, cifrarJsonSeConfigurado, cifrarSeConfigurado, decifrar, decifrarJson } from '../lib/crypto.js'
+import { aadDe, cifrar, cifrarJson, decifrar, decifrarJson } from '../lib/crypto.js'
 import { supabase } from '../lib/supabase.js'
 import { DatabaseError } from './errors.js'
 import { conferirCpf, deveBloquear } from './identidade.js'
@@ -23,9 +23,15 @@ const COLUNAS =
  * `.eq` no SQL — ver a nota de segunda chave em `findByPaciente`.
  */
 function cpfDaLinha(linha: { id: string; cpf?: unknown; cpf_enc?: unknown }): string {
-  return linha.cpf_enc
-    ? decifrar(linha.cpf_enc as string, aadDe(TABELA, 'cpf', linha.id))
-    : (linha.cpf as string)
+  if (linha.cpf_enc) return decifrar(linha.cpf_enc as string, aadDe(TABELA, 'cpf', linha.id))
+  // Linha anterior ao corte do S-06: só a coluna em claro existe.
+  if (typeof linha.cpf === 'string') return linha.cpf
+  // As duas vazias é linha corrompida. Lançar, e não devolver vazio: este CPF é
+  // a SEGUNDA CHAVE que impede servir o laudo de outra pessoa (`conferirCpf` em
+  // findByPaciente). Uma string vazia aqui não abriria a porta — a comparação
+  // falha e bloqueia —, mas apareceria como "paciente sem laudo nenhum", que é
+  // o sintoma mais caro de investigar que este código sabe produzir.
+  throw new Error(`exam_results ${linha.id} não tem CPF em nenhuma das duas colunas`)
 }
 
 // `result` no banco é a lista de laudos da linha (hoje um elemento: o pedido
@@ -216,16 +222,16 @@ export class ExamResultRepository implements IExamResultRepository {
     // `tabela:coluna:id` e precisa existir ANTES de cifrar — mesmo motivo do
     // POST /webhooks/resultados.
     const id = randomUUID()
-    const cpfEnc = cifrarSeConfigurado(cpf, aadDe(TABELA, 'cpf', id))
 
     const { error } = await supabase.from(TABELA).insert({
       id,
-      paciente_id: pacienteId,
-      cpf,
-      ...(cpfEnc ? { cpf_enc: cpfEnc } : {}),
+      // Só cifrado (S-06, o corte). `cifrar` em vez de `cifrarSeConfigurado`: a
+      // versão tolerante devolvia null sem chave, o que agora significaria
+      // gravar a linha SEM o CPF em lugar nenhum. Falhar é o certo — e em
+      // produção é inalcançável, `validarCriptografia()` derruba o boot antes.
+      cpf_enc: cifrar(cpf, aadDe(TABELA, 'cpf', id)),
       codigo_lis: codigoLis,
       codigo_os: codigoOs,
-      result: null,
       cached_at: null,
     })
 
@@ -259,17 +265,14 @@ export class ExamResultRepository implements IExamResultRepository {
   // inseria uma linha nova a cada revalidação. Nesta altura do fluxo a linha
   // sempre existe (foi criada por insertAwaiting ou já veio do banco).
   async saveResult(id: string, result: Laudo[]): Promise<void> {
-    // Escrita dupla (S-06, fase 1): claro + cifrado. Enquanto as duas colunas
-    // convivem, reverter o deploy não perde nada — é o que torna a migração
-    // segura sem janela de indisponibilidade. Na fase 2 sai o `result` daqui e
-    // a coluna em claro é dropada.
-    const enc = cifrarJsonSeConfigurado(result, aadDe(TABELA, 'result', id))
-
+    // Só cifrado (S-06, o corte). A escrita dupla da fase 1 existia para o
+    // deploy ser reversível; enquanto durou, `result` em claro anulava a
+    // proteção que a coluna cifrada prometia — esta é a coluna de maior valor
+    // do S-06, o laudo inteiro.
     const { error } = await supabase
       .from(TABELA)
       .update({
-        result,
-        ...(enc ? { result_enc: enc } : {}),
+        result_enc: cifrarJson(result, aadDe(TABELA, 'result', id)),
         cached_at: new Date().toISOString(),
       })
       .eq('id', id)

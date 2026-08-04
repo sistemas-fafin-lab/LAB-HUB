@@ -211,11 +211,12 @@ describe('escrita — o que sai em direção ao banco vai cifrado', () => {
     )
   })
 
-  it('saveResult escreve nas DUAS colunas, e a cifrada decifra de volta', async () => {
-    // Escrita dupla é o que torna a fase 1 reversível: enquanto a coluna em
-    // claro continuar sendo preenchida, voltar o deploy não perde laudo nenhum.
-    // Se um dia alguém "limpar" o `result` daqui achando que é resíduo, este
-    // teste cai — e é para cair.
+  it('saveResult escreve SÓ a coluna cifrada, e ela decifra de volta', async () => {
+    // O corte do S-06. A escrita dupla existia para a fase 1 ser reversível, e
+    // enquanto durou o `result` em claro anulava a proteção que a coluna cifrada
+    // prometia — esta é a coluna de maior valor de todo o S-06, o laudo inteiro.
+    // Se um dia alguém devolver o `result` aqui "para garantir", este teste cai
+    // — e é para cair.
     const calls: SupaCall[] = []
     const handler: SupaHandler = (call) => {
       calls.push(call)
@@ -229,7 +230,7 @@ describe('escrita — o que sai em direção ao banco vai cifrado', () => {
     const update = calls.find((c) => c.table === 'exam_results' && c.op === 'update')
     const gravado = update?.payload as Record<string, unknown>
 
-    expect(gravado.result).toEqual(laudos)
+    expect(gravado).not.toHaveProperty('result')
     expect(
       decifrarJson(gravado.result_enc as string, aadDe('exam_results', 'result', LAUDO_ID)),
     ).toEqual(laudos)
@@ -438,9 +439,15 @@ describe('fase 2a — rótulos e identificadores', () => {
     expect(decifrar(gravado.categoria_enc as string, aadDe('resultados', 'categoria', id))).toBe(
       'Imunologia',
     )
-    // Escrita dupla: é o que mantém o deploy reversível enquanto as duas colunas
-    // convivem. Derrubar a coluna em claro é migration própria.
+    // `exame_nome` é a ÚNICA que segue em claro depois do corte, e por um motivo
+    // específico: participa de `uq_resultado_agendamento_exame`, e unicidade não
+    // existe sobre coluna cifrada com IV aleatório. Sai quando a migration
+    // 20260804140000 trocar a chave para o `exame_flowlab_id`.
     expect(gravado.exame_nome).toBe(payload.exameNome)
+    // As outras três já não vão mais em claro.
+    expect(gravado).not.toHaveProperty('categoria')
+    expect(gravado).not.toHaveProperty('resumo')
+    expect(gravado).not.toHaveProperty('paineis')
   })
 
   it('insertAwaiting grava o CPF cifrado — a segunda cópia fora de `pacientes`', async () => {
@@ -462,7 +469,12 @@ describe('fase 2a — rótulos e identificadores', () => {
 
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
     expect(decifrar(gravado.cpf_enc as string, aadDe('exam_results', 'cpf', id))).toBe('52998224725')
+    // Corte do S-06: esta é a segunda cópia do CPF fora de `pacientes`. Deixá-la
+    // em claro anularia cifrar `pacientes.cpf` na fase 2b, porque o dump ainda
+    // traria o documento ligado ao mesmo `paciente_id`.
+    expect(gravado).not.toHaveProperty('cpf')
   })
+
 
   // A checagem de segunda chave (linha cujo CPF diverge do paciente do token não
   // é servida) precisa continuar valendo com a coluna cifrada — senão cifrar

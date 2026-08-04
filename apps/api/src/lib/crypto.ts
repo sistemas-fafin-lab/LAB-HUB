@@ -110,9 +110,14 @@ export function validarCriptografia(): void {
         'do banco e defina no .env antes de subir o container.',
     )
   }
+  // Depois do corte do S-06 a coluna em claro não é mais escrita: sem chave o
+  // dado não vai para lugar nenhum, então a escrita FALHA em vez de degradar
+  // para texto puro. O aviso mudou junto — dizer "será gravado em texto puro"
+  // agora seria mentira, e mentira em aviso de segurança é pior que silêncio.
   console.warn(
-    '[cripto] PII_KEY_K1 ausente: o dado clínico será gravado em TEXTO PURO. ' +
-      'Aceitável em desenvolvimento; em produção o boot falharia aqui.',
+    '[cripto] PII_KEY_K1 ausente: gravar dado clínico vai FALHAR (a coluna em ' +
+      'claro deixou de ser escrita — auditoria § S-06). Leitura de linha antiga ' +
+      'continua funcionando. Em produção o boot falharia aqui.',
   )
 }
 

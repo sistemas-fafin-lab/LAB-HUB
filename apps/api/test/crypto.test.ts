@@ -150,7 +150,11 @@ describe('boot', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 
     expect(() => validarCriptografia()).not.toThrow()
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('TEXTO PURO'))
+    // O aviso mudou com o corte do S-06: a coluna em claro não é mais escrita,
+    // então sem chave a gravação FALHA em vez de degradar para texto puro.
+    // Prometer texto puro aqui seria mentir num aviso de segurança.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('FALHAR'))
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('gravado em TEXTO PURO'))
     warn.mockRestore()
   })
 

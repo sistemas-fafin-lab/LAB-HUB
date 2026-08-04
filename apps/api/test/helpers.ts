@@ -135,6 +135,9 @@ export function createSupabaseMock(opts: {
       calls.push({ ...state, filters: { ...state.filters } })
       return Promise.resolve(opts.handler(state))
     }
+    const desembrulhar = (r: SupaResult): SupaResult =>
+      Array.isArray(r.data) ? { ...r, data: r.data[0] ?? null } : r
+
     const builder: Record<string, unknown> = {
       select: () => builder,
       insert: (p: unknown) => ((state.op = 'insert'), (state.payload = p), builder),
@@ -153,8 +156,14 @@ export function createSupabaseMock(opts: {
       or: (f: string) => ((state.filters.__or = f), builder),
       order: () => builder,
       limit: () => builder,
-      single: () => run(),
-      maybeSingle: () => run(),
+      // `single`/`maybeSingle` DESEMBRULHAM a lista, como o PostgREST de
+      // verdade: o cenário do teste é um valor só para todas as chamadas da
+      // tabela, e sem isto uma rota que faz `.maybeSingle()` recebia o array
+      // inteiro como se fosse a linha. Passava despercebido enquanto os
+      // acessores devolviam `undefined` em silêncio; desde o corte do S-06 eles
+      // lançam, e o sintoma virava um 500 sem relação com o que o teste mede.
+      single: () => run().then(desembrulhar),
+      maybeSingle: () => run().then(desembrulhar),
       then: (resolve: (r: SupaResult) => unknown, reject?: (e: unknown) => unknown) =>
         run().then(resolve, reject),
     }

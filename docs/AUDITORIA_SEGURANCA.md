@@ -680,6 +680,71 @@ em `uq_resultado_flowlab` é reentrega de verdade; colisão em
 `uq_resultado_agendamento_exame` pode ser o descarte silencioso descrito acima.
 Até o passo 4, essa linha de log é o único rastro que existe da diferença.
 
+### 04/08/2026 — o corte: sete das oito colunas em claro pararam de ser escritas
+
+| | |
+|---|---|
+| **Migration** | `20260804130000_s06_corte_colunas_em_claro.sql` — **aplicada**, ledger 23 × 24 (a 24ª é a `140000`, retida de propósito) |
+| **Código** | `webhooks.ts`, `documentos.ts`, `integracao.ts`, `laudos/repository.ts`, `lib/crypto.ts`, `lib/mappers.ts`, `lib/backfillCripto.ts` |
+| **Testes** | API 340 → **341**; type-check limpo |
+| **Falta** | deploy no VPS, observar, e a migration do `drop column` |
+
+Ao conferir a nullability das colunas para escrever isto, apareceu que a premissa
+anterior estava errada. Eu vinha tratando "derrubar o texto puro" como um bloco
+único, esperando a troca da constraint. **Só uma das oito colunas depende dela.**
+
+| Coluna | Era `NOT NULL`? | Dependia do FlowLab |
+|---|---|---|
+| `resultados.exame_nome` | sim | **sim** — é a da `uq_resultado_agendamento_exame` |
+| `resultados.paineis` | sim | não |
+| `resultados.resumo` | não | não |
+| `resultados.categoria` | não | não |
+| `agendamentos.exames` | não | não |
+| `documentos.nome_arquivo` | sim | não |
+| `exam_results.result` | não | não |
+| `exam_results.cpf` | sim | não |
+
+Isso inverteu a prioridade. `exame_nome` é um rótulo; o que estava esperando de
+graça era **`exam_results.result` — o laudo completo**, a coluna de maior valor
+de todo o S-06, em texto puro ao lado da versão cifrada desde 03/08.
+
+**Por que anular é passo separado do drop.** Quatro eram `NOT NULL`. Se o código
+parasse de escrevê-las antes da migration, toda inserção falharia de uma vez —
+laudo do LIS, resultado do FlowLab e upload de documento. Anular primeiro faz do
+passo seguinte um deploy comum em vez de uma janela de manutenção. E a migration
+sozinha não muda comportamento nenhum: pode conviver com o build atual.
+
+**`cifrarSeConfigurado` saiu do caminho destas colunas.** A versão tolerante
+devolvia `null` sem chave — o que antes significava "grava só em claro" e agora
+significaria **gravar em lugar nenhum**. As escritas passaram a usar
+`cifrar`/`cifrarJson`, que lançam. Em produção é inalcançável
+(`validarCriptografia()` derruba o boot sem chave), e o aviso de dev foi
+reescrito: prometer "será gravado em TEXTO PURO" virou mentira, e mentira em
+aviso de segurança é pior que silêncio.
+
+**Os acessores de leitura passaram a lançar quando as duas colunas estão
+vazias**, em vez de seguir com `undefined`. Vale principalmente para
+`exam_results.cpf`, que é a **segunda chave** contra servir laudo de outra
+pessoa: `undefined` ali não abriria a porta (a comparação falha e bloqueia), mas
+apareceria como "paciente sem laudo nenhum" — o sintoma mais caro de investigar
+que este código sabe produzir.
+
+**Dois defeitos de teste que só apareceram agora.** O mock do Supabase fazia
+`single()`/`maybeSingle()` devolverem a **lista inteira** como se fosse a linha —
+o PostgREST desembrulha. Passava despercebido enquanto os acessores devolviam
+`undefined` em silêncio. E as fixtures de `laudos.test.ts` escreviam linhas de
+`exam_results` sem `id` nem `cpf`, que o banco nunca produz. Os dois foram
+corrigidos; o segundo com um completador no handler, para cada teste seguir
+tratando do seu assunto.
+
+**O que muda quando o `drop column` acontecer (ainda não):** a chave passa a ser
+o dado. Perder `PII_KEY_K1` deixa de ser incidente e vira perda irreversível de
+resultado clínico. Cópia em cofre separado de onde o banco vive — custódia de
+chave, assunto diferente do backup do banco.
+
+Entre este deploy e o drop, as linhas **antigas** continuam em claro; só as novas
+nascem limpas. A proteção contra dump existe de fato na migration do drop.
+
 ### 03/08/2026 — retenção da trilha definida em 6 meses (fecha a pendência do S-08)
 
 | | |

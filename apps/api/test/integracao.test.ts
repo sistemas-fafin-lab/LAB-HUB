@@ -325,7 +325,11 @@ function uploadSupaHandler(
           ...docRow(p.id as string),
           agendamento_id: p.agendamento_id,
           tipo: p.tipo,
-          nome_arquivo: p.nome_arquivo,
+          // Devolve o que o insert de fato gravou. Desde o corte do S-06 o nome
+          // vai SÓ cifrado, e ecoar a coluna em claro (agora ausente) fazia o
+          // mapeamento cair — o `.select()` do PostgREST devolve a linha real.
+          nome_arquivo: p.nome_arquivo ?? null,
+          nome_arquivo_enc: p.nome_arquivo_enc,
           storage_path: p.storage_path,
           mime_type: p.mime_type,
           tamanho_bytes: p.tamanho_bytes,

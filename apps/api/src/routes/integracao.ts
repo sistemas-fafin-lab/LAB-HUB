@@ -27,7 +27,7 @@ import {
   criarAgendamentoRecepcaoSchema,
 } from '../schemas/recepcao.js'
 import { nomeArquivoDe, type DocumentoRow } from '../lib/mappers.js'
-import { aadDe, cifrarSeConfigurado } from '../lib/crypto.js'
+import { aadDe, cifrar } from '../lib/crypto.js'
 
 // Rotas consumidas PELO FlowLab (server-to-server, autenticadas por API key).
 // Ficam num arquivo separado de propósito: este módulo não importa `authenticate`,
@@ -589,10 +589,6 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       // Mesmo tratamento do upload do paciente (S-06 fase 2a): o nome descreve o
       // documento, então entra cifrado junto.
       const nomeArquivo = sanitizarNome(nomeOriginal, formato.extensao)
-      const nomeArquivoEnc = cifrarSeConfigurado(
-        nomeArquivo,
-        aadDe('documentos', 'nome_arquivo', documentoId),
-      )
 
       const { data, error } = await supabase
         .from('documentos')
@@ -601,8 +597,8 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
           paciente_id: ag.paciente_id,
           agendamento_id: ag.id, // anexa À COLETA (aparece no check-in deste agendamento)
           tipo,
-          nome_arquivo: nomeArquivo,
-          ...(nomeArquivoEnc ? { nome_arquivo_enc: nomeArquivoEnc } : {}),
+          // Só cifrado (S-06, o corte) — mesmo tratamento do upload do paciente.
+          nome_arquivo_enc: cifrar(nomeArquivo, aadDe('documentos', 'nome_arquivo', documentoId)),
           storage_path: storagePath,
           mime_type: formato.mimeType,
           tamanho_bytes: buffer.length,
