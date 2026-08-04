@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js'
 import { authenticate } from '../middlewares/auth.js'
 import { registrarAcesso } from '../lib/auditoria.js'
 import { toResultado } from '../lib/mappers.js'
+import { marcarRetificados } from '../lib/retificacao.js'
 
 // Mesmo TTL de documentos.ts, e pela mesma razão: signed URL é capability ao
 // portador sobre dado de saúde — vaza por histórico do browser, Referer, log de
@@ -19,10 +20,18 @@ export async function resultadosRoutes(app: FastifyInstance): Promise<void> {
       .select('*')
       .eq('paciente_id', request.pacienteId)
       .order('liberado_em', { ascending: false, nullsFirst: false })
+      // Desempate por ordem de chegada. Duas versões do mesmo exame podem sair
+      // com o MESMO `liberado_em` (correção reliberada no mesmo minuto, ou o
+      // FlowLab repetindo o carimbo da liberação original); sem este critério a
+      // ordem entre elas seria a que o Postgres devolvesse, e a marcação de
+      // "versão anterior" cairia numa linha ou noutra a cada requisição.
+      .order('criado_em', { ascending: false })
     if (error) {
       throw app.httpErrors.internalServerError('Falha ao listar resultados')
     }
-    const resultados = (data ?? []).map(toResultado)
+    // A ordem acima é o que define quem é a versão vigente de cada exame — ver
+    // lib/retificacao.ts.
+    const resultados = marcarRetificados((data ?? []).map(toResultado))
 
     // Fora da lista mínima do § S-08, e entra pelo mesmo critério dos que estão
     // nela: `resultados` é a fonte alimentada pelo webhook do FlowLab e carrega

@@ -167,6 +167,38 @@ describe('GET /resultados', () => {
     })
   })
 
+  // A ordem que o banco devolve é o que decide qual versão é a vigente; a
+  // marcação em si é testada em retificacao.test.ts. Aqui só se confere que a
+  // rota realmente aplica a marcação (já houve versão em que ela existia como
+  // função e ninguém a chamava).
+  it('marca a versão anterior quando o mesmo exame vem duas vezes no agendamento', async () => {
+    setup({
+      resultados: {
+        data: [
+          resultadoRow({
+            id: RES_ID,
+            agendamento_id: 'ag-1',
+            liberado_em: '2026-08-04T12:00:00.000Z',
+          }),
+          resultadoRow({
+            id: '55555555-5555-5555-5555-555555555555',
+            agendamento_id: 'ag-1',
+            liberado_em: '2026-08-01T12:00:00.000Z',
+          }),
+        ],
+        error: null,
+      },
+    })
+    app = await buildApp(resultadosRoutes)
+
+    const res = await app.inject({ method: 'GET', url: '/resultados', headers: AUTH })
+
+    expect(res.statusCode).toBe(200)
+    const [novo, velho] = res.json()
+    expect(novo.retificadoPor).toBeUndefined()
+    expect(velho.retificadoPor).toBe(RES_ID)
+  })
+
   it('falha do banco devolve 500', async () => {
     setup({ resultados: { data: null, error: { message: 'timeout' } } })
     app = await buildApp(resultadosRoutes)

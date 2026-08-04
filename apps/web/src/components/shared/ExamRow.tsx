@@ -53,7 +53,23 @@ export function ExamRow({ exam, onClick, dark }: ExamRowProps) {
       </div>
 
       <div className="min-w-0">
-        <div className={`text-sm font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>{exam.name}</div>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={`text-sm font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>{exam.name}</div>
+          {/* Fica ao lado do NOME, não na coluna de status: o paciente tem duas
+              linhas com o mesmo nome de exame, e é aí que ele precisa da
+              distinção — não depois de percorrer a linha até a direita. A
+              coluna de status continua dizendo "Liberado", porque este laudo
+              foi liberado de verdade; ele só não é mais o vigente. */}
+          {exam.retificado && (
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${
+                dark ? 'bg-gray-700 text-gray-300' : 'bg-slate-200 text-slate-600'
+              }`}
+            >
+              Versão anterior
+            </span>
+          )}
+        </div>
         <div className={`text-[11px] truncate ${dark ? 'text-gray-400' : 'text-gray-500'}`}>{exam.category}</div>
         {/* Abaixo de md as colunas de responsável e contexto não cabem; descem
             para dentro desta célula em vez de sumirem. */}

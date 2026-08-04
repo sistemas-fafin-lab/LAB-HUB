@@ -16,7 +16,7 @@ const painel = (over: Partial<ExamPanel> = {}): ExamPanel => ({
   ...over,
 })
 
-function exame(panels: ExamPanel[]): Exam {
+function exame(panels: ExamPanel[], over: Partial<Exam> = {}): Exam {
   return {
     id: 'e-1',
     name: 'Glicemia',
@@ -29,11 +29,31 @@ function exame(panels: ExamPanel[]): Exam {
     status: 'ready',
     summary: '',
     panels,
+    ...over,
   } as Exam
 }
 
-const monta = (panels: ExamPanel[]) =>
-  render(<ExamDetailPage exam={exame(panels)} onBack={() => {}} dark={false} onViewLaudo={() => {}} />)
+const monta = (panels: ExamPanel[], over: Partial<Exam> = {}) =>
+  render(
+    <ExamDetailPage exam={exame(panels, over)} onBack={() => {}} dark={false} onViewLaudo={() => {}} />,
+  )
+
+// Ler valor superado como se fosse o atual é o dano que a marcação evita. Na
+// lista um selo basta (o paciente está escolhendo); aqui ele está lendo, então
+// o aviso precisa vir antes dos valores.
+describe('laudo substituído', () => {
+  it('avisa que existe versão mais recente', () => {
+    monta([painel()], { retificado: true })
+
+    expect(screen.getByText(/Este laudo foi substituído/)).toBeTruthy()
+  })
+
+  it('não avisa nada no laudo vigente', () => {
+    monta([painel()])
+
+    expect(screen.queryByText(/substituíd/)).toBeNull()
+  })
+})
 
 describe('coluna Tendência', () => {
   it('não aparece quando nenhum marcador tem série histórica', () => {

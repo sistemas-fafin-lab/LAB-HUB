@@ -113,6 +113,27 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
         <WIcon name="arrow-left" className="w-4 h-4" strokeWidth={2.2} />Voltar para resultados
       </button>
 
+      {/* Na lista, "Versão anterior" é um selo discreto — lá o paciente está
+          escolhendo. Aqui ele está LENDO valores, e ler um valor superado como
+          se fosse o atual é o dano concreto que essa marcação existe para
+          evitar. Por isso o aviso vem antes do laudo, não dentro dele. */}
+      {exam.retificado && (
+        <div
+          className={`rounded-xl border px-4 py-3 mb-4 flex items-start gap-2.5 ${
+            dark
+              ? 'bg-amber-950/40 border-amber-900 text-amber-200'
+              : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}
+        >
+          <WIcon name="alert-triangle" className="w-4 h-4 mt-0.5 shrink-0" strokeWidth={2.2} />
+          <p className="text-sm leading-snug">
+            <span className="font-semibold">Este laudo foi substituído.</span> O laboratório
+            liberou uma versão mais recente deste exame — ela está no topo da sua lista de
+            resultados. Esta página mostra a versão anterior.
+          </p>
+        </div>
+      )}
+
       {/* Header card */}
       <div
         className={`rounded-2xl border ${

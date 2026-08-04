@@ -203,4 +203,32 @@ describe('união das duas fontes', () => {
 
     expect(ler().exams.map((e) => e.name)).toEqual(['Recente', 'Colesterol', 'Antigo'])
   })
+
+  // Duas versões do mesmo exame podem sair com o MESMO `liberadoEm` (uma
+  // correção reliberada no mesmo minuto, ou o FlowLab repetindo o carimbo da
+  // liberação original). Aí as duas chaves de ordenação empatam e quem decide é
+  // a ordem que a API mandou — ela já vem com a vigente primeiro. Se esta
+  // ordenação deixasse de ser estável, o paciente veria "Versão anterior" acima
+  // do laudo que vale.
+  it('mantém a versão vigente acima da anterior quando a liberação empata', async () => {
+    const mesmoInstante = '2026-08-04T12:00:00.000Z'
+    respondeCom({
+      resultados: [
+        resultado({ id: 'vigente', exameNome: 'Hemograma', liberadoEm: mesmoInstante }),
+        resultado({
+          id: 'anterior',
+          exameNome: 'Hemograma',
+          liberadoEm: mesmoInstante,
+          retificadoPor: 'vigente',
+        }),
+      ],
+      laudos: [],
+    })
+    const { mod, ler } = await montaHook()
+
+    await act(() => mod.atualizaResultados())
+
+    expect(ler().exams.map((e) => e.id)).toEqual(['vigente', 'anterior'])
+    expect(ler().exams.map((e) => e.retificado)).toEqual([undefined, true])
+  })
 })

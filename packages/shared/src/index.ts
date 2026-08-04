@@ -68,6 +68,12 @@ export interface Resultado {
   declaracaoUrl?: string // PDF opcional
   liberadoEm?: string
   flowlabAnaliseId?: string
+  // Id do resultado MAIS NOVO do mesmo exame no mesmo agendamento — presente só
+  // quando este aqui foi substituído por uma correção/reliberação. A tela mostra
+  // os dois, o novo em cima e este marcado como versão anterior. Calculado na
+  // API a cada listagem (não é coluna): o agrupamento é pelo nome do exame, que
+  // é cifrado, e só depois de decifrar dá para saber que são o mesmo exame.
+  retificadoPor?: string
 }
 
 // ---------------------------------------------------------------------------

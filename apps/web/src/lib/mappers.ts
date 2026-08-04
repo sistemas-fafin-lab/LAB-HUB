@@ -77,6 +77,9 @@ export function resultadoToExam(r: Resultado): Exam {
     // Sem `dataColeta` de propósito: o FlowLab só manda a liberação, e o campo
     // "Coleta" do laudo fica '—' em vez de repetir a data de liberação.
     ...(liberado ? { dataEmissao: longDate.format(liberado) } : {}),
+    // A API manda o id da versão que substituiu esta; a tela só precisa saber
+    // que ela foi substituída.
+    ...(r.retificadoPor ? { retificado: true } : {}),
     origem: 'flowlab',
   }
 }

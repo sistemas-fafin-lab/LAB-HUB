@@ -61,6 +61,12 @@ export interface Exam {
   // Quantos exames o pedido consolidado reúne — a lista mostra isto quando o
   // pedido não tem um médico responsável único.
   totalExames?: number
+  // Este resultado foi SUBSTITUÍDO por uma versão mais nova do mesmo exame
+  // (correção, reliberação). Continua na lista, abaixo da versão vigente e
+  // marcado — quem já baixou o PDF antigo precisa conseguir achá-lo, e o que
+  // mudou entre duas versões de um laudo é informação clínica. Só o resultado
+  // do FlowLab preenche; o laudo dos LIS não tem esse conceito.
+  retificado?: boolean
 }
 
 interface WebHeroProps {

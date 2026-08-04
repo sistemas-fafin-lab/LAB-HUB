@@ -631,14 +631,48 @@ unique antiga: `(null, exame_nome)` não colide com nada.
 
 | # | Passo | Depende de |
 |---|---|---|
+| ~~3~~ | ~~Decisão de produto~~ | **DECIDIDA em 04/08 e já implementada** — ver abaixo |
 | 1 | Deploy do FlowLab mandando `exameFlowlabId` | push + Vercel |
 | 2 | Conferir que todo resultado novo chega com o id | observação em produção |
-| 3 | **Decisão de produto** | com a unique antiga fora, um segundo resultado genuíno do mesmo exame passa a ser aceito e aparece **duas vezes** no portal. Exibir as duas? A nova substitui? Marcar a antiga como retificada? |
-| 4 | `exame_flowlab_id NOT NULL`, drop da `uq_resultado_agendamento_exame`, parar de escrever `exame_nome` em claro e derrubar a coluna | os três acima |
+| 4 | `exame_flowlab_id NOT NULL`, drop da `uq_resultado_agendamento_exame`, parar de escrever `exame_nome` em claro e derrubar a coluna | os dois acima |
 
-O passo 3 é o único que não é técnico, e é o que segura o resto: trocar a
-constraint sem respondê-lo troca um bug silencioso por um comportamento de tela
-indefinido.
+**A decisão: mostrar as duas versões, a nova em cima e a antiga marcada.**
+Implementada ANTES da troca da constraint, de propósito — na ordem inversa
+haveria uma janela em que duas versões já podem existir e a tela ainda mostra
+duas linhas idênticas sem dizer qual vale.
+
+| | |
+|---|---|
+| **API** | `lib/retificacao.ts` (`marcarRetificados`), `routes/resultados.ts`, campo `retificadoPor` em `Resultado` |
+| **Web** | selo "Versão anterior" no `ExamRow`; faixa de aviso no `ExamDetailPage`; `retificado` no `Exam` |
+| **Testes** | +10 em `retificacao.test.ts`, +1 em `resultados.test.ts`, +3 em `ExamRow`, +2 em `ExamDetailPage`, +1 em `useResultados`. API **340**, web **58** |
+
+Esconder a versão anterior seria mais limpo de olhar e pior de auditar: o que
+mudou entre duas versões de um laudo é informação clínica, e quem já baixou o PDF
+antigo precisa conseguir achá-lo de novo.
+
+**Por que a marcação é calculada na API e não no SQL.** O agrupamento é pelo NOME
+do exame, e o nome é cifrado com IV aleatório — nenhum `group by` do Postgres
+enxerga que dois envelopes são o mesmo exame. Só depois de decifrar, na
+aplicação, eles viram comparáveis. É a mesma razão por que a busca da tela de
+resultados é filtro no cliente, e é por isso que `retificadoPor` é campo
+calculado a cada listagem, não coluna.
+
+**Duas armadilhas que o agrupamento evita.** Resultado sem `agendamento_id` nunca
+é marcado: dois exames de mesmo nome feitos em visitas diferentes não são
+correção um do outro, e marcá-los esconderia um exame legítimo do histórico. E a
+chave usa ` ` como separador — com concatenação crua, `('ag','X')` e
+`('a','gX')` cairiam no mesmo grupo.
+
+**O empate de `liberado_em`.** Duas versões podem sair com o mesmo carimbo
+(correção reliberada no mesmo minuto, ou o FlowLab repetindo o instante da
+liberação original). A rota desempata por `criado_em desc`, e a ordenação do
+cliente é estável — sem os dois, a linha marcada como "versão anterior" trocaria
+de lugar a cada requisição, e o paciente veria o selo acima do laudo que vale.
+
+O selo **não** substitui o status: um laudo retificado foi liberado de verdade,
+só não é mais o vigente. Trocar "Liberado" por "Versão anterior" apagaria essa
+informação e faria a linha parecer que nunca ficou pronta.
 
 Enquanto isso, o 23505 passou a ser **logado** (`request.log.warn` com o
 `details` do Postgres, que diz qual constraint bateu e não carrega PII). Colisão

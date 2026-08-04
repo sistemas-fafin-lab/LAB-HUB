@@ -63,6 +63,42 @@ describe('data exibida na lista', () => {
   })
 })
 
+describe('versão anterior', () => {
+  const resultado = (over: Partial<Resultado> = {}): Resultado =>
+    ({
+      id: 'r-1',
+      exameNome: 'Hemograma completo',
+      categoria: 'Hematologia',
+      status: 'ready',
+      liberadoEm: '2026-08-01T00:00:00.000Z',
+      resumo: '',
+      paineis: [],
+      ...over,
+    }) as unknown as Resultado
+
+  it('marca a linha quando o resultado foi substituído', () => {
+    const { container } = render1(resultadoToExam(resultado({ retificadoPor: 'r-2' })))
+
+    expect(container.textContent).toContain('Versão anterior')
+  })
+
+  it('não marca o resultado vigente', () => {
+    const { container } = render1(resultadoToExam(resultado()))
+
+    expect(container.textContent).not.toContain('Versão anterior')
+  })
+
+  // O selo diz qual das duas linhas é a antiga; o status continua sendo sobre a
+  // liberação do laudo. Um laudo substituído foi liberado de verdade — trocar o
+  // status por "Versão anterior" apagaria essa informação e deixaria a linha
+  // parecendo que nunca ficou pronta.
+  it('não substitui o status do laudo', () => {
+    const { container } = render1(resultadoToExam(resultado({ retificadoPor: 'r-2' })))
+
+    expect(container.textContent).toContain('Liberado')
+  })
+})
+
 describe('unidade', () => {
   it('não escreve travessão quando a unidade é desconhecida', () => {
     // O LIS deixou de mandar 'DASA'/'ApLIS' chutados; sem unidade real a linha
