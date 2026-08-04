@@ -553,7 +553,7 @@ O host da AOL responde normalmente **de fora** (DNS → `191.239.240.111`, `braz
 | **Migration** | `20260803170000_s06_fase2a_rotulos_cifrados.sql` — **aplicada em produção**, ledger 21 × 21 |
 | **Código** | `lib/mappers.ts` (novo `nomeArquivoDe`), `laudos/repository.ts` (`cpfDaLinha`), `routes/webhooks.ts`, `routes/documentos.ts`, `routes/integracao.ts`, `lib/backfillCripto.ts` |
 | **Testes** | +8 em `criptografiaColunas.test.ts` (7 → 15). API de 318 → **326 testes**; type-check e lint limpos |
-| **Pendente** | deploy no VPS e `docker compose exec -T api node dist/scripts/backfillCripto.js` — o backfill **tem** de rodar lá dentro: a chave é a do VPS |
+| **Produção** | **deploy feito e backfill rodado no VPS** no mesmo dia: 2 rótulos + 16 nomes de arquivo cifrados, e **0 pendentes nas seis contagens**. `agendamentos` e `exam_results.cpf` saíram em 0 porque não há linha com conteúdo nessas colunas ainda — o caminho de escrita é que passa a cifrar |
 
 Cinco colunas: `resultados.exame_nome` e `.categoria`, `agendamentos.exames`, `documentos.nome_arquivo`, `exam_results.cpf`. Nenhuma pediu blind index — foi conferido no código antes de escrever a migration que nenhuma é filtrada em SQL. As duas checagens que poderiam ter obrigado:
 
@@ -561,6 +561,18 @@ Cinco colunas: `resultados.exame_nome` e `.categoria`, `agendamentos.exames`, `d
 - `exam_results.cpf` é comparado **em JS por dígitos** (`conferirCpf`), nunca com `.eq` — e isso é anterior a este trabalho, está escrito em `laudos/repository.ts:112`.
 
 **A checagem de segunda chave sobreviveu, e tem teste dedicado.** Aquela comparação de CPF é uma barreira de segurança (linha vinculada ao paciente errado deixa de ser servida), então cifrar a coluna sem cuidado a desarmaria em silêncio. O teste monta uma linha em que o CPF **em claro bate** e só o cifrado diverge: se a leitura caísse na coluna errada, o laudo do outro seria servido e o teste ficaria verde. Ele exige lista vazia.
+
+**Verificação em produção depois do backfill.** Duas perguntas diferentes, e a segunda é a que teste não alcança:
+
+| O quê | Como | Resultado |
+|---|---|---|
+| Todas as linhas foram cifradas | `count(*) filter (where … is null)` | **0** em `resultados.exame_nome` (2 linhas) e `documentos.nome_arquivo` (16) |
+| O envelope é o formato certo | `like 'v1:k1:%'` | **18 de 18** |
+| E o conteúdo **certo** entrou | `length(enc) = 48 + ceil(octet_length(claro)/3)*4` | confere nas duas linhas de `resultados` (47→116 e 23→84 bytes) |
+
+A terceira linha usa o fato de o GCM ser cifra de fluxo: o tamanho do envelope é função exata do tamanho do texto original, então bate-los prova que o valor daquela linha foi cifrado — e não um placeholder, um `null` ou o valor de outra linha. Não pega erro de AAD; para isso só decifrando dentro do container.
+
+**E prova o deploy de quebra.** O log do backfill traz as chaves `rotulos`, `agendamentos`, `documentos` e `examResultsCpf`, que só existem no build novo — o container antigo nem teria o script com esses contadores. Vale mais que `/ping`, que responde 200 igual nas duas versões (o laço que segurou o S-10 por três dias).
 
 **O que esta migration NÃO resolve, e está dito nela:** `uq_resultado_agendamento_exame UNIQUE (agendamento_id, exame_nome)` é o que torna o webhook de resultado idempotente — o FlowLab entrega at-least-once e a reentrega bate no 23505. Sobre coluna cifrada essa unicidade não existe (IV aleatório), então **derrubar `exame_nome` sem substituir a chave transforma cada reentrega num resultado duplicado na tela do paciente**. Dois caminhos, e a escolha não era desta migration: usar `exame_flowlab_id` (a coluna já existe e está sem uso; depende de o FlowLab passar a enviá-la) ou um índice cego `hmac(chave, agendamento_id || nome)` — com o `agendamento_id` **dentro da mensagem**, senão a contagem por hash entrega o catálogo por análise de frequência.
 
