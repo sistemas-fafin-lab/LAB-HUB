@@ -10,8 +10,10 @@ import type { ExamResultRow, Laudo } from './types.js'
 // resolvido do token.
 
 const TABELA = 'exam_results'
-const COLUNAS =
-  'id, paciente_id, cpf, cpf_enc, codigo_os, codigo_lis, result, result_enc, cached_at'
+// Sem `cpf` e `result`: as colunas em claro foram dropadas (S-06, migration do
+// corte). Nomear coluna inexistente aqui não é erro silencioso — o PostgREST
+// responde 400 e a rota inteira cai.
+const COLUNAS = 'id, paciente_id, cpf_enc, codigo_os, codigo_lis, result_enc, cached_at'
 
 /**
  * CPF da linha, cifrado ou não (S-06 fase 2a).
@@ -22,20 +24,18 @@ const COLUNAS =
  * nenhuma: a comparação sempre foi em JS por dígitos (`conferirCpf`), nunca com
  * `.eq` no SQL — ver a nota de segunda chave em `findByPaciente`.
  */
-function cpfDaLinha(linha: { id: string; cpf?: unknown; cpf_enc?: unknown }): string {
+function cpfDaLinha(linha: { id: string; cpf_enc?: unknown }): string {
   if (linha.cpf_enc) return decifrar(linha.cpf_enc as string, aadDe(TABELA, 'cpf', linha.id))
-  // Linha anterior ao corte do S-06: só a coluna em claro existe.
-  if (typeof linha.cpf === 'string') return linha.cpf
-  // As duas vazias é linha corrompida. Lançar, e não devolver vazio: este CPF é
-  // a SEGUNDA CHAVE que impede servir o laudo de outra pessoa (`conferirCpf` em
-  // findByPaciente). Uma string vazia aqui não abriria a porta — a comparação
-  // falha e bloqueia —, mas apareceria como "paciente sem laudo nenhum", que é
-  // o sintoma mais caro de investigar que este código sabe produzir.
-  throw new Error(`exam_results ${linha.id} não tem CPF em nenhuma das duas colunas`)
+  // Sem coluna em claro para onde cair — ela foi dropada. Lançar, e não devolver
+  // vazio: este CPF é a SEGUNDA CHAVE que impede servir o laudo de outra pessoa
+  // (`conferirCpf` em findByPaciente). Uma string vazia não abriria a porta — a
+  // comparação falha e bloqueia —, mas apareceria como "paciente sem laudo
+  // nenhum", o sintoma mais caro de investigar que este código sabe produzir.
+  throw new Error(`exam_results ${linha.id} está sem cpf_enc`)
 }
 
-// `result` no banco é a lista de laudos da linha (hoje um elemento: o pedido
-// consolidado; ver ExamResultRow). Linha gravada antes da mudança para lista
+// `result` cifrado é a lista de laudos da linha (hoje um elemento: o pedido
+// consolidado; ver ExamResultRow). Envelope gravado antes da mudança para lista
 // guardava um objeto único — normalizamos na leitura para não depender de
 // migração de dado.
 function comoLaudos(result: unknown): Laudo[] {
@@ -43,11 +43,8 @@ function comoLaudos(result: unknown): Laudo[] {
   return (Array.isArray(result) ? result : [result]) as Laudo[]
 }
 
-// Linha crua do banco, com as duas formas da coluna convivendo durante a
-// migração do S-06.
 interface LinhaComResult {
   id: string
-  result?: unknown
   result_enc?: string | null
 }
 
@@ -59,17 +56,14 @@ interface LinhaComResult {
  * rotas — cada ponto de leitura que soubesse do formato seria mais um lugar para
  * a próxima pessoa esquecer o AAD.
  *
- * O fallback para a coluna em claro vale só quando a cifrada está VAZIA (linha
- * antiga, ainda não migrada). Falha ao decifrar NÃO cai no texto puro: isso
- * mascararia chave errada ou dado adulterado exatamente no caso em que se
- * precisa saber, e o dado em claro vai desaparecer na fase 2 — o fallback
- * silencioso passaria a ser um 500 surpresa lá na frente.
+ * Sem envelope é linha SEM resultado (requisição registrada, laudo ainda não
+ * buscado) — não linha antiga: a coluna em claro não existe mais. Falha ao
+ * decifrar propaga em vez de virar lista vazia, senão chave errada apareceria
+ * como "o laboratório ainda não liberou".
  */
 export function laudosDaLinha(linha: LinhaComResult): Laudo[] {
-  if (linha.result_enc) {
-    return decifrarJson<Laudo[]>(linha.result_enc, aadDe(TABELA, 'result', linha.id))
-  }
-  return comoLaudos(linha.result)
+  if (!linha.result_enc) return []
+  return comoLaudos(decifrarJson<Laudo[]>(linha.result_enc, aadDe(TABELA, 'result', linha.id)))
 }
 
 /**
@@ -87,14 +81,12 @@ function comoExamResultRow(linha: Record<string, unknown>): ExamResultRow {
   const { result_enc: _cifrado, cpf_enc: _cpfCifrado, ...resto } = linha
   const bruta: LinhaComResult = {
     id: linha.id as string,
-    result: linha.result,
     result_enc: linha.result_enc as string | null,
   }
-  const temConteudo = linha.result_enc != null || linha.result != null
   return {
     ...resto,
     cpf: cpfDaLinha(linha as { id: string }),
-    result: temConteudo ? laudosDaLinha(bruta) : null,
+    result: linha.result_enc != null ? laudosDaLinha(bruta) : null,
   } as ExamResultRow
 }
 
@@ -126,14 +118,14 @@ export interface IExamResultRepository {
 export class ExamResultRepository implements IExamResultRepository {
   async findByPaciente(pacienteId: string, cpf: string): Promise<Laudo[]> {
     // `id` entrou no select por causa do S-06: ele compõe o AAD e sem ele não há
-    // como decifrar. `or(...)` porque durante a migração o conteúdo pode estar
-    // em qualquer uma das duas colunas — filtrar só por `result` esconderia a
-    // linha já migrada.
+    // como decifrar. O filtro é só por `result_enc` desde o corte — a coluna em
+    // claro não existe mais, e o `or(...)` que cobria as duas iria buscar uma
+    // coluna inexistente (PostgREST 400, rota inteira fora).
     const { data, error } = await supabase
       .from(TABELA)
-      .select('id, cpf, cpf_enc, result, result_enc, cached_at')
+      .select('id, cpf_enc, result_enc, cached_at')
       .eq('paciente_id', pacienteId)
-      .or('result.not.is.null,result_enc.not.is.null')
+      .not('result_enc', 'is', null)
 
     if (error) {
       throw new DatabaseError('Falha ao buscar laudos do paciente', { pacienteId, cause: error })

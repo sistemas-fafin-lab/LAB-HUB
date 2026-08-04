@@ -19,6 +19,7 @@ import { buildPacienteMap, normalizaIdOsLis } from '../src/laudos/aol.js'
 import { ExamResultRepository } from '../src/laudos/repository.js'
 import { DatabaseError } from '../src/laudos/errors.js'
 import { buildApp, createSupabaseMock, type SupaHandler, type SupaResult } from './helpers.js'
+import { aadDe, cifrar, cifrarJson } from '../src/lib/crypto.js'
 
 // Testes da BARREIRA DE IDENTIDADE: o laudo servido é mesmo do paciente do token?
 //
@@ -56,10 +57,12 @@ function supaHandler(cenario: Cenario = {}): SupaHandler {
     if (call.table === 'exam_results') {
       if (call.op === 'insert') return cenario.insert ?? { error: null }
       if (call.op === 'update') return { error: null }
-      // findByPaciente é a única leitura que filtra por "tem conteúdo". Desde o
-      // S-06 o conteúdo pode estar na coluna em claro OU na cifrada, então o
-      // filtro virou um `or` — daí a âncora ser `__or` e não `result__not_is`.
-      if ('__or' in call.filters) return { data: cenario.cacheadas ?? [], error: null }
+      // findByPaciente é a única leitura que filtra por "tem conteúdo". Depois
+      // do corte do S-06 o conteúdo só existe cifrado, então o `or` que cobria
+      // as duas colunas virou um filtro simples — a âncora acompanhou.
+      if ('result_enc__not_is' in call.filters) {
+        return { data: (cenario.cacheadas ?? []).map((c) => linha(c as Record<string, unknown>)), error: null }
+      }
       // findByCodigoLis / findByCodigoOs terminam em maybeSingle.
       if (call.filters.codigo_lis || call.filters.codigo_os) return { data: null, error: null }
       return { data: cenario.linhas ?? [], error: null }
@@ -152,16 +155,21 @@ function xmlOs(cpfDaOs: string, analito = 'COLESTEROL TOTAL'): string {
 </resultados>`
 }
 
+// Linha como o banco a devolve DEPOIS do corte do S-06: `cpf` e `result` vivem
+// só nas colunas cifradas. O cenário continua escrevendo os valores em claro por
+// legibilidade; a conversão para envelope (com o AAD da linha) acontece aqui.
 function linha(over: Record<string, unknown> = {}): Record<string, unknown> {
+  const { cpf = CPF, result = null, ...resto } = { id: 'row-1', ...over }
+  const id = resto.id as string
   return {
-    id: 'row-1',
     paciente_id: 'pac-1',
-    cpf: CPF,
     codigo_os: null,
     codigo_lis: 'REQ-1',
-    result: null,
     cached_at: null,
-    ...over,
+    ...resto,
+    cpf_enc: cifrar(cpf as string, aadDe('exam_results', 'cpf', id)),
+    result_enc:
+      result != null ? cifrarJson(result, aadDe('exam_results', 'result', id)) : null,
   }
 }
 
@@ -329,8 +337,8 @@ describe('GET /laudos — barreira de identidade', () => {
       // é o CPF gravado na linha, e um laudo ApLIS-only sairia da resposta pelo
       // corte de fonte — o teste passaria sem provar nada sobre a barreira.
       cacheadas: [
-        { cpf: CPF, result: [{ name: 'Hemograma', source: 'merged', panels: [] }], cached_at: fresco },
-        { cpf: OUTRO_CPF, result: [{ name: 'Laudo de outro', source: 'merged', panels: [] }], cached_at: fresco },
+        { id: 'row-1', cpf: CPF, result: [{ name: 'Hemograma', source: 'merged', panels: [] }], cached_at: fresco },
+        { id: 'row-2', cpf: OUTRO_CPF, result: [{ name: 'Laudo de outro', source: 'merged', panels: [] }], cached_at: fresco },
       ],
     })
 

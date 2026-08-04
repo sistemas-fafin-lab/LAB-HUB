@@ -84,16 +84,17 @@ describe('leitura — a API decifra o que está cifrado no banco', () => {
     expect(res.json()[0].summary).toBe('Hemoglobina 14,2 g/dL')
   })
 
-  it('GET /laudos/:id continua servindo a linha antiga, ainda em claro', async () => {
-    // Compatibilidade durante a migração: enquanto o backfill não passou, a
-    // linha só tem a coluna em claro. Quebrar isto tiraria o laudo do ar entre o
-    // deploy e o backfill.
-    app = await appDeLaudos({ id: LAUDO_ID, result: [laudo()], result_enc: null })
+  // Este teste era o inverso: enquanto o backfill não tinha passado, a linha só
+  // tinha a coluna em claro e servi-la era obrigatório. Depois do corte a coluna
+  // não existe mais, e linha sem envelope significa "requisição registrada, laudo
+  // ainda não buscado" — não "laudo antigo". O 404 é a resposta certa para isso,
+  // e é o que prova que não sobrou caminho para o texto puro.
+  it('linha sem envelope é linha SEM resultado, não linha antiga', async () => {
+    app = await appDeLaudos({ id: LAUDO_ID, result_enc: null })
 
     const res = await app.inject({ method: 'GET', url: `/laudos/${LAUDO_ID}`, headers: AUTH })
 
-    expect(res.statusCode).toBe(200)
-    expect(res.json()[0].summary).toBe('Hemoglobina 14,2 g/dL')
+    expect(res.statusCode).toBe(404)
   })
 
   it('o envelope movido para a linha de outro paciente NÃO é servido', async () => {
@@ -315,16 +316,17 @@ describe('fase 2a — rótulos e identificadores', () => {
     expect(r.categoria).toBe('Imunologia')
   })
 
-  it('toResultado ainda serve a linha antiga, só em claro', () => {
+  // `exame_nome` é a última coluna com as duas formas — o fallback para o texto
+  // puro sobrevive SÓ para ela, e some quando a unicidade migrar para o
+  // `exame_flowlab_id`. Para `categoria` a coluna em claro já foi dropada: sem
+  // envelope o campo simplesmente não vem.
+  it('toResultado cai no exame_nome em claro, mas não inventa categoria', () => {
     const r = toResultado({
       id: RES_ID,
       paciente_id: 'pac-1',
       agendamento_id: null,
       exame_nome: 'Glicemia de jejum',
-      categoria: 'Bioquímica',
       status: 'ready',
-      resumo: null,
-      paineis: [],
       laudo_url: null,
       declaracao_url: null,
       liberado_em: null,
@@ -332,7 +334,7 @@ describe('fase 2a — rótulos e identificadores', () => {
     })
 
     expect(r.exameNome).toBe('Glicemia de jejum')
-    expect(r.categoria).toBe('Bioquímica')
+    expect(r.categoria).toBeUndefined()
   })
 
   // O AAD é o que impede mover envelope de uma linha para outra. Sem ele, quem

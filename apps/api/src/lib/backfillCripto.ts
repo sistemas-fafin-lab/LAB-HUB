@@ -1,37 +1,32 @@
 import type { Logger } from 'pino'
-import { aadDe, cifrar, cifrarJson, criptografiaConfigurada } from './crypto.js'
+import { aadDe, cifrar, criptografiaConfigurada } from './crypto.js'
 import { supabase } from './supabase.js'
 
 /**
- * Backfill da criptografia de coluna (S-06, passo 3 do plano de migração).
+ * Backfill da criptografia de coluna (S-06).
  *
- * Cifra o que já estava gravado em claro quando o deploy da escrita dupla subiu.
- * Linha nova não passa por aqui — ela já nasce cifrada.
+ * **Este módulo é o que sobrou.** Ele existia para cifrar o que já estava
+ * gravado em claro quando o deploy da escrita dupla subiu, e cobria oito
+ * colunas. Sete foram cifradas, conferidas (0 pendentes em produção, 04/08) e
+ * tiveram a coluna em claro **dropada** — não há mais de onde ler o texto puro,
+ * então as funções correspondentes não foram apenas desativadas: elas quebrariam
+ * contra o banco (o PostgREST responde 400 a coluna inexistente).
  *
- * Três propriedades que fazem isto ser re-executável sem medo, e que são o
- * motivo de existir um script em vez de um `UPDATE` só:
+ * Resta `resultados.exame_nome`, a única ainda escrita nas duas formas. Ela
+ * participa de `uq_resultado_agendamento_exame`, e unicidade não existe sobre
+ * coluna cifrada com IV aleatório. Quando a unicidade migrar para o
+ * `exame_flowlab_id` (migration `20260804140000`) e a coluna em claro cair,
+ * **este arquivo inteiro deixa de ter função** — apagar, não manter por simetria.
  *
- * 1. **Idempotente.** Só toca em linha com a coluna cifrada AINDA vazia. Rodar
- *    duas vezes não re-cifra nada nem gera envelope novo.
- * 2. **Em lotes.** A base é pequena hoje, mas um `UPDATE` único que falhe no
- *    meio deixa metade migrada e nenhum registro de onde parou.
- * 3. **Não apaga o texto puro.** A coluna em claro continua lá, e é o que
- *    permite reverter o deploy a qualquer momento. Removê-la é migration
- *    própria, depois de observar produção.
+ * As três propriedades que sempre valeram continuam valendo para a que sobrou:
+ * idempotente (só toca em linha com a coluna cifrada vazia), em lotes, e não
+ * apaga o texto puro — removê-lo é migration própria.
  */
 
 const LOTE = 100
 
 export interface ResultadoBackfill {
-  examResults: number
-  resultados: number
-  // Fase 2a — os rótulos. Contadores próprios porque as linhas já cifradas na
-  // fase 1 continuam com o rótulo em claro: as duas contagens divergem, e
-  // somá-las esconderia um backfill que parou no meio.
   rotulos: number
-  agendamentos: number
-  documentos: number
-  examResultsCpf: number
 }
 
 export async function backfillCriptografia(log: Logger): Promise<ResultadoBackfill> {
@@ -41,107 +36,21 @@ export async function backfillCriptografia(log: Logger): Promise<ResultadoBackfi
     )
   }
 
-  return {
-    examResults: await backfillExamResults(log),
-    resultados: await backfillResultados(log),
-    rotulos: await backfillRotulos(log),
-    agendamentos: await backfillAgendamentos(log),
-    documentos: await backfillDocumentos(log),
-    examResultsCpf: await backfillExamResultsCpf(log),
-  }
+  return { rotulos: await backfillRotulos(log) }
 }
 
-/** `exam_results.result` — o laudo completo; a coluna de maior valor do S-06. */
-async function backfillExamResults(log: Logger): Promise<number> {
-  let total = 0
-
-  for (;;) {
-    const { data, error } = await supabase
-      .from('exam_results')
-      .select('id, result')
-      .is('result_enc', null)
-      .not('result', 'is', null)
-      .limit(LOTE)
-
-    if (error) throw new Error(`Falha ao ler exam_results: ${error.message}`)
-    if (!data?.length) break
-
-    for (const linha of data) {
-      const envelope = cifrarJson(linha.result, aadDe('exam_results', 'result', linha.id as string))
-      const { error: updateError } = await supabase
-        .from('exam_results')
-        .update({ result_enc: envelope })
-        .eq('id', linha.id)
-        // Guarda contra corrida com a API: se a linha foi cifrada por um
-        // saveResult() entre o select e o update, este filtro faz o update não
-        // encontrar nada em vez de sobrescrever um envelope mais novo com um
-        // derivado de dado velho.
-        .is('result_enc', null)
-
-      if (updateError) throw new Error(`Falha ao cifrar exam_results ${linha.id}: ${updateError.message}`)
-      total += 1
-    }
-
-    log.info({ lote: data.length, total }, 'Backfill exam_results: lote cifrado')
-    if (data.length < LOTE) break
-  }
-
-  return total
-}
-
-/** `resultados.paineis` e `.resumo` — o que chega pelo webhook do FlowLab. */
-async function backfillResultados(log: Logger): Promise<number> {
-  let total = 0
-
-  for (;;) {
-    // `paineis` é NOT NULL default '[]', então a condição de "falta cifrar" é a
-    // coluna cifrada estar vazia — não a origem ter conteúdo.
-    const { data, error } = await supabase
-      .from('resultados')
-      .select('id, paineis, resumo')
-      .is('paineis_enc', null)
-      // Depois do corte (S-06) linha nova nasce só cifrada, então "sem `_enc`"
-      // deixou de significar "falta cifrar" — sem este guarda, uma linha com as
-      // duas colunas vazias seria lida para sempre e o laço nunca esvaziaria.
-      .not('paineis', 'is', null)
-      .limit(LOTE)
-
-    if (error) throw new Error(`Falha ao ler resultados: ${error.message}`)
-    if (!data?.length) break
-
-    for (const linha of data) {
-      const id = linha.id as string
-      const resumo = linha.resumo as string | null
-
-      const { error: updateError } = await supabase
-        .from('resultados')
-        .update({
-          paineis_enc: cifrarJson(linha.paineis, aadDe('resultados', 'paineis', id)),
-          ...(resumo ? { resumo_enc: cifrar(resumo, aadDe('resultados', 'resumo', id)) } : {}),
-        })
-        .eq('id', id)
-        .is('paineis_enc', null)
-
-      if (updateError) throw new Error(`Falha ao cifrar resultados ${id}: ${updateError.message}`)
-      total += 1
-    }
-
-    log.info({ lote: data.length, total }, 'Backfill resultados: lote cifrado')
-    if (data.length < LOTE) break
-  }
-
-  return total
-}
-
-/** `resultados.exame_nome` e `.categoria` — o rótulo do exame (fase 2a). */
+/** `resultados.exame_nome` — o rótulo do exame, a última coluna com as duas formas. */
 async function backfillRotulos(log: Logger): Promise<number> {
   let total = 0
 
   for (;;) {
     const { data, error } = await supabase
       .from('resultados')
-      .select('id, exame_nome, categoria')
+      .select('id, exame_nome')
       .is('exame_nome_enc', null)
+      // "Sem `_enc`" deixou de significar "falta cifrar" depois do corte: linha
+      // nova nasce cifrada. Sem este guarda, uma linha com as duas vazias seria
+      // relida para sempre e o laço nunca esvaziaria.
       .not('exame_nome', 'is', null)
       .limit(LOTE)
 
@@ -150,17 +59,16 @@ async function backfillRotulos(log: Logger): Promise<number> {
 
     for (const linha of data) {
       const id = linha.id as string
-      const categoria = linha.categoria as string | null
-
       const { error: updateError } = await supabase
         .from('resultados')
         .update({
           exame_nome_enc: cifrar(linha.exame_nome as string, aadDe('resultados', 'exame_nome', id)),
-          ...(categoria
-            ? { categoria_enc: cifrar(categoria, aadDe('resultados', 'categoria', id)) }
-            : {}),
         })
         .eq('id', id)
+        // Guarda contra corrida com a API: se a linha foi cifrada por um insert
+        // entre o select e o update, este filtro faz o update não encontrar nada
+        // em vez de sobrescrever um envelope mais novo com um derivado de dado
+        // velho.
         .is('exame_nome_enc', null)
 
       if (updateError) throw new Error(`Falha ao cifrar rótulo de ${id}: ${updateError.message}`)
@@ -174,159 +82,17 @@ async function backfillRotulos(log: Logger): Promise<number> {
   return total
 }
 
-/** `agendamentos.exames` — quais exames a pessoa vai fazer (fase 2a). */
-async function backfillAgendamentos(log: Logger): Promise<number> {
-  let total = 0
-
-  for (;;) {
-    // Só quem TEM snapshot: agendamento sem `exames` não tem o que cifrar, e
-    // incluí-lo faria o laço nunca esvaziar.
-    const { data, error } = await supabase
-      .from('agendamentos')
-      .select('id, exames')
-      .is('exames_enc', null)
-      .not('exames', 'is', null)
-      .limit(LOTE)
-
-    if (error) throw new Error(`Falha ao ler agendamentos: ${error.message}`)
-    if (!data?.length) break
-
-    for (const linha of data) {
-      const id = linha.id as string
-      const { error: updateError } = await supabase
-        .from('agendamentos')
-        .update({ exames_enc: cifrarJson(linha.exames, aadDe('agendamentos', 'exames', id)) })
-        .eq('id', id)
-        .is('exames_enc', null)
-
-      if (updateError) throw new Error(`Falha ao cifrar agendamento ${id}: ${updateError.message}`)
-      total += 1
-    }
-
-    log.info({ lote: data.length, total }, 'Backfill agendamentos: lote cifrado')
-    if (data.length < LOTE) break
-  }
-
-  return total
-}
-
-/** `documentos.nome_arquivo` — o nome descreve o documento (fase 2a). */
-async function backfillDocumentos(log: Logger): Promise<number> {
-  let total = 0
-
-  for (;;) {
-    const { data, error } = await supabase
-      .from('documentos')
-      .select('id, nome_arquivo')
-      .is('nome_arquivo_enc', null)
-      .not('nome_arquivo', 'is', null)
-      .limit(LOTE)
-
-    if (error) throw new Error(`Falha ao ler documentos: ${error.message}`)
-    if (!data?.length) break
-
-    for (const linha of data) {
-      const id = linha.id as string
-      const { error: updateError } = await supabase
-        .from('documentos')
-        .update({
-          nome_arquivo_enc: cifrar(
-            linha.nome_arquivo as string,
-            aadDe('documentos', 'nome_arquivo', id),
-          ),
-        })
-        .eq('id', id)
-        .is('nome_arquivo_enc', null)
-
-      if (updateError) throw new Error(`Falha ao cifrar documento ${id}: ${updateError.message}`)
-      total += 1
-    }
-
-    log.info({ lote: data.length, total }, 'Backfill documentos: lote cifrado')
-    if (data.length < LOTE) break
-  }
-
-  return total
-}
-
-/** `exam_results.cpf` — a segunda cópia do CPF fora de `pacientes` (fase 2a). */
-async function backfillExamResultsCpf(log: Logger): Promise<number> {
-  let total = 0
-
-  for (;;) {
-    const { data, error } = await supabase
-      .from('exam_results')
-      .select('id, cpf')
-      .is('cpf_enc', null)
-      .not('cpf', 'is', null)
-      .limit(LOTE)
-
-    if (error) throw new Error(`Falha ao ler cpf de exam_results: ${error.message}`)
-    if (!data?.length) break
-
-    for (const linha of data) {
-      const id = linha.id as string
-      const { error: updateError } = await supabase
-        .from('exam_results')
-        .update({ cpf_enc: cifrar(linha.cpf as string, aadDe('exam_results', 'cpf', id)) })
-        .eq('id', id)
-        .is('cpf_enc', null)
-
-      if (updateError) throw new Error(`Falha ao cifrar cpf de ${id}: ${updateError.message}`)
-      total += 1
-    }
-
-    log.info({ lote: data.length, total }, 'Backfill exam_results.cpf: lote cifrado')
-    if (data.length < LOTE) break
-  }
-
-  return total
-}
-
 /**
- * Confere o que o passo 4 do plano manda conferir: nenhuma linha com conteúdo em
- * claro e a coluna cifrada vazia. Zero nos dois é o sinal verde para a fase 2.
+ * Quantas linhas ainda têm conteúdo em claro sem par cifrado. Zero é o sinal
+ * verde para dropar a coluna em claro correspondente.
  */
-export async function verificarBackfill(): Promise<{
-  examResults: number
-  resultados: number
-  rotulos: number
-  agendamentos: number
-  documentos: number
-  examResultsCpf: number
-}> {
-  const { count: examResults, error: e1 } = await supabase
-    .from('exam_results')
-    .select('id', { count: 'exact', head: true })
-    .is('result_enc', null)
-    .not('result', 'is', null)
-  if (e1) throw new Error(`Falha ao verificar exam_results: ${e1.message}`)
-
-  const { count: resultados, error: e2 } = await supabase
+export async function verificarBackfill(): Promise<{ rotulos: number }> {
+  const { count, error } = await supabase
     .from('resultados')
     .select('id', { count: 'exact', head: true })
-    .is('paineis_enc', null)
-    .not('paineis', 'is', null)
-  if (e2) throw new Error(`Falha ao verificar resultados: ${e2.message}`)
+    .is('exame_nome_enc', null)
+    .not('exame_nome', 'is', null)
+  if (error) throw new Error(`Falha ao verificar resultados.exame_nome_enc: ${error.message}`)
 
-  const pendentes = async (
-    tabela: string,
-    colunaEnc: string,
-    exigirOrigem?: string,
-  ): Promise<number> => {
-    let q = supabase.from(tabela).select('id', { count: 'exact', head: true }).is(colunaEnc, null)
-    if (exigirOrigem) q = q.not(exigirOrigem, 'is', null)
-    const { count, error } = await q
-    if (error) throw new Error(`Falha ao verificar ${tabela}.${colunaEnc}: ${error.message}`)
-    return count ?? 0
-  }
-
-  return {
-    examResults: examResults ?? 0,
-    resultados: resultados ?? 0,
-    rotulos: await pendentes('resultados', 'exame_nome_enc', 'exame_nome'),
-    agendamentos: await pendentes('agendamentos', 'exames_enc', 'exames'),
-    documentos: await pendentes('documentos', 'nome_arquivo_enc', 'nome_arquivo'),
-    examResultsCpf: await pendentes('exam_results', 'cpf_enc', 'cpf'),
-  }
+  return { rotulos: count ?? 0 }
 }

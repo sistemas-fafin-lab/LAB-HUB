@@ -15,6 +15,7 @@ vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 
 import { laudosRoutes } from '../src/routes/laudos.js'
 import { buildApp, createSupabaseMock, type SupaHandler, type SupaResult } from './helpers.js'
+import { aadDe, cifrar, cifrarJson } from '../src/lib/crypto.js'
 
 const LAUDO_ID = '44444444-4444-4444-4444-444444444444'
 const CPF = '52998224725' // CPF válido pelos dígitos verificadores
@@ -65,10 +66,22 @@ function laudo(over: Record<string, unknown> = {}): Record<string, unknown> {
  * que o banco não produz.
  */
 function completarExamResults(res: SupaResult): SupaResult {
-  const completar = (linha: unknown, i: number): unknown =>
-    linha && typeof linha === 'object'
-      ? { id: `row-${i + 1}`, cpf: CPF, ...(linha as Record<string, unknown>) }
-      : linha
+  const completar = (linha: unknown, i: number): unknown => {
+    if (!linha || typeof linha !== 'object') return linha
+    const l = { id: `row-${i + 1}`, ...(linha as Record<string, unknown>) }
+    const id = l.id as string
+    // Depois do corte do S-06 as colunas em claro não existem mais: o cenário
+    // escreve `cpf`/`result` por legibilidade e a conversão para envelope
+    // acontece aqui, com o AAD correto da linha.
+    const { cpf, result, ...resto } = l
+    return {
+      ...resto,
+      cpf_enc: cifrar((cpf as string) ?? CPF, aadDe('exam_results', 'cpf', id)),
+      ...(result != null
+        ? { result_enc: cifrarJson(result, aadDe('exam_results', 'result', id)) }
+        : { result_enc: null }),
+    }
+  }
 
   // O cenário é UM valor para todas as chamadas à tabela, mas o repositório usa
   // tanto `select` de lista quanto `maybeSingle` — daí as duas formas.

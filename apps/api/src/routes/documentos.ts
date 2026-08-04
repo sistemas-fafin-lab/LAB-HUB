@@ -217,7 +217,7 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
     const { data: doc, error } = await supabase
       .from('documentos')
       // `id` entra no select porque compõe o AAD do nome do arquivo (S-06).
-      .select('id, storage_path, nome_arquivo, nome_arquivo_enc')
+      .select('id, storage_path, nome_arquivo_enc')
       .eq('id', parsed.data.id)
       .eq('paciente_id', request.pacienteId)
       .maybeSingle()

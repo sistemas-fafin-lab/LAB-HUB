@@ -21,7 +21,7 @@ vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 vi.mock('../src/lib/flowlab.js', () => ({ flowlab: h.flProxy }))
 
 import { documentosRoutes } from '../src/routes/documentos.js'
-import { aadDe, decifrar } from '../src/lib/crypto.js'
+import { aadDe, cifrar, decifrar } from '../src/lib/crypto.js'
 import {
   buildApp,
   createSupabaseMock,
@@ -39,14 +39,18 @@ const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(
 const PDF = Buffer.concat([Buffer.from('%PDF-1.4', 'latin1'), Buffer.alloc(32)])
 const EXE = Buffer.concat([Buffer.from([0x4d, 0x5a, 0x90, 0x00]), Buffer.alloc(32)])
 
+// Linha como o banco a devolve DEPOIS do corte do S-06: o nome existe só
+// cifrado. A coluna em claro foi dropada, então uma fixture com `nome_arquivo`
+// descreveria uma linha impossível.
 function docRow(over: Record<string, unknown> = {}): Record<string, unknown> {
+  const id = (over.id as string) ?? DOC_ID
   return {
-    id: DOC_ID,
+    id,
     paciente_id: 'pac-1',
     agendamento_id: null,
     tipo: 'identidade',
-    nome_arquivo: 'rg.jpg',
-    storage_path: `pac-1/${DOC_ID}.jpg`,
+    nome_arquivo_enc: cifrar('rg.jpg', aadDe('documentos', 'nome_arquivo', id)),
+    storage_path: `pac-1/${id}.jpg`,
     mime_type: 'image/jpeg',
     tamanho_bytes: 36,
     criado_em: '2026-07-15T00:00:00.000Z',

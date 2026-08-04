@@ -24,17 +24,16 @@ interface AgendamentoRow {
   status: string
   flowlab_id: string | null
   criado_em: string
-  // Anulável desde o corte do S-06: linha nova só tem a cifrada.
-  exames: ExameColeta[] | null
   // S-06 fase 2a: quais exames a pessoa vai fazer é a mesma revelação que o
-  // resultado. Opcional porque nem todo select traz a coluna.
+  // resultado. A coluna em claro foi dropada no corte; esta é a única que
+  // sobrou. Opcional porque nem todo select a traz.
   exames_enc?: string | null
 }
 
 export function toAgendamento(row: AgendamentoRow): Agendamento {
   const exames = row.exames_enc
     ? decifrarJson<ExameColeta[]>(row.exames_enc, aadDe('agendamentos', 'exames', row.id))
-    : row.exames
+    : null
 
   return {
     id: row.id,
@@ -53,14 +52,14 @@ interface ResultadoRow {
   id: string
   paciente_id: string
   agendamento_id: string | null
+  // `exame_nome` é a última coluna em claro que sobrou: ela participa de
+  // `uq_resultado_agendamento_exame`, e unicidade não existe sobre coluna
+  // cifrada com IV aleatório. Sai quando a unicidade migrar para o
+  // `exame_flowlab_id`.
   exame_nome: string
-  categoria: string | null
   status: string
-  // Anuláveis desde o corte do S-06: linha nova só tem as cifradas.
-  resumo: string | null
-  paineis: PainelResultado[] | null
-  // S-06: durante a migração o conteúdo clínico pode estar em qualquer uma das
-  // duas colunas. Opcionais porque nem todo select as traz.
+  // S-06: o conteúdo clínico vive SÓ nestas. Opcionais porque nem todo select as
+  // traz — não porque possam faltar na linha.
   resumo_enc?: string | null
   paineis_enc?: string | null
   // Fase 2a: o rótulo entra junto — "TESTE RÁPIDO COVID-19" ao lado do nome do
@@ -74,22 +73,22 @@ interface ResultadoRow {
 }
 
 export function toResultado(row: ResultadoRow): Resultado {
-  // Decifra o que estiver cifrado (S-06). Só cai na coluna em claro quando a
-  // cifrada está VAZIA — falha de decifragem propaga em vez de virar fallback
-  // silencioso, senão chave errada apareceria como "tudo normal" até o dia em
-  // que a coluna em claro fosse dropada.
+  // Decifra (S-06). Não há mais coluna em claro para onde cair — ela foi
+  // dropada no corte, e falha de decifragem propaga em vez de virar fallback
+  // silencioso: chave errada tem de aparecer como erro, não como "tudo normal".
+  // A exceção é `exame_nome`, a última que ainda tem as duas.
   const resumo = row.resumo_enc
     ? decifrar(row.resumo_enc, aadDe('resultados', 'resumo', row.id))
-    : row.resumo
+    : null
   const paineis = row.paineis_enc
     ? decifrarJson<PainelResultado[]>(row.paineis_enc, aadDe('resultados', 'paineis', row.id))
-    : row.paineis
+    : null
   const exameNome = row.exame_nome_enc
     ? decifrar(row.exame_nome_enc, aadDe('resultados', 'exame_nome', row.id))
     : row.exame_nome
   const categoria = row.categoria_enc
     ? decifrar(row.categoria_enc, aadDe('resultados', 'categoria', row.id))
-    : row.categoria
+    : null
 
   return {
     id: row.id,
@@ -112,8 +111,6 @@ export interface DocumentoRow {
   paciente_id: string
   agendamento_id: string | null
   tipo: string
-  // Anulável desde o corte do S-06: linha nova só tem `nome_arquivo_enc`.
-  nome_arquivo: string | null
   storage_path: string
   mime_type: string
   tamanho_bytes: number
@@ -124,17 +121,14 @@ export interface DocumentoRow {
 }
 
 /** Nome do arquivo já decifrado (S-06). Usado também fora do `toDocumento`. */
-export function nomeArquivoDe(row: Pick<DocumentoRow, 'id' | 'nome_arquivo' | 'nome_arquivo_enc'>): string {
+export function nomeArquivoDe(row: Pick<DocumentoRow, 'id' | 'nome_arquivo_enc'>): string {
   if (row.nome_arquivo_enc) {
     return decifrar(row.nome_arquivo_enc, aadDe('documentos', 'nome_arquivo', row.id))
   }
-  // Linha anterior ao corte (S-06): só a coluna em claro existe. Depois que ela
-  // for dropada, este caminho some junto.
-  if (row.nome_arquivo != null) return row.nome_arquivo
-  // As duas vazias é linha corrompida, não linha antiga. Lançar em vez de
-  // devolver string vazia: um `Content-Disposition` com nome vazio seria um
+  // Sem coluna em claro para onde cair — ela foi dropada no corte. Lançar em vez
+  // de devolver string vazia: um `Content-Disposition` com nome vazio seria um
   // download quebrado que ninguém liga ao banco.
-  throw new Error(`Documento ${row.id} não tem nome de arquivo em nenhuma das duas colunas`)
+  throw new Error(`Documento ${row.id} está sem nome_arquivo_enc`)
 }
 
 // storage_path fica DE FORA de propósito: é detalhe interno e o cliente lê o

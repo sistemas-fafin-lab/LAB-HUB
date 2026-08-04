@@ -745,6 +745,36 @@ chave, assunto diferente do backup do banco.
 Entre este deploy e o drop, as linhas **antigas** continuam em claro; só as novas
 nascem limpas. A proteção contra dump existe de fato na migration do drop.
 
+**A migration do drop está escrita** (`20260804160000_s06_drop_colunas_em_claro.sql`)
+e **não foi aplicada**. Ao escrevê-la apareceu que parar de escrever não bastava:
+`laudos/repository.ts` **nomeia** `cpf` e `result` no `select` do PostgREST, e
+coluna inexistente ali não é campo vazio — é **400, com `/laudos` inteira fora do
+ar**. Aplicar o drop antes do deploy derruba o portal de laudos no mesmo segundo.
+
+Então o corte virou uma coisa só: o mesmo deploy para de escrever **e** de ler.
+Mudou junto:
+
+- `COLUNAS` do repositório e o `select` de `findByPaciente` perderam `cpf` e
+  `result`; o `.or('result.not.is.null,result_enc.not.is.null')` virou
+  `.not('result_enc','is',null)` — o `or` buscaria coluna inexistente.
+- `laudosDaLinha` deixou de ter fallback: sem envelope agora significa **linha
+  sem resultado** (requisição registrada, laudo não buscado), não linha antiga.
+- `toResultado`, `toAgendamento` e `nomeArquivoDe` idem. `exame_nome` é a única
+  que ainda tem as duas formas.
+- `backfillCripto.ts` **encolheu de seis funções para uma**. As outras liam as
+  colunas dropadas — não ficariam só ociosas, quebrariam. Sobrou o `exame_nome`,
+  e o arquivo inteiro morre quando ele sair.
+
+Conferido em produção antes de escrever o drop: **0 linhas em claro sem par
+cifrado** nas sete (`exam_results` está com 0 linhas — o cache de laudos está
+vazio porque a AOL não responde do VPS; `documentos` tem 16).
+
+**As fixtures dos testes descreviam linhas que o banco não produz mais** e
+tiveram de ser convertidas para a forma cifrada (`laudos`, `laudosIdentidade`,
+`documentos`, `integracao`). Dois testes foram substituídos em vez de
+consertados: eles afirmavam o fallback para o texto puro, que passou a ser
+comportamento removido de propósito. **341 testes**, tsc e eslint limpos.
+
 ### 03/08/2026 — retenção da trilha definida em 6 meses (fecha a pendência do S-08)
 
 | | |

@@ -14,6 +14,7 @@ const h = vi.hoisted(() => {
 vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 
 import { integracaoRoutes } from '../src/routes/integracao.js'
+import { aadDe, cifrar } from '../src/lib/crypto.js'
 import {
   buildApp,
   createSupabaseMock,
@@ -29,13 +30,14 @@ const DOC_COLETA = '44444444-4444-4444-4444-444444444444'
 
 const CHAVE = { 'x-api-key': 'test-flowlab-key' } // = FLOWLAB_API_KEY do test/setup.ts
 
+// Linha como o banco a devolve DEPOIS do corte do S-06: só a coluna cifrada.
 function docRow(id: string, over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id,
     paciente_id: 'pac-1',
     agendamento_id: null,
     tipo: 'identidade',
-    nome_arquivo: 'rg.jpg',
+    nome_arquivo_enc: cifrar('rg.jpg', aadDe('documentos', 'nome_arquivo', id)),
     storage_path: `pac-1/${id}.jpg`,
     mime_type: 'image/jpeg',
     tamanho_bytes: 36,
@@ -325,10 +327,8 @@ function uploadSupaHandler(
           ...docRow(p.id as string),
           agendamento_id: p.agendamento_id,
           tipo: p.tipo,
-          // Devolve o que o insert de fato gravou. Desde o corte do S-06 o nome
-          // vai SÓ cifrado, e ecoar a coluna em claro (agora ausente) fazia o
-          // mapeamento cair — o `.select()` do PostgREST devolve a linha real.
-          nome_arquivo: p.nome_arquivo ?? null,
+          // Devolve o que o insert de fato gravou — o `.select()` do PostgREST
+          // devolve a linha real, e desde o corte do S-06 o nome vai só cifrado.
           nome_arquivo_enc: p.nome_arquivo_enc,
           storage_path: p.storage_path,
           mime_type: p.mime_type,
