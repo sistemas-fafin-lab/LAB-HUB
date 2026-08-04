@@ -7,7 +7,8 @@ import { authenticate } from '../middlewares/auth.js'
 import { registrarAcesso } from '../lib/auditoria.js'
 import { detectarTipoArquivo } from '../lib/fileType.js'
 import { sanitizarNome } from '../lib/nomeArquivo.js'
-import { toDocumento, type DocumentoRow } from '../lib/mappers.js'
+import { nomeArquivoDe, toDocumento, type DocumentoRow } from '../lib/mappers.js'
+import { aadDe, cifrarSeConfigurado } from '../lib/crypto.js'
 import {
   documentoIdParamSchema,
   listarDocumentosSchema,
@@ -119,6 +120,16 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
         throw app.httpErrors.internalServerError('Falha ao enviar arquivo')
       }
 
+      // O nome descreve o documento ("pedido_medico_hemograma.pdf"), então é
+      // dado clínico como qualquer outro rótulo (S-06 fase 2a). O `documentoId`
+      // já existia antes do insert — é o mesmo que nomeia o objeto no Storage —,
+      // então o AAD sai de graça.
+      const nomeArquivo = sanitizarNome(parte.filename, formato.extensao)
+      const nomeArquivoEnc = cifrarSeConfigurado(
+        nomeArquivo,
+        aadDe('documentos', 'nome_arquivo', documentoId),
+      )
+
       const { data, error } = await supabase
         .from('documentos')
         .insert({
@@ -126,7 +137,8 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
           paciente_id: request.pacienteId,
           agendamento_id: agendamentoId ?? null,
           tipo,
-          nome_arquivo: sanitizarNome(parte.filename, formato.extensao),
+          nome_arquivo: nomeArquivo,
+          ...(nomeArquivoEnc ? { nome_arquivo_enc: nomeArquivoEnc } : {}),
           storage_path: storagePath,
           mime_type: formato.mimeType,
           tamanho_bytes: buffer.length,
@@ -207,7 +219,8 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
     // o padrão errado até o P-05 e hoje faz igual a este.
     const { data: doc, error } = await supabase
       .from('documentos')
-      .select('storage_path, nome_arquivo')
+      // `id` entra no select porque compõe o AAD do nome do arquivo (S-06).
+      .select('id, storage_path, nome_arquivo, nome_arquivo_enc')
       .eq('id', parsed.data.id)
       .eq('paciente_id', request.pacienteId)
       .maybeSingle()
@@ -223,7 +236,9 @@ export async function documentosRoutes(app: FastifyInstance): Promise<void> {
       .createSignedUrl(
         doc.storage_path as string,
         URL_TTL_SEGUNDOS,
-        download === 'true' ? { download: doc.nome_arquivo as string } : undefined,
+        download === 'true'
+          ? { download: nomeArquivoDe(doc as unknown as DocumentoRow) }
+          : undefined,
       )
     if (signedError || !signed) {
       throw app.httpErrors.internalServerError('Falha ao gerar URL assinada')

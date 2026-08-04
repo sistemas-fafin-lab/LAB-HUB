@@ -1,4 +1,5 @@
-import { aadDe, cifrarJsonSeConfigurado, decifrarJson } from '../lib/crypto.js'
+import { randomUUID } from 'node:crypto'
+import { aadDe, cifrarJsonSeConfigurado, cifrarSeConfigurado, decifrar, decifrarJson } from '../lib/crypto.js'
 import { supabase } from '../lib/supabase.js'
 import { DatabaseError } from './errors.js'
 import { conferirCpf, deveBloquear } from './identidade.js'
@@ -9,7 +10,23 @@ import type { ExamResultRow, Laudo } from './types.js'
 // resolvido do token.
 
 const TABELA = 'exam_results'
-const COLUNAS = 'id, paciente_id, cpf, codigo_os, codigo_lis, result, result_enc, cached_at'
+const COLUNAS =
+  'id, paciente_id, cpf, cpf_enc, codigo_os, codigo_lis, result, result_enc, cached_at'
+
+/**
+ * CPF da linha, cifrado ou não (S-06 fase 2a).
+ *
+ * Esta coluna é a SEGUNDA cópia do CPF no banco, fora de `pacientes` — deixá-la
+ * em claro anularia cifrar `pacientes.cpf`, porque o dump continuaria trazendo o
+ * documento ligado ao mesmo `paciente_id`. Cifrar aqui não custou consulta
+ * nenhuma: a comparação sempre foi em JS por dígitos (`conferirCpf`), nunca com
+ * `.eq` no SQL — ver a nota de segunda chave em `findByPaciente`.
+ */
+function cpfDaLinha(linha: { id: string; cpf?: unknown; cpf_enc?: unknown }): string {
+  return linha.cpf_enc
+    ? decifrar(linha.cpf_enc as string, aadDe(TABELA, 'cpf', linha.id))
+    : (linha.cpf as string)
+}
 
 // `result` no banco é a lista de laudos da linha (hoje um elemento: o pedido
 // consolidado; ver ExamResultRow). Linha gravada antes da mudança para lista
@@ -58,14 +75,21 @@ export function laudosDaLinha(linha: LinhaComResult): Laudo[] {
  * sozinho.
  */
 function comoExamResultRow(linha: Record<string, unknown>): ExamResultRow {
-  const { result_enc: _cifrado, ...resto } = linha
+  // As colunas cifradas saem do objeto: acima deste ponto ninguém deve escolher
+  // entre a versão clara e a cifrada — foi essa escolha espalhada que a fase 1
+  // já tinha evitado concentrando a decifragem aqui.
+  const { result_enc: _cifrado, cpf_enc: _cpfCifrado, ...resto } = linha
   const bruta: LinhaComResult = {
     id: linha.id as string,
     result: linha.result,
     result_enc: linha.result_enc as string | null,
   }
   const temConteudo = linha.result_enc != null || linha.result != null
-  return { ...resto, result: temConteudo ? laudosDaLinha(bruta) : null } as ExamResultRow
+  return {
+    ...resto,
+    cpf: cpfDaLinha(linha as { id: string }),
+    result: temConteudo ? laudosDaLinha(bruta) : null,
+  } as ExamResultRow
 }
 
 export interface IExamResultRepository {
@@ -101,7 +125,7 @@ export class ExamResultRepository implements IExamResultRepository {
     // linha já migrada.
     const { data, error } = await supabase
       .from(TABELA)
-      .select('id, cpf, result, result_enc, cached_at')
+      .select('id, cpf, cpf_enc, result, result_enc, cached_at')
       .eq('paciente_id', pacienteId)
       .or('result.not.is.null,result_enc.not.is.null')
 
@@ -121,7 +145,7 @@ export class ExamResultRepository implements IExamResultRepository {
     // junto do laudo para decidir se o cache venceu, então é injetado aqui.
     // Com `result` sendo lista, a ordenação por data saiu do SQL para cá.
     return (data ?? [])
-      .filter((row) => !deveBloquear(conferirCpf(cpf, row.cpf as string)))
+      .filter((row) => !deveBloquear(conferirCpf(cpf, cpfDaLinha(row as { id: string }))))
       .flatMap((row) =>
         laudosDaLinha(row as LinhaComResult).map((l) => ({
           ...l,
@@ -188,9 +212,17 @@ export class ExamResultRepository implements IExamResultRepository {
     codigoLis: string | null,
     codigoOs: string | null,
   ): Promise<void> {
+    // Id gerado aqui, e não pelo `gen_random_uuid()` do banco, porque o AAD é
+    // `tabela:coluna:id` e precisa existir ANTES de cifrar — mesmo motivo do
+    // POST /webhooks/resultados.
+    const id = randomUUID()
+    const cpfEnc = cifrarSeConfigurado(cpf, aadDe(TABELA, 'cpf', id))
+
     const { error } = await supabase.from(TABELA).insert({
+      id,
       paciente_id: pacienteId,
       cpf,
+      ...(cpfEnc ? { cpf_enc: cpfEnc } : {}),
       codigo_lis: codigoLis,
       codigo_os: codigoOs,
       result: null,

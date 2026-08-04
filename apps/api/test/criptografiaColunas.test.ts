@@ -19,6 +19,7 @@ import { laudosRoutes } from '../src/routes/laudos.js'
 import { resultadosRoutes } from '../src/routes/resultados.js'
 import { webhooksRoutes } from '../src/routes/webhooks.js'
 import { aadDe, cifrar, cifrarJson, decifrar, decifrarJson } from '../src/lib/crypto.js'
+import { toAgendamento, toDocumento, toResultado } from '../src/lib/mappers.js'
 import { buildApp, createSupabaseMock, type SupaCall, type SupaHandler } from './helpers.js'
 
 // Criptografia de coluna do dado clínico (auditoria § S-06 / Parte 3).
@@ -268,5 +269,225 @@ describe('escrita — o que sai em direção ao banco vai cifrado', () => {
     const gravado = insert?.payload as Record<string, unknown>
     expect(gravado).not.toHaveProperty('resumo_enc')
     expect(gravado.paineis_enc).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fase 2a — o RÓTULO, não só o valor
+// ---------------------------------------------------------------------------
+//
+// A fase 1 cifrou o conteúdo do exame e deixou o nome dele em claro. Em
+// produção isso era, num join de uma linha: "<paciente>" → "TESTE RÁPIDO COMBO
+// — COVID-19 / INFLUENZA A E B". Para dado de saúde o rótulo costuma ser a
+// revelação inteira, e é isso que estes testes protegem.
+
+describe('fase 2a — rótulos e identificadores', () => {
+  const DOC_ID = '77777777-7777-7777-7777-777777777777'
+  const EXAM_ID = '88888888-8888-8888-8888-888888888888'
+
+  it('toResultado decifra o nome do exame e a categoria', () => {
+    const linha = {
+      id: RES_ID,
+      paciente_id: 'pac-1',
+      agendamento_id: null,
+      // Em claro fica um valor DIFERENTE do cifrado: se o mapper cair na coluna
+      // errada, o teste diz qual das duas ele leu em vez de passar por acaso.
+      exame_nome: 'placeholder em claro',
+      categoria: 'categoria em claro',
+      status: 'ready',
+      resumo: null,
+      paineis: [],
+      exame_nome_enc: cifrar(
+        'TESTE RÁPIDO COMBO — COVID-19 / INFLUENZA A E B',
+        aadDe('resultados', 'exame_nome', RES_ID),
+      ),
+      categoria_enc: cifrar('Imunologia', aadDe('resultados', 'categoria', RES_ID)),
+      laudo_url: null,
+      declaracao_url: null,
+      liberado_em: null,
+      flowlab_analise_id: null,
+    }
+
+    const r = toResultado(linha)
+
+    expect(r.exameNome).toBe('TESTE RÁPIDO COMBO — COVID-19 / INFLUENZA A E B')
+    expect(r.categoria).toBe('Imunologia')
+  })
+
+  it('toResultado ainda serve a linha antiga, só em claro', () => {
+    const r = toResultado({
+      id: RES_ID,
+      paciente_id: 'pac-1',
+      agendamento_id: null,
+      exame_nome: 'Glicemia de jejum',
+      categoria: 'Bioquímica',
+      status: 'ready',
+      resumo: null,
+      paineis: [],
+      laudo_url: null,
+      declaracao_url: null,
+      liberado_em: null,
+      flowlab_analise_id: null,
+    })
+
+    expect(r.exameNome).toBe('Glicemia de jejum')
+    expect(r.categoria).toBe('Bioquímica')
+  })
+
+  // O AAD é o que impede mover envelope de uma linha para outra. Sem ele, quem
+  // tem escrita no banco troca o rótulo de um paciente pelo de outro e nada
+  // acusa — o mesmo ataque que a fase 1 já barrava para o conteúdo.
+  it('rótulo cifrado sob o AAD de OUTRA linha não é servido', () => {
+    const linha = {
+      id: RES_ID,
+      paciente_id: 'pac-1',
+      agendamento_id: null,
+      exame_nome: 'Glicemia',
+      categoria: null,
+      status: 'ready',
+      resumo: null,
+      paineis: [],
+      exame_nome_enc: cifrar('Carga viral', aadDe('resultados', 'exame_nome', 'outra-linha')),
+      laudo_url: null,
+      declaracao_url: null,
+      liberado_em: null,
+      flowlab_analise_id: null,
+    }
+
+    expect(() => toResultado(linha)).toThrow()
+  })
+
+  it('toAgendamento decifra os exames da coleta', () => {
+    const exames = [{ nome: 'Beta HCG', codigo: 'BHCG' }]
+    const ag = toAgendamento({
+      id: AG_ID,
+      paciente_id: 'pac-1',
+      posto_flowlab_id: 'posto-1',
+      posto_nome: 'Unidade Centro',
+      data_hora: '2026-08-01T12:00:00.000Z',
+      status: 'realizado',
+      flowlab_id: null,
+      criado_em: '2026-08-01T10:00:00.000Z',
+      exames: null,
+      exames_enc: cifrarJson(exames, aadDe('agendamentos', 'exames', AG_ID)),
+    })
+
+    expect(ag.exames).toEqual(exames)
+  })
+
+  it('toDocumento decifra o nome do arquivo', () => {
+    const doc = toDocumento({
+      id: DOC_ID,
+      paciente_id: 'pac-1',
+      agendamento_id: null,
+      tipo: 'pedido_medico',
+      nome_arquivo: 'placeholder.pdf',
+      storage_path: 'pac-1/x.pdf',
+      mime_type: 'application/pdf',
+      tamanho_bytes: 10,
+      criado_em: '2026-08-01T10:00:00.000Z',
+      nome_arquivo_enc: cifrar(
+        'pedido_medico_hemograma.pdf',
+        aadDe('documentos', 'nome_arquivo', DOC_ID),
+      ),
+    })
+
+    expect(doc.nomeArquivo).toBe('pedido_medico_hemograma.pdf')
+  })
+
+  it('o webhook grava o nome do exame e a categoria cifrados', async () => {
+    const calls: SupaCall[] = []
+    const handler: SupaHandler = (call) => {
+      calls.push(call)
+      if (call.table === 'agendamentos') {
+        return { data: { id: AG_ID, paciente_id: 'pac-1' }, error: null }
+      }
+      return { error: null }
+    }
+    h.setSb(createSupabaseMock({ handler }).client)
+    app = await buildApp(webhooksRoutes)
+
+    const payload = {
+      agendamentoLabhubId: AG_ID,
+      exameNome: 'TESTE RÁPIDO COMBO — COVID-19 / INFLUENZA A E B',
+      categoria: 'Imunologia',
+      paineis: [],
+      liberadoEm: '2026-08-01T12:00:00.000Z',
+    }
+    const body = JSON.stringify(payload)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/webhooks/resultados',
+      headers: {
+        'content-type': 'application/json',
+        'x-webhook-signature': createHmac('sha256', process.env.FLOWLAB_WEBHOOK_SECRET!)
+          .update(body)
+          .digest('hex'),
+      },
+      payload: body,
+    })
+
+    expect(res.statusCode).toBe(201)
+    const gravado = calls.find((c) => c.table === 'resultados' && c.op === 'insert')
+      ?.payload as Record<string, unknown>
+    const id = gravado.id as string
+
+    expect(decifrar(gravado.exame_nome_enc as string, aadDe('resultados', 'exame_nome', id))).toBe(
+      payload.exameNome,
+    )
+    expect(decifrar(gravado.categoria_enc as string, aadDe('resultados', 'categoria', id))).toBe(
+      'Imunologia',
+    )
+    // Escrita dupla: é o que mantém o deploy reversível enquanto as duas colunas
+    // convivem. Derrubar a coluna em claro é migration própria.
+    expect(gravado.exame_nome).toBe(payload.exameNome)
+  })
+
+  it('insertAwaiting grava o CPF cifrado — a segunda cópia fora de `pacientes`', async () => {
+    const calls: SupaCall[] = []
+    h.setSb(
+      createSupabaseMock({
+        handler: (call) => {
+          calls.push(call)
+          return { error: null }
+        },
+      }).client,
+    )
+
+    await new ExamResultRepository().insertAwaiting('pac-1', '52998224725', 'LIS-1', null)
+
+    const gravado = calls.find((c) => c.table === 'exam_results' && c.op === 'insert')
+      ?.payload as Record<string, unknown>
+    const id = gravado.id as string
+
+    expect(id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(decifrar(gravado.cpf_enc as string, aadDe('exam_results', 'cpf', id))).toBe('52998224725')
+  })
+
+  // A checagem de segunda chave (linha cujo CPF diverge do paciente do token não
+  // é servida) precisa continuar valendo com a coluna cifrada — senão cifrar
+  // teria desarmado uma barreira de segurança em silêncio.
+  it('a segunda chave continua bloqueando quando o CPF está cifrado', async () => {
+    h.setSb(
+      createSupabaseMock({
+        handler: () => ({
+          data: [
+            {
+              id: EXAM_ID,
+              cpf: '52998224725', // em claro bate — só o cifrado diverge
+              cpf_enc: cifrar('11144477735', aadDe('exam_results', 'cpf', EXAM_ID)),
+              result: [laudo()],
+              result_enc: null,
+              cached_at: null,
+            },
+          ],
+          error: null,
+        }),
+      }).client,
+    )
+
+    const laudos = await new ExamResultRepository().findByPaciente('pac-1', '52998224725')
+
+    expect(laudos).toEqual([])
   })
 })

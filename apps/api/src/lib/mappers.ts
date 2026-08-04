@@ -25,9 +25,16 @@ interface AgendamentoRow {
   flowlab_id: string | null
   criado_em: string
   exames: ExameColeta[] | null
+  // S-06 fase 2a: quais exames a pessoa vai fazer é a mesma revelação que o
+  // resultado. Opcional porque nem todo select traz a coluna.
+  exames_enc?: string | null
 }
 
 export function toAgendamento(row: AgendamentoRow): Agendamento {
+  const exames = row.exames_enc
+    ? decifrarJson<ExameColeta[]>(row.exames_enc, aadDe('agendamentos', 'exames', row.id))
+    : row.exames
+
   return {
     id: row.id,
     pacienteId: row.paciente_id,
@@ -37,7 +44,7 @@ export function toAgendamento(row: AgendamentoRow): Agendamento {
     status: row.status as AgendamentoStatus,
     ...(row.flowlab_id ? { flowlabId: row.flowlab_id } : {}),
     criadoEm: row.criado_em,
-    ...(row.exames ? { exames: row.exames } : {}),
+    ...(exames ? { exames } : {}),
   }
 }
 
@@ -54,6 +61,10 @@ interface ResultadoRow {
   // duas colunas. Opcionais porque nem todo select as traz.
   resumo_enc?: string | null
   paineis_enc?: string | null
+  // Fase 2a: o rótulo entra junto — "TESTE RÁPIDO COVID-19" ao lado do nome do
+  // paciente conta a história sem precisar de nenhum valor medido.
+  exame_nome_enc?: string | null
+  categoria_enc?: string | null
   laudo_url: string | null
   declaracao_url: string | null
   liberado_em: string | null
@@ -71,13 +82,19 @@ export function toResultado(row: ResultadoRow): Resultado {
   const paineis = row.paineis_enc
     ? decifrarJson<PainelResultado[]>(row.paineis_enc, aadDe('resultados', 'paineis', row.id))
     : row.paineis
+  const exameNome = row.exame_nome_enc
+    ? decifrar(row.exame_nome_enc, aadDe('resultados', 'exame_nome', row.id))
+    : row.exame_nome
+  const categoria = row.categoria_enc
+    ? decifrar(row.categoria_enc, aadDe('resultados', 'categoria', row.id))
+    : row.categoria
 
   return {
     id: row.id,
     pacienteId: row.paciente_id,
     ...(row.agendamento_id ? { agendamentoId: row.agendamento_id } : {}),
-    exameNome: row.exame_nome,
-    ...(row.categoria ? { categoria: row.categoria } : {}),
+    exameNome,
+    ...(categoria ? { categoria } : {}),
     status: row.status as ResultadoStatus,
     ...(resumo ? { resumo } : {}),
     paineis: paineis ?? [],
@@ -98,6 +115,16 @@ export interface DocumentoRow {
   mime_type: string
   tamanho_bytes: number
   criado_em: string
+  // S-06 fase 2a: o nome do arquivo descreve o documento ("pedido_medico_
+  // hemograma.pdf"), então é dado clínico como qualquer outro rótulo.
+  nome_arquivo_enc?: string | null
+}
+
+/** Nome do arquivo já decifrado (S-06). Usado também fora do `toDocumento`. */
+export function nomeArquivoDe(row: Pick<DocumentoRow, 'id' | 'nome_arquivo' | 'nome_arquivo_enc'>): string {
+  return row.nome_arquivo_enc
+    ? decifrar(row.nome_arquivo_enc, aadDe('documentos', 'nome_arquivo', row.id))
+    : row.nome_arquivo
 }
 
 // storage_path fica DE FORA de propósito: é detalhe interno e o cliente lê o
@@ -109,7 +136,7 @@ export function toDocumento(row: DocumentoRow): Documento {
     pacienteId: row.paciente_id,
     ...(row.agendamento_id ? { agendamentoId: row.agendamento_id } : {}),
     tipo: row.tipo as TipoDocumento,
-    nomeArquivo: row.nome_arquivo,
+    nomeArquivo: nomeArquivoDe(row),
     mimeType: row.mime_type,
     tamanhoBytes: row.tamanho_bytes,
     criadoEm: row.criado_em,

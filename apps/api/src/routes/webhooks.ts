@@ -93,6 +93,15 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
     const resumoEnc = payload.resumo
       ? cifrarSeConfigurado(payload.resumo, aadDe('resultados', 'resumo', id))
       : null
+    // Fase 2a: o rótulo vale tanto quanto o valor. "TESTE RÁPIDO COVID-19" ao
+    // lado do nome do paciente já é a revelação, sem nenhum painel medido.
+    const exameNomeEnc = cifrarSeConfigurado(
+      payload.exameNome,
+      aadDe('resultados', 'exame_nome', id),
+    )
+    const categoriaEnc = payload.categoria
+      ? cifrarSeConfigurado(payload.categoria, aadDe('resultados', 'categoria', id))
+      : null
 
     const { error } = await supabase.from('resultados').insert({
       id,
@@ -105,6 +114,8 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       paineis: payload.paineis,
       ...(paineisEnc ? { paineis_enc: paineisEnc } : {}),
       ...(resumoEnc ? { resumo_enc: resumoEnc } : {}),
+      ...(exameNomeEnc ? { exame_nome_enc: exameNomeEnc } : {}),
+      ...(categoriaEnc ? { categoria_enc: categoriaEnc } : {}),
       laudo_url: payload.laudoUrl ?? null,
       declaracao_url: payload.declaracaoUrl ?? null,
       liberado_em: payload.liberadoEm,
@@ -154,7 +165,7 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
     // encontrado" de falha transitória (mesma razão do /webhooks/resultados).
     const { data: agendamento, error: agendamentoError } = await supabase
       .from('agendamentos')
-      .select('id, status, exames')
+      .select('id, status, exames, exames_enc')
       .eq('id', payload.agendamentoLabhubId)
       .maybeSingle()
     if (agendamentoError) {
@@ -188,10 +199,21 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       // Status já é o alvo. Ainda assim, uma reentrega/reconciliação pode trazer os
       // exames que faltavam (ex.: curl no deliver-coleta sobre uma coleta já
       // 'realizado' cujo snapshot ficou null). Grava só os exames nesse caso.
-      if (temExames && agendamento.exames == null) {
+      // "Ainda não tem snapshot" passa a olhar as DUAS colunas (S-06 fase 2a):
+      // checar só a em claro faria esta reconciliação sobrescrever um snapshot
+      // que já existe cifrado.
+      if (temExames && agendamento.exames == null && agendamento.exames_enc == null) {
+        const examesEnc = cifrarJsonSeConfigurado(
+          exames,
+          aadDe('agendamentos', 'exames', agendamento.id as string),
+        )
         const { error } = await supabase
           .from('agendamentos')
-          .update({ exames, atualizado_em: new Date().toISOString() })
+          .update({
+            exames,
+            ...(examesEnc ? { exames_enc: examesEnc } : {}),
+            atualizado_em: new Date().toISOString(),
+          })
           .eq('id', agendamento.id)
         if (error) {
           throw app.httpErrors.internalServerError('Falha ao gravar exames do agendamento')
@@ -205,7 +227,14 @@ export async function webhooksRoutes(app: FastifyInstance): Promise<void> {
       status: novoStatus,
       atualizado_em: new Date().toISOString(),
     }
-    if (temExames) patch.exames = exames
+    if (temExames) {
+      patch.exames = exames
+      const examesEnc = cifrarJsonSeConfigurado(
+        exames,
+        aadDe('agendamentos', 'exames', agendamento.id as string),
+      )
+      if (examesEnc) patch.exames_enc = examesEnc
+    }
 
     const { error } = await supabase.from('agendamentos').update(patch).eq('id', agendamento.id)
     if (error) {

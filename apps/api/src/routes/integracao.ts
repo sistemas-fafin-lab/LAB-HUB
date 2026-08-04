@@ -26,7 +26,8 @@ import {
   corrigirIdentidadeSchema,
   criarAgendamentoRecepcaoSchema,
 } from '../schemas/recepcao.js'
-import type { DocumentoRow } from '../lib/mappers.js'
+import { nomeArquivoDe, type DocumentoRow } from '../lib/mappers.js'
+import { aadDe, cifrarSeConfigurado } from '../lib/crypto.js'
 
 // Rotas consumidas PELO FlowLab (server-to-server, autenticadas por API key).
 // Ficam num arquivo separado de propósito: este módulo não importa `authenticate`,
@@ -488,7 +489,7 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
           {
             id: d.id,
             tipo: d.tipo as TipoDocumento,
-            nomeArquivo: d.nome_arquivo,
+            nomeArquivo: nomeArquivoDe(d),
             mimeType: d.mime_type,
             tamanhoBytes: d.tamanho_bytes,
             criadoEm: d.criado_em,
@@ -585,6 +586,14 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
         nomeOriginal = undefined // header malformado → cai no nome-padrão do sanitizador
       }
 
+      // Mesmo tratamento do upload do paciente (S-06 fase 2a): o nome descreve o
+      // documento, então entra cifrado junto.
+      const nomeArquivo = sanitizarNome(nomeOriginal, formato.extensao)
+      const nomeArquivoEnc = cifrarSeConfigurado(
+        nomeArquivo,
+        aadDe('documentos', 'nome_arquivo', documentoId),
+      )
+
       const { data, error } = await supabase
         .from('documentos')
         .insert({
@@ -592,7 +601,8 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
           paciente_id: ag.paciente_id,
           agendamento_id: ag.id, // anexa À COLETA (aparece no check-in deste agendamento)
           tipo,
-          nome_arquivo: sanitizarNome(nomeOriginal, formato.extensao),
+          nome_arquivo: nomeArquivo,
+          ...(nomeArquivoEnc ? { nome_arquivo_enc: nomeArquivoEnc } : {}),
           storage_path: storagePath,
           mime_type: formato.mimeType,
           tamanho_bytes: buffer.length,
@@ -619,7 +629,7 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       const resposta: Omit<DocumentoFlowLab, 'url' | 'expiraEm'> = {
         id: doc.id,
         tipo: doc.tipo as TipoDocumento,
-        nomeArquivo: doc.nome_arquivo,
+        nomeArquivo: nomeArquivoDe(doc),
         mimeType: doc.mime_type,
         tamanhoBytes: doc.tamanho_bytes,
         criadoEm: doc.criado_em,

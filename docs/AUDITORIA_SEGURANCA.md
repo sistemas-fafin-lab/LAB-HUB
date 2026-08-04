@@ -21,7 +21,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** → **parcial 31/07** (SSL exigido; CIDR aberto por decisão) |
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 31/07** (o que sobra exige plano Pro ou código) |
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** |
-| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 NO AR 03/08** (dado clínico cifrado). `pacientes.*` = fase 2 |
+| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 NO AR 03/08** (valores) + **fase 2a 04/08** (rótulos: nome do exame, `documentos.nome_arquivo`, `exam_results.cpf`). Falta a **2b** (`pacientes.*`) e, nas duas, derrubar as colunas em claro |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** (junto com S-01; DDL capturada em 31/07 pelo P-04) |
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | ~~**MÉDIO**~~ **CORRIGIDO 03/08/2026** |
@@ -545,6 +545,24 @@ O host da AOL responde normalmente **de fora** (DNS → `191.239.240.111`, `braz
 > algo não estava chegando ao paciente. É o argumento do S-08 em miniatura, no
 > primeiro dia: sem trilha, "não sabemos" não é uma resposta que se dá só à ANPD; é
 > o que se sabe sobre o próprio sistema.
+
+### 04/08/2026 — S-06 fase 2a: o rótulo do exame passa a ser cifrado
+
+| | |
+|---|---|
+| **Migration** | `20260803170000_s06_fase2a_rotulos_cifrados.sql` — **aplicada em produção**, ledger 21 × 21 |
+| **Código** | `lib/mappers.ts` (novo `nomeArquivoDe`), `laudos/repository.ts` (`cpfDaLinha`), `routes/webhooks.ts`, `routes/documentos.ts`, `routes/integracao.ts`, `lib/backfillCripto.ts` |
+| **Testes** | +8 em `criptografiaColunas.test.ts` (7 → 15). API de 318 → **326 testes**; type-check e lint limpos |
+| **Pendente** | deploy no VPS e `docker compose exec -T api node dist/scripts/backfillCripto.js` — o backfill **tem** de rodar lá dentro: a chave é a do VPS |
+
+Cinco colunas: `resultados.exame_nome` e `.categoria`, `agendamentos.exames`, `documentos.nome_arquivo`, `exam_results.cpf`. Nenhuma pediu blind index — foi conferido no código antes de escrever a migration que nenhuma é filtrada em SQL. As duas checagens que poderiam ter obrigado:
+
+- a busca "por nome ou categoria" da tela de resultados é **filtro no cliente** (`ResultsPage.tsx`), sobre a lista que a API já devolveu decifrada;
+- `exam_results.cpf` é comparado **em JS por dígitos** (`conferirCpf`), nunca com `.eq` — e isso é anterior a este trabalho, está escrito em `laudos/repository.ts:112`.
+
+**A checagem de segunda chave sobreviveu, e tem teste dedicado.** Aquela comparação de CPF é uma barreira de segurança (linha vinculada ao paciente errado deixa de ser servida), então cifrar a coluna sem cuidado a desarmaria em silêncio. O teste monta uma linha em que o CPF **em claro bate** e só o cifrado diverge: se a leitura caísse na coluna errada, o laudo do outro seria servido e o teste ficaria verde. Ele exige lista vazia.
+
+**O que esta migration NÃO resolve, e está dito nela:** `uq_resultado_agendamento_exame UNIQUE (agendamento_id, exame_nome)` é o que torna o webhook de resultado idempotente — o FlowLab entrega at-least-once e a reentrega bate no 23505. Sobre coluna cifrada essa unicidade não existe (IV aleatório), então **derrubar `exame_nome` sem substituir a chave transforma cada reentrega num resultado duplicado na tela do paciente**. Dois caminhos, e a escolha não era desta migration: usar `exame_flowlab_id` (a coluna já existe e está sem uso; depende de o FlowLab passar a enviá-la) ou um índice cego `hmac(chave, agendamento_id || nome)` — com o `agendamento_id` **dentro da mensagem**, senão a contagem por hash entrega o catálogo por análise de frequência.
 
 ### 03/08/2026 — retenção da trilha definida em 6 meses (fecha a pendência do S-08)
 
@@ -1131,9 +1149,28 @@ Limpeza conferida: paciente e usuário removidos, base de volta a **2 usuários 
 > **STATUS 03/08/2026.** O dado **clínico** (`exam_results.result`,
 > `resultados.paineis`, `resultados.resumo`) **está cifrado em produção** —
 > migration, chave no VPS, deploy e backfill feitos e verificados no mesmo dia.
-> As colunas de `pacientes` e `documentos.nome_arquivo` seguem em texto puro e
-> são a **fase 2**, que depende do blind index e da decisão sobre o typeahead da
-> recepção (§ 3.4).
+> A **fase 2a** (04/08) acrescenta os RÓTULOS: `resultados.exame_nome` e
+> `.categoria`, `agendamentos.exames`, `documentos.nome_arquivo` e
+> `exam_results.cpf`. Falta a **fase 2b**, `pacientes.*` — e `pacientes.nome`
+> ficou **em claro por decisão**, ver § 3.4.
+
+> **⚠ Dois avisos que valem para as duas fases, e que a redação anterior desta
+> seção deixava implícitos.**
+>
+> **1. "Cifrado" ainda não significa "protegido contra dump."** As colunas em
+> claro continuam preenchidas e continuam sendo escritas — é o que torna o
+> deploy reversível. Enquanto elas existirem, um `pg_dump` entrega tudo do mesmo
+> jeito. A proteção só passa a valer na migration que **para de escrever em
+> claro e derruba as colunas**, que é a etapa definitiva e não foi feita para
+> nenhuma das duas fases. Conferido em produção em 04/08: `resultados.resumo`
+> tinha 2 linhas com conteúdo em claro ao lado das 2 cifradas.
+>
+> **2. A fase 1 cifrou o valor e deixou a etiqueta.** `resultados.exame_nome`
+> guardava, em texto puro e a um join de `pacientes.nome`, coisas como `TESTE
+> RÁPIDO COMBO — COVID-19 / INFLUENZA A E B`. Para dado de saúde o rótulo
+> costuma ser a revelação inteira — Beta-HCG diz gravidez, carga viral diz o
+> diagnóstico — e nenhum deles precisa do número medido. É o que a fase 2a
+> corrige.
 
 Estado atual do dado sensível no banco:
 
@@ -1145,6 +1182,14 @@ Estado atual do dado sensível no banco:
 | `pacientes.cpf` | CPF (11 dígitos, UNIQUE) | texto puro |
 | `pacientes.nome` / `email` / `telefone` / `data_nascimento` | identificadores diretos | texto puro |
 | `documentos.nome_arquivo` | pode conter nome da pessoa | texto puro |
+
+**Três colunas que este levantamento não listava e que a fase 2a acrescentou** — achadas ao conferir o banco em 04/08, antes de escrever a migration:
+
+| Coluna | Conteúdo | Por que entrou |
+|---|---|---|
+| `resultados.exame_nome` / `.categoria` | `TESTE RÁPIDO COMBO — COVID-19 / INFLUENZA A E B`, `Imunologia` | o rótulo é a revelação; cifrar o painel e deixar o nome é trancar o cofre com a etiqueta na porta |
+| `agendamentos.exames` (jsonb) | quais exames a pessoa vai fazer | a mesma revelação, antes da coleta |
+| `exam_results.cpf` | **segunda cópia do CPF**, fora de `pacientes` | cifrar `pacientes.cpf` e deixar esta anularia a fase 2b: o CPF seguiria no dump, ligado ao mesmo `paciente_id` |
 
 Confirmei a estrutura de `exam_results.result`: array de laudos com as chaves `groups, panels, results, analitos, crm, doctor, laboratorio, material, metodo, exam_type, data_coleta, codigo_os, codigo_lis, summary…`. É o prontuário do exame, inteiro, em claro.
 
@@ -1976,18 +2021,24 @@ export function blindIndex(valor: string): string {
 | `pacientes.telefone` | lido para enviar ao FlowLab | **Cifrar.** Zero atrito |
 | `pacientes.email` | lido para exibir | **Cifrar.** (o e-mail canônico vive em `auth.users`, gerido pelo Supabase) |
 | `pacientes.data_nascimento` | `select` em `/laudos`, exibido na busca da recepção | **Cifrar** — mas ver P-01: se o claim passar a conferir nascimento, a conferência vira comparação de blind index |
-| **`pacientes.nome`** | **`ilike('nome', '%termo%')`** em `/integracao/pacientes/buscar` | **Conflito real — decidir. Ver abaixo** |
-| `documentos.nome_arquivo` | exibição e `Content-Disposition` | **Cifrar.** Zero atrito |
+| **`pacientes.nome`** | **`ilike('nome', '%termo%')`** em `/integracao/pacientes/buscar` | **Fica em claro — decidido em 04/08. Ver abaixo** |
+| `documentos.nome_arquivo` | exibição e `Content-Disposition` | ~~Cifrar~~ **CIFRADO na fase 2a (04/08)** |
+| `resultados.exame_nome`, `.categoria` | nunca filtradas em SQL (a busca da tela de resultados é no cliente) | ~~—~~ **CIFRADO na fase 2a (04/08)** |
+| `agendamentos.exames` | snapshot lido inteiro | ~~—~~ **CIFRADO na fase 2a (04/08)** |
+| `exam_results.cpf` | comparado em JS por dígitos (`conferirCpf`), nunca com `.eq` | ~~—~~ **CIFRADO na fase 2a (04/08)** |
 
 **Cuidado novo, criado pela correção do S-01.** O trigger `trg_pacientes_identidade` e a RPC `corrigir_identidade_paciente()` comparam `cpf` e `data_nascimento` por igualdade — entre `old`/`new` e contra as colunas de `correcoes_identidade`. AES-GCM usa IV aleatório, então **cifrar o mesmo CPF duas vezes dá ciphertexts diferentes**, e toda comparação de igualdade passa a mentir: `new.cpf is distinct from old.cpf` viraria verdadeiro em qualquer `UPDATE`, bloqueando até troca de nome. Ao cifrar essas duas colunas é obrigatório migrar as comparações para o **blind index** (determinístico) e guardar `cpf_bidx`/`nascimento_bidx` na trilha em vez do valor. Sem isso a criptografia quebra o `PUT /pacientes/me` e o claim do `POST /cadastro` de uma vez.
 
-**O conflito do `nome`.** `GET /integracao/pacientes/buscar` é o typeahead da recepção e faz busca parcial por nome. Coluna cifrada não suporta `ilike`. Três saídas:
+**O conflito do `nome` — ~~decidir~~ DECIDIDO em 04/08/2026: fica em claro.** `GET /integracao/pacientes/buscar` é o typeahead da recepção e faz busca parcial por nome. Coluna cifrada não suporta `ilike` — nem `ilike` nem sequer `=`, porque o IV é aleatório e o mesmo nome nunca cifra igual duas vezes. As saídas eram:
 
-1. **Buscar por CPF em vez de nome** (recomendada). O operador tem o CPF do paciente em mãos no balcão — é o documento que a pessoa apresenta. Vira `.eq('cpf_bidx', blindIndex(cpf))`, exato, mais rápido, e **elimina a enumeração da base** que o `ilike` permite hoje (`q` de 2 caracteres devolve 8 pacientes; iterar o alfabeto varre o cadastro).
-2. **Decifrar e filtrar na API.** Funciona com a base atual (8 pacientes), não escala. Descarte.
-3. **Deixar `nome` em claro.** Custo: um dump ainda liga nome a laudo (se o `paciente_id` correlacionar). Aceitável só se (1) for inviável operacionalmente.
+1. **Buscar por CPF em vez de nome.** Vira `.eq('cpf_bidx', blindIndex(cpf))`, exato, e de quebra fecha a enumeração que o `ilike` permite hoje.
+2. **Decifrar e filtrar na API.** Puxa a base inteira decifrada a cada tecla. Não escala e piora a exposição. Descarte.
+3. **Índice cego por prefixo/trigrama do nome.** Parece resolver e não resolve: um índice determinístico sobre pedaços de 3 letras vira oráculo — os baldes ficam pequenos o bastante para reconstruir o nome por frequência. Cifra a coluna e devolve a informação pela porta do lado.
+4. **Deixar `nome` em claro.**
 
-Minha recomendação é (1): resolve o conflito **e** fecha a enumeração de cadastro, de graça.
+**A decisão foi a (4), e o argumento é clínico, não de custo.** No balcão, identificar a pessoa certa é um **controle de segurança do paciente**. Degradar a busca aumenta a chance de anexar o laudo de um a outro — erro que age direto sobre o cuidado, é silencioso e acontece todo dia. A cifra do `nome` defende contra um dump hipotético; a busca degradada cria um risco real e recorrente. Nesse trade, em saúde, a identificação ganha.
+
+O resíduo aceito é pequeno **depois da fase 2a**: com os nomes de exame cifrados, `pacientes.nome` sozinho revela "é cliente deste laboratório", não "fez teste de COVID". Somado ao S-01 (acesso fechado) e ao S-08 (acesso auditado), é proporcional. Se o `nome` um dia for cifrado, a (1) continua sendo o caminho — e ela **não depende** desta decisão: o blind index de `cpf` é exigido pela fase 2b de qualquer forma, por causa do trigger de identidade.
 
 ## 3.5 Migração sem downtime
 
@@ -2053,7 +2104,7 @@ Depois de (1), reconfira: `select has_table_privilege('authenticated','public.pa
 | | Ação | Onde |
 |---|---|---|
 | 13 | ~~Criptografia de coluna, começando por `exam_results.result` e `resultados.paineis`~~ — **fase 1 no ar 03/08** (migration, chave, deploy e backfill verificados). `pacientes.*` = fase 2 | Parte 3 |
-| 14 | Trocar o typeahead da recepção de nome para CPF (blind index) | §3.4 |
+| 14 | ~~Trocar o typeahead da recepção de nome para CPF (blind index)~~ — **decidido em 04/08: `pacientes.nome` fica em claro.** Identificação correta no balcão é controle de segurança do paciente; degradá-la troca um risco de dump por um risco diário de trocar laudo entre pessoas | §3.4 |
 | 15 | ~~Estender a trilha append-only aos pontos de leitura de dado sensível~~ — **fechado 03/08**: migration, deploy e trilha gravando nos dois canais em produção, append-only provado com `set role`, `trustProxy` confirmado com IP público | S-08 |
 | 16 | ~~Rotina de expurgo (`storage.remove` **antes** do `delete`) + exclusão de conta~~ — **feito 31/07** | S-09 |
 | 17 | ~~`@fastify/helmet` + `redact` no logger + CORS obrigatório em produção~~ — **feito 30/07** | P-03 |
