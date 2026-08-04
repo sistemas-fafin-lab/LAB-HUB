@@ -2,20 +2,44 @@
 -- Troca a chave de idempotência do webhook: (agendamento, exame_nome) →
 -- exame_flowlab_id
 --
--- ⚠ NÃO APLICADA AINDA — ver PRÉ-REQUISITOS abaixo. Se o ledger
--- (`supabase_migrations.schema_migrations`) tiver 22 linhas e a pasta tiver 23
+-- ⚠ NÃO APLICADA — e a espera NÃO é por um deploy. Se o ledger
+-- (`supabase_migrations.schema_migrations`) tiver 24 linhas e a pasta tiver 25
 -- arquivos, é ESTA que falta, e é de propósito. Não é drift.
 --
--- PRÉ-REQUISITOS, na ordem:
---   1. Deploy do LAB-HUB gravando `exame_flowlab_id`     — FEITO (04/08, probe 400)
---   2. Deploy do FlowLab mandando `exameFlowlabId`       — Vercel, commit 184cbf4
---   3. Uma entrega real conferida com o id preenchido    — não há tráfego
---      orgânico neste caminho; precisa ser forçada
+-- ESPERA UMA FUNCIONALIDADE QUE NÃO EXISTE (conferido em 04/08/2026)
 --
--- O passo 2 é o que importa. Aplicar isto antes dele deixa a coluna NOT NULL
--- enquanto o FlowLab ainda entrega sem o campo: todo resultado tomaria
--- not_null_violation (23502) e nenhum seria gravado. Falha alta e recuperável
--- (o webhook retenta), mas é uma parada de serviço evitável.
+-- `ac_resultados` está com ZERO linhas no FlowLab, e nada escreve nela: o
+-- handler `deliver-resultado` existe, mas a `LiberacaoResultadosPage` — a tela
+-- que libera resultado — ainda não foi construída (ver PLANO_FLOWLAB_ANALISES_
+-- CLINICAS). Ou seja, não há como "esperar uma entrega real": o produtor não
+-- existe. Esta migration fica retida até o FlowLab passar a produzir resultado,
+-- não até alguém implantar alguma coisa.
+--
+-- O commit `184cbf4` do FlowLab (que manda o campo) está pushado, e isso não
+-- basta como prova: das 3 linhas de `resultados` em produção, a ÚNICA com
+-- `exame_flowlab_id` preenchido é a sonda de verificação do S-06. Nenhum webhook
+-- real jamais mandou o campo, porque nenhum webhook real jamais aconteceu.
+--
+-- PRÉ-REQUISITOS, na ordem:
+--   1. Deploy do LAB-HUB gravando `exame_flowlab_id`     — FEITO (04/08)
+--   2. FlowLab PRODUZINDO resultado (a tela de liberação) — NÃO EXISTE
+--   3. Uma entrega real conferida com o id preenchido     — impossível sem o 2
+--
+-- Aplicar isto antes do passo 3 deixa a coluna NOT NULL enquanto o FlowLab pode
+-- entregar sem o campo: o resultado tomaria not_null_violation (23502) e nenhum
+-- seria gravado. Falha alta e recuperável (o webhook retenta), mas é uma parada
+-- de serviço evitável.
+--
+-- COMO TESTAR QUANDO CHEGAR A HORA (o caminho existe e está ligado)
+--
+-- O FlowLab de TESTE (projeto Supabase `eqzqkztgzcngnxmihdom`) aponta para o
+-- LAB-HUB de PRODUÇÃO: `ac_agendamentos 017d41b5…` tem `labhub_id ba40d0e2…`,
+-- que existe lá. Dá para inserir uma linha em `ac_resultados` apontando para
+-- esse agendamento e chamar
+-- `POST /api/analises-clinicas/deliver-resultado {"resultadoId": …}` com o
+-- `Authorization: Bearer <FLOWLAB_API_KEY>`. Se `resultados.exame_flowlab_id`
+-- aparecer com aquele id, o FlowLab no ar manda o campo. Custo: deixa um
+-- resultado permanente no portal do paciente (não há rota de exclusão).
 --
 -- POR QUE ISTO EXISTE
 --

@@ -909,12 +909,26 @@ janela entre a foto e o tiro — pequena, e do tamanho exato de um webhook chega
 | `insert` em `documentos` | upload 201 + `DELETE` 204 |
 | Envelopes | 3 `paineis_enc`, 3 `exame_nome_enc`, 1 `exames_enc`, 16 `nome_arquivo_enc` — intactos |
 
-**A `20260804140000` NÃO subiu junto, e a razão apareceu na hora de decidir.** Ela faz
+**A `20260804140000` NÃO subiu junto, e a razão ficou maior quando fui olhar.** Ela faz
 `exame_flowlab_id` virar `NOT NULL`. O commit do FlowLab está pushado, mas das três
 linhas de `resultados` a única que carrega o id opaco **é a sonda deste documento** —
-nenhum webhook real jamais mandou o campo. Pushado não é implantado, e aplicar a
-`140000` faria todo resultado real passar a falhar com 23502. Ela espera uma entrega
-real com o campo preenchido, não um commit no `origin`.
+nenhum webhook real jamais mandou o campo.
+
+E o motivo não é deploy atrasado: **`ac_resultados` está com zero linhas e nada
+escreve nela**. O handler `deliver-resultado` existe, mas a `LiberacaoResultadosPage`
+— a tela que libera resultado — ainda não foi construída. Não há entrega real para
+esperar porque **o produtor não existe**. Eu vinha chamando isso de "espera o deploy do
+FlowLab", o que teria mandado alguém esperar para sempre; a migration agora diz no
+próprio cabeçalho que espera uma **funcionalidade**.
+
+Decisão de 04/08: deixar como está até o FlowLab passar a produzir resultado.
+
+O caminho de teste, porém, existe e está ligado — vale registrar antes que se perca. O
+FlowLab de **teste** (Supabase `eqzqkztgzcngnxmihdom`) aponta para o LAB-HUB de
+**produção**: `ac_agendamentos 017d41b5…` tem `labhub_id ba40d0e2…`, que é o mesmo
+agendamento usado nos três disparos. Inserir uma linha em `ac_resultados` e chamar
+`POST /api/analises-clinicas/deliver-resultado` exercitaria o código FlowLab implantado
+de verdade. Custo: mais um resultado permanente no portal do paciente.
 
 **A partir daqui a chave é o dado.** Perder `PII_KEY_K1` deixou de ser incidente
 operacional e passou a ser perda irreversível de resultado clínico: o backup do banco
