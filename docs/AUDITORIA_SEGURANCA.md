@@ -834,6 +834,51 @@ guarda de reconciliação virou só o envelope.
 **Os dois commits precisam estar no ar antes da `20260804160000`** — o deploy conferido
 acima ainda tem os dois defeitos. **342 testes**, tsc e eslint limpos.
 
+#### A "janela de observação" virou checklist
+
+Eu vinha dizendo "observar alguns dias" antes do drop. Ao definir o que isso seria,
+duas coisas derrubaram a ideia:
+
+1. **A janela não detecta a falha que o drop causaria.** Enquanto as colunas existem,
+   todo `select` que as nomeia funciona. O defeito achado duas vezes acima é invisível
+   **até o instante do drop** — esperar não reduz esse risco em nada. Quem reduz é o
+   inventário e o teste de varredura.
+2. **Não há tráfego para acumular.** 3 resultados, 16 documentos (o último de 03/08),
+   13 agendamentos, `exam_results` vazio. "Alguns dias" produz a mesma evidência que
+   alguns minutos.
+
+Trocado por três disparos deliberados, cada um aprovado à parte, com leitura de volta
+pelo portal com login real:
+
+| Disparo | Coluna | Resultado |
+|---|---|---|
+| Upload de documento (reversível — apagado no fim) | `nome_arquivo_enc` | 84 bytes = `48+ceil(25/3)*4`; nome voltou legível; signed URL 200; trilha registrou `documento.url` |
+| Webhook de coleta (`em_coleta` + exames) | `exames_enc` | 220 bytes; portal devolveu os dois exames com `material`/`isCultura` intactos |
+| Webhook de resultado (com `exameFlowlabId`) | `paineis_enc`, `resumo_enc`, `categoria_enc`, `exame_nome_enc` | 152 bytes; reentrega devolveu `idempotency: ignored` sem duplicar |
+
+O tamanho prova **qual** conteúdo foi cifrado sem precisar da chave; quem prova o
+**AAD** é a leitura de volta, que só devolve legível se gravação e leitura montarem a
+mesma tripla `tabela:coluna:id`. Escrita e leitura conferidas na mesma linha.
+
+A reentrega da coleta merece nota própria: mandada com exames **diferentes**, caiu no
+ramo `atual === novoStatus` — exatamente a linha que o `cf464ab` mudou — e o envelope
+ficou byte por byte igual. Esse ramo existe para o caso de o snapshot ter ficado null
+numa entrega anterior; condição errada ali faria uma reentrega do FlowLab **apagar um
+snapshot bom por um pior, em silêncio**.
+
+Censo depois dos três: **0 linhas em claro sem par cifrado** nas sete.
+
+**Fica uma linha de verificação em `resultados`** (`cc11fa7e`, exame `VERIFICACAO DE
+DEPLOY — NAO E RESULTADO CLINICO`), visível no portal do paciente de teste. Não existe
+rota de exclusão de resultado e SQL de escrita em produção está fora — some quando
+alguém apagar à mão. É o mesmo espírito da 1ª linha da trilha do S-08: marca de
+verificação deliberada, não dado real.
+
+`exam_results` continua **sem prova de ponta a ponta**: a tabela está vazia e o caminho
+de escrita depende da AOL, inalcançável do VPS. O drop leva `result` e `cpf` de lá sem
+dado a perder, mas o código que grava e lê essas duas colunas segue conferido só por
+teste até o IP ser liberado.
+
 ### 03/08/2026 — retenção da trilha definida em 6 meses (fecha a pendência do S-08)
 
 | | |
