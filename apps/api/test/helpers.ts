@@ -42,8 +42,12 @@ export type RpcHandler = (call: RpcCall) => SupaResult
 // Chamada ao Storage registrada pelo mock (upload/remove/signed URLs).
 export interface StorageCall {
   bucket: string
-  op: 'upload' | 'remove' | 'createSignedUrl' | 'createSignedUrls'
+  op: 'upload' | 'remove' | 'createSignedUrl' | 'createSignedUrls' | 'list'
   paths: string[]
+  // Paginação do `list`. Registrada porque a varredura de órfãos do
+  // apagarPaciente depende do laço de páginas — sem isto, um mock que devolve
+  // tudo de uma vez esconderia a falta do laço.
+  opcoesList?: { limit?: number; offset?: number }
   // TTL da signed URL, em segundos. Registrado porque é decisão de segurança
   // (P-05): sem isto, alguém troca 300 por 3600 e nenhum teste reclama.
   ttl?: number
@@ -104,17 +108,28 @@ export function createSupabaseMock(opts: {
           error: null,
         }
       }
+      // `list` devolve LISTA (vazia por default); os demais, um objeto.
+      if (call.op === 'list') {
+        return { data: [], error: null }
+      }
       return { data: { path: call.paths[0] }, error: null }
     })
 
   function storageFrom(bucket: string) {
-    const run = (op: StorageCall['op'], paths: string[], ttl?: number, options?: unknown) => {
+    const run = (
+      op: StorageCall['op'],
+      paths: string[],
+      ttl?: number,
+      options?: unknown,
+      opcoesList?: StorageCall['opcoesList'],
+    ) => {
       const call: StorageCall = {
         bucket,
         op,
         paths,
         ...(ttl === undefined ? {} : { ttl }),
         ...(options ? { options } : {}),
+        ...(opcoesList ? { opcoesList } : {}),
       }
       storageCalls.push(call)
       return Promise.resolve(storageHandler(call))
@@ -123,6 +138,10 @@ export function createSupabaseMock(opts: {
       upload: (path: string, _body: unknown, options?: unknown) =>
         run('upload', [path], undefined, options),
       remove: (paths: string[]) => run('remove', paths),
+      // `paths` guarda o PREFIXO consultado — é o que o teste precisa conferir
+      // (a varredura tem de olhar `{pacienteId}/`, não a raiz do bucket).
+      list: (prefixo: string, opcoes?: { limit?: number; offset?: number }) =>
+        run('list', [prefixo], undefined, undefined, opcoes ?? {}),
       createSignedUrl: (path: string, ttl: number, options?: unknown) =>
         run('createSignedUrl', [path], ttl, options),
       createSignedUrls: (paths: string[], ttl: number) => run('createSignedUrls', paths, ttl),
