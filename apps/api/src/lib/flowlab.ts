@@ -91,6 +91,13 @@ export const flowlab = {
   // Leitura ao vivo (usada na validação do agendamento).
   getDisponibilidade: () => call<PostoDisponivel[]>('get-disponibilidade'),
 
+  // Idem, mas incluindo a janela retroativa do FlowLab (AGENDA_RETROATIVO_DIAS).
+  // Exclusiva da criação PELA RECEPÇÃO: o operador lança um atendimento que já
+  // aconteceu (ontem, ou hoje de manhã) e o slot escolhido não está mais no
+  // futuro. O paciente nunca passa por aqui — segue com getDisponibilidade().
+  getDisponibilidadeRetroativa: () =>
+    call<PostoDisponivel[]>('get-disponibilidade?retroativo=1'),
+
   // Leitura com cache de TTL curto (usada só para exibição).
   getDisponibilidadeCacheada,
   invalidarDisponibilidade,

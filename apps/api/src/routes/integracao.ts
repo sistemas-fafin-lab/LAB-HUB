@@ -284,7 +284,10 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       //    (mesma checagem do fluxo do paciente). A recepção escolhe um slot real da
       //    grade — não é encaixe livre — então validamos aqui p/ pegar o horário que
       //    ficou ocupado entre o operador abrir o modal e enviar.
-      const disponiveis = await flowlab.getDisponibilidade()
+      //    A grade vem com a janela retroativa: o registro é assíncrono e o horário
+      //    lançado costuma já ter passado. Continua sendo um slot real e livre da
+      //    grade — o que muda é só o piso da janela.
+      const disponiveis = await flowlab.getDisponibilidadeRetroativa()
       const posto = disponiveis.find((p) => p.id === postoFlowlabId)
       if (!posto) {
         throw app.httpErrors.badRequest('Posto desconhecido')
