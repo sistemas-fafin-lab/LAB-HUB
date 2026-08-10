@@ -271,20 +271,16 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = criarAgendamentoRecepcaoSchema.safeParse(request.body)
       if (!parsed.success) {
-        // O chamador aqui é o FlowLab, não uma pessoa: quem depura a integração lê
-        // ESTE log, não a tela. A mensagem curta vai na resposta e o detalhe fica
-        // aqui. As issues do zod carregam `path` e `code`, não os valores enviados.
-        request.log.warn({ issues: parsed.error.issues }, 'payload inválido')
-        throw app.httpErrors.badRequest(mensagemZod(parsed.error))
+        throw app.httpErrors.badRequest(parsed.error.message)
       }
       const { pacienteId, nome, cpf, dataNascimento, telefone, postoFlowlabId, dataHora } =
         parsed.data
 
-      // 1) Confirma posto + horário contra a disponibilidade AO VIVO do FlowLab
-      //    (mesma checagem do fluxo do paciente). A recepção escolhe um slot real da
-      //    grade — não é encaixe livre — então validamos aqui p/ pegar o horário que
-      //    ficou ocupado entre o operador abrir o modal e enviar.
-      const disponiveis = await flowlab.getDisponibilidade()
+      // 1) Confirma posto + horário contra a disponibilidade AO VIVO do FlowLab.
+      //    Usa a chamada RETROATIVA porque o operador lança atendimentos que já
+      //    aconteceram (ontem, ou hoje de manhã) — o slot escolhido não está mais
+      //    no futuro. O paciente segue com getDisponibilidade() padrão.
+      const disponiveis = await flowlab.getDisponibilidadeRetroativa()
       const posto = disponiveis.find((p) => p.id === postoFlowlabId)
       if (!posto) {
         throw app.httpErrors.badRequest('Posto desconhecido')
