@@ -21,7 +21,7 @@ O problema não está nesse caminho. Está **do lado de fora dele**: o banco exp
 | S-03 | Banco aberto a `0.0.0.0/0` e SSL não obrigatório na conexão Postgres | **ALTO** → **parcial 31/07** (SSL exigido; CIDR aberto por decisão) |
 | S-04 | Política de senha fraca (mín. 6), troca de senha sem reautenticação, MFA não exigido | **ALTO** → **parcial 31/07** (o que sobra exige plano Pro ou código) |
 | S-05 | `site_url` = `localhost:3000`, sem SMTP próprio, confirmação de e-mail desligada | ~~**ALTO**~~ **CORRIGIDO 31/07/2026** |
-| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 NO AR 03/08** (valores) + **fase 2a 04/08** (rótulos) + **DROP das sete colunas em claro aplicado 04/08** — é daí que a cifra passa a proteger de dump. Sobra `resultados.exame_nome` (sai com a troca da unicidade, esperando entrega real do FlowLab com o id opaco) e a fase **2b** (`pacientes.cpf/email/data_nascimento`, depende de blind index) |
+| S-06 | Dados clínicos (`exam_results.result`, `resultados.paineis`) e identificadores em texto puro | **MÉDIO** → **fase 1 NO AR 03/08** (valores) + **fase 2a 04/08** (rótulos) + **DROP das sete colunas em claro aplicado 04/08** — é daí que a cifra passa a proteger de dump. **Fase 2b 26/08: `pacientes.cpf` sai do texto puro, `cpf_hash` vira índice cego definitivo** — verificado em produção. Sobra `resultados.exame_nome` (sai com a troca da unicidade, esperando entrega real do FlowLab com o id opaco) e `pacientes.email`/`data_nascimento`, que ficaram fora do escopo desta fase |
 | P-02 | 4 vulnerabilidades `high` em dependências de produção; sem CI e sem gate de auditoria | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** |
 | S-07 | `rls_auto_enable()` é `SECURITY DEFINER` e executável por `anon` via RPC | ~~**MÉDIO**~~ **CORRIGIDO 30/07/2026** (junto com S-01; DDL capturada em 31/07 pelo P-04) |
 | S-08 | Sem trilha de auditoria de acesso a dado de saúde (LGPD art. 37/38) | ~~**MÉDIO**~~ **CORRIGIDO 03/08/2026** |
@@ -974,6 +974,50 @@ A última linha é a que o bloco SQL não alcança: função nova não aparece n
 PostgREST até o `notify pgrst, 'reload schema'`, e a rotina chama por RPC. Sem
 esse teste, o primeiro sinal de falha seria um cron mudo daqui a seis meses.
 
+### 26/08/2026 — S-06 fase 2b: `pacientes.cpf` sai do texto puro, `cpf_hash` vira índice definitivo — **APLICADO**
+
+| | |
+|---|---|
+| **Migrations** | `20260826120000_s06_fase2b_cpf_indice_cego.sql` (escrita dupla) → `20260826130000_s06_fase2b_corte_escrita_cpf.sql` (corte) → `20260826140000_s06_fase2b_drop_cpf_e_unicidade.sql` (drop) — as três **aplicadas em produção** |
+| **Código** | `lib/crypto.ts` (`hashCpf`/`decifrarCpfPaciente`), `lib/backfillCripto.ts`, `lib/apagarPaciente.ts`, `lib/mappers.ts`, `routes/cadastro.ts`, `routes/integracao.ts`, `routes/laudos.ts`, `routes/admin.ts` |
+| **Testes** | API de 353 → **409 testes** (+56, entre eles a fase 2b e a consulta admin por CPF que passou a depender dela); build (`tsc`) limpo |
+| **Irreversível** | sim, mesma natureza do drop de 04/08 — revertido o deploy, `pacientes.cpf` não volta a existir com dado nenhum dentro |
+| **Produção** | verificado por consulta direta ao banco (ver tabela abaixo) |
+
+Mesma coreografia de três tickets que a fase 1/2a já tinha rodado para as sete
+colunas de dado clínico, adaptada para uma coluna que participa de **busca e
+unicidade**, não só leitura: `cpf_hash` é HMAC-SHA256 determinístico com chave
+própria (`CPF_HASH_KEY`, nunca reaproveitada de `PII_KEY_*`) — blind index, não
+AEAD, porque `cifrar()` tem IV aleatório e cifraria o mesmo CPF diferente a
+cada vez, o que quebraria comparação por igualdade. `cpf_enc` (AEAD) guarda o
+valor para os poucos lugares que precisam mostrá-lo de volta (ex.: `cpfMascarado`
+no typeahead da recepção, a identidade decifrada na consulta admin).
+
+**O que a migration do drop (ticket 04) teve de ajustar junto**, porque duas
+peças fora do alcance da API liam `pacientes.cpf` dentro do próprio Postgres:
+o trigger `pacientes_bloqueia_troca_identidade()` (o ramo de CPF saiu — já era
+código morto desde o corte do ticket 03, que fez `cpf` nascer sempre nulo) e a
+RPC `corrigir_identidade_paciente()` (passou a receber `p_cpf_hash_novo` e
+`p_cpf_anterior_texto`, calculados/decifrados pela API antes da chamada, já
+que a chave de cripto não existe dentro do banco).
+
+**A guarda ficou no mesmo batch do drop**, como em 04/08: um `do $$` conta
+`pacientes` com `cpf_hash is null` e levanta exceção antes de qualquer `alter
+table` — se o backfill não tivesse terminado, a migration inteira abortaria
+sem tocar em nada.
+
+**Conferido em produção depois do deploy:**
+
+| O quê | Como | Resultado |
+|---|---|---|
+| Coluna `cpf` não existe mais | `select column_name from information_schema.columns where table_name = 'pacientes'` | só `cpf_hash` e `cpf_enc` |
+| Nenhuma linha ficou sem índice cego | `select count(*) from pacientes where cpf_hash is null` | **0** |
+
+A segunda linha, sozinha, já provaria o backfill — mas o argumento mais forte é
+a primeira: a coluna só sai da tabela se a guarda acima **passar**, e a guarda
+só passa com zero pendências. A migration ter aplicado é, por construção, prova
+de que o backfill terminou antes do corte.
+
 ---
 
 # PARTE 1 — SUPABASE
@@ -1516,7 +1560,7 @@ Limpeza conferida: paciente e usuário removidos, base de volta a **2 usuários 
 
 ---
 
-### S-06 — Dado clínico e identificadores em texto puro — **FASE 1 NO AR 03/08/2026**
+### S-06 — Dado clínico e identificadores em texto puro — **FASE 2b NO AR 26/08/2026**
 
 > **STATUS 03/08/2026.** O dado **clínico** (`exam_results.result`,
 > `resultados.paineis`, `resultados.resumo`) **está cifrado em produção** —
@@ -1525,6 +1569,19 @@ Limpeza conferida: paciente e usuário removidos, base de volta a **2 usuários 
 > `.categoria`, `agendamentos.exames`, `documentos.nome_arquivo` e
 > `exam_results.cpf`. Falta a **fase 2b**, `pacientes.*` — e `pacientes.nome`
 > ficou **em claro por decisão**, ver § 3.4.
+
+> **STATUS 26/08/2026.** A **fase 2b** foi ao ar: `pacientes.cpf` percorreu a
+> mesma coreografia de três tickets da fase 1/2a (escrita dupla → corte da
+> escrita em claro → drop), só que com **blind index** (`cpf_hash`, HMAC-SHA256
+> determinístico com chave própria `CPF_HASH_KEY`) em vez de AEAD simples — é a
+> coluna comparada por igualdade (busca, unicidade, trigger de identidade), e
+> AES-GCM com IV aleatório cifra o mesmo CPF diferente a cada vez, o que
+> quebraria as três coisas. `pacientes.cpf` **não existe mais** na tabela;
+> `cpf_hash` é `NOT NULL UNIQUE` e a única fonte de busca/unicidade de CPF.
+> Verificado em produção depois do deploy (ver Registro de execução, entrada de
+> 26/08). Seguem em claro, fora do escopo desta fase: `pacientes.email`,
+> `pacientes.data_nascimento` e `resultados.exame_nome` (este último esperando
+> a troca de unicidade para `exame_flowlab_id`, ver o registro de 04/08).
 
 > **⚠ Dois avisos que valem para as duas fases, e que a redação anterior desta
 > seção deixava implícitos.**
