@@ -169,10 +169,10 @@ export function validarCriptografia(): void {
   }
 
   if (!lerChaveHash()) {
-    // Mesmo espírito do PII_KEY_K1 acima, para o índice cego do CPF (fase 2b).
-    // `pacientes.cpf` continua em claro enquanto esta fase durar, então a
-    // ausência daqui não interrompe busca nem cadastro — só deixa cpf_hash/
-    // cpf_enc sem gravar, o que o ticket 03 (corte) não pode herdar.
+    // Mesmo espírito do PII_KEY_K1 acima, desde o corte de pacientes.cpf em
+    // claro (fase 2b, ticket 03): sem esta chave não há como gravar CPF em
+    // NENHUMA forma — nem cpf em claro (parou de ser escrito), nem cpf_hash/
+    // cpf_enc. A escrita de paciente FALHA em vez de degradar.
     if (process.env.NODE_ENV === 'production') {
       throw new Error(
         'CPF_HASH_KEY é obrigatória em produção: sem ela o índice cego de pacientes.cpf (auditoria ' +
@@ -182,9 +182,9 @@ export function validarCriptografia(): void {
       )
     }
     console.warn(
-      '[cripto] CPF_HASH_KEY ausente: pacientes.cpf_hash/cpf_enc não serão gravados (fase 2b do ' +
-        'S-06). cpf em claro continua sendo a fonte de verdade enquanto isso. Em produção o boot ' +
-        'falharia aqui.',
+      '[cripto] CPF_HASH_KEY ausente: gravar paciente vai FALHAR (pacientes.cpf em claro deixou de ' +
+        'ser escrito — auditoria § S-06, fase 2b). Leitura de linha antiga continua funcionando. Em ' +
+        'produção o boot falharia aqui.',
     )
   }
 }
@@ -272,26 +272,6 @@ export function cifrarJsonSeConfigurado(valor: unknown, aad: string): string | n
 
 export function cifrarSeConfigurado(texto: string, aad: string): string | null {
   return criptografiaConfigurada() ? cifrar(texto, aad) : null
-}
-
-/**
- * Versão tolerante de `hashCpf`, no mesmo espírito de `cifrarSeConfigurado`:
- * devolve `null` sem `CPF_HASH_KEY` em vez de lançar.
- *
- * Só para a ESCRITA (grava `cpf_hash` junto do `cpf` em claro no INSERT): sem
- * a chave, o par cpf_hash/cpf_enc fica de fora e o `cpf` em claro segue sendo
- * gravado normalmente. Por isso a criação de paciente não pode falhar fechado
- * só por causa do índice cego: derrubar o cadastro (ou deixar um usuário do
- * Auth órfão, criado um passo antes do INSERT) por uma coluna que a escrita
- * ainda trata como best-effort seria pior que a proteção que ela adianta.
- *
- * Desde o ticket 02 (busca por `cpf_hash`), isso NÃO vale mais para a busca —
- * `hashCpf()` direto, sem a variante tolerante, é o que os quatro pontos de
- * busca usam, e lança sem a chave. Em produção `hashCpfSeConfigurado` nunca
- * devolve `null` — `validarCriptografia()` já derrubou o boot.
- */
-export function hashCpfSeConfigurado(cpfNormalizado: string): string | null {
-  return hashCpfConfigurado() ? hashCpf(cpfNormalizado) : null
 }
 
 /**

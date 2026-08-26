@@ -545,16 +545,17 @@ describe('POST /integracao/agendamentos/:labhubId/documentos', () => {
 // ---------------------------------------------------------------------------
 // POST /integracao/agendamentos — modo NOVO (find-or-create por CPF)
 //
-// Fase 2b (S-06, ticket 01): o paciente "fantasma" criado aqui pela recepção
-// passa a gravar cpf_hash e cpf_enc além do cpf em claro já gravado hoje.
+// Fase 2b (S-06), ticket 03 — o corte: o paciente "fantasma" criado aqui pela
+// recepção grava só cpf_hash e cpf_enc; `cpf` em claro não entra mais no
+// INSERT.
 // ---------------------------------------------------------------------------
 
-describe('POST /integracao/agendamentos — modo NOVO: escrita dupla do índice cego', () => {
+describe('POST /integracao/agendamentos — modo NOVO, ticket 03: corte da escrita de cpf em claro', () => {
   const POSTO_ID = '99999999-9999-9999-9999-999999999999'
   const SLOT = '2026-08-20T10:00:00.000Z'
   const CPF_NOVO_PACIENTE = '52998224725'
 
-  it('cria o paciente fantasma gravando cpf_hash e cpf_enc, junto do cpf em claro', async () => {
+  it('cria o paciente fantasma gravando cpf_hash e cpf_enc, e nunca cpf em claro', async () => {
     let pacienteInserido: Record<string, unknown> | undefined
 
     const handler: SupaHandler = (call) => {
@@ -611,7 +612,7 @@ describe('POST /integracao/agendamentos — modo NOVO: escrita dupla do índice 
     expect(pacienteInserido).toBeDefined()
     const gravado = pacienteInserido!
 
-    expect(gravado.cpf).toBe(CPF_NOVO_PACIENTE)
+    expect(gravado).not.toHaveProperty('cpf')
     expect(gravado.cpf_hash).toBe(hashCpf(CPF_NOVO_PACIENTE))
 
     const id = gravado.id as string
@@ -623,14 +624,48 @@ describe('POST /integracao/agendamentos — modo NOVO: escrita dupla do índice 
     expect(res.body).not.toContain('cpf_enc')
   })
 
-  // Ticket 01 (escrita): sem CPF_HASH_KEY, o INSERT do fantasma tolera a
-  // ausência de cpf_hash/cpf_enc (`SeConfigurado`). Ticket 02 (busca) muda o
-  // outro lado: achar o paciente por CPF passa a exigir `hashCpf` direto — sem
-  // a chave, a busca (que acontece ANTES do insert, no find-or-create) falha
-  // e o find-or-create inteiro 500a, sem chegar a criar paciente nem agendamento.
+  // A busca do fantasma/paciente existente (ticket 02) já exige `hashCpf`
+  // direto — sem a chave, a busca (que acontece ANTES do insert, no
+  // find-or-create) falha e o find-or-create inteiro 500a, sem chegar a criar
+  // paciente nem agendamento.
   it('sem CPF_HASH_KEY, falha ao buscar o paciente por CPF (não chega a criar nada)', async () => {
     vi.stubEnv('CPF_HASH_KEY', '')
     const handler: SupaHandler = () => ({ data: null, error: null })
+    const mock = createSupabaseMock({ handler })
+    h.setSb(mock.client)
+    h.setFl({
+      getDisponibilidadeRetroativa: async () => [
+        { id: POSTO_ID, nome: 'Posto Centro', endereco: 'Rua X, 1', slots: [SLOT] },
+      ],
+      invalidarDisponibilidade: () => undefined,
+    })
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integracao/agendamentos',
+      headers: CHAVE,
+      payload: {
+        nome: 'Maria Nova',
+        cpf: '529.982.247-25',
+        dataNascimento: '1990-05-05',
+        postoFlowlabId: POSTO_ID,
+        dataHora: SLOT,
+      },
+    })
+
+    expect(res.statusCode).toBe(500)
+    expect(mock.calls.some((c) => c.table === 'pacientes' && c.op === 'insert')).toBe(false)
+    expect(mock.calls.some((c) => c.table === 'agendamentos')).toBe(false)
+  })
+
+  // A busca por CPF usa `hashCpf`, não `cifrar` — não depende de PII_KEY_K1.
+  // Só o INSERT do fantasma novo chega a chamar `cifrar` (para `cpf_enc`), e é
+  // aí que a ausência da chave precisa falhar fechado, sem criar paciente nem
+  // agendamento.
+  it('sem PII_KEY_K1, falha fechado ao gravar o fantasma novo (não chega a criar nada)', async () => {
+    vi.stubEnv('PII_KEY_K1', '')
+    const handler: SupaHandler = () => ({ data: null, error: null }) // ninguém com este CPF ainda
     const mock = createSupabaseMock({ handler })
     h.setSb(mock.client)
     h.setFl({
@@ -940,7 +975,8 @@ describe('POST /integracao/pacientes/:pacienteId/correcao-identidade', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Fase 2b (S-06) — a RPC troca `cpf`; cpf_hash/cpf_enc precisam acompanhar
+// Fase 2b (S-06), ticket 03 — a RPC não grava mais `cpf` em claro; a API
+// calcula cpf_hash/cpf_enc ANTES de chamá-la e os grava logo depois.
 // ---------------------------------------------------------------------------
 
 describe('POST /integracao/pacientes/:pacienteId/correcao-identidade — sincroniza cpf_hash/cpf_enc', () => {
@@ -1002,21 +1038,18 @@ describe('POST /integracao/pacientes/:pacienteId/correcao-identidade — sincron
     expect(res.json().correcaoId).toBe('66666666-6666-6666-6666-666666666666')
   })
 
-  // Um cpf_hash/cpf_enc do CPF ANTERIOR (não nulo, só desatualizado) é pior que
-  // ausente: verificarBackfill() só enxerga pendência via `.is('cpf_hash',
-  // null)`, então uma linha stale ficaria invisível para sempre. Por isso a
-  // sincronização que falha tenta, em seguida, ZERAR as duas colunas — devolve
-  // a linha ao estado "pendente" para o próximo backfillCripto reencontrá-la.
-  it('se a sincronização falhar, zera cpf_hash/cpf_enc para o backfill reencontrar a linha', async () => {
+  // Diferente de antes do ticket 03: a sincronização que falha NÃO zera
+  // cpf_hash/cpf_enc mais. A RPC parou de gravar `cpf` em claro, então
+  // zerar faria o backfill regenerar o par a partir do CPF ANTERIOR (o único
+  // que a coluna em claro ainda guarda) — silenciosamente errado. A linha
+  // fica como estava (índice cego do CPF anterior) até correção manual.
+  it('se a sincronização falhar, não zera cpf_hash/cpf_enc (só loga)', async () => {
     const updates: Record<string, unknown>[] = []
-    let chamada = 0
     const mock = createSupabaseMock({
       handler: (call) => {
         if (call.table === 'pacientes' && call.op === 'update') {
-          chamada += 1
           updates.push(call.payload as Record<string, unknown>)
-          // 1ª chamada: a sincronização em si, que falha. 2ª: a limpeza, que segue.
-          return chamada === 1 ? { data: null, error: { message: 'boom' } } : { data: null, error: null }
+          return { data: null, error: { message: 'boom' } }
         }
         return { data: null, error: null }
       },
@@ -1033,7 +1066,28 @@ describe('POST /integracao/pacientes/:pacienteId/correcao-identidade — sincron
     })
 
     expect(res.statusCode).toBe(200)
-    expect(updates).toHaveLength(2)
-    expect(updates[1]).toEqual({ cpf_hash: null, cpf_enc: null })
+    expect(updates).toHaveLength(1)
+  })
+
+  // Calculado ANTES da RPC: sem CPF_HASH_KEY/PII_KEY_K1 a correção falha ali
+  // mesmo, e a RPC nem chega a ser chamada — nenhuma trilha, nenhuma
+  // invalidação de cache de laudos, nenhuma escrita (S-06, ticket 03).
+  it.each([
+    ['CPF_HASH_KEY', 'CPF_HASH_KEY'],
+    ['PII_KEY_K1', 'PII_KEY_K1'],
+  ])('sem %s, falha fechado antes de chamar a RPC', async (_rotulo, env) => {
+    vi.stubEnv(env, '')
+    const mock = setupCorrecao(RPC_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: CORPO_VALIDO,
+    })
+
+    expect(res.statusCode).toBe(500)
+    expect(mock.rpcCalls).toHaveLength(0)
   })
 })

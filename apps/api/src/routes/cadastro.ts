@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase.js'
 import { cadastroSchema } from '../schemas/cadastro.js'
 import { toPaciente } from '../lib/mappers.js'
 import { mensagemZod } from '../lib/validacao.js'
-import { aadDe, cifrarSeConfigurado, hashCpf, hashCpfSeConfigurado } from '../lib/crypto.js'
+import { aadDe, cifrar, hashCpf } from '../lib/crypto.js'
 
 // Toggle do fluxo de confirmação de e-mail.
 //  - false (default, fase de testes): NÃO dispara e-mail; o front loga direto.
@@ -138,15 +138,25 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
         // de `cpf_enc` é `pacientes:cpf:<id>` e precisa existir ANTES de cifrar
         // — mesmo motivo do `insertAwaiting` de exam_results.
         const pacienteId = randomUUID()
-        // Fase 2b (S-06): índice cego + envelope cifrado, lado a lado com o
-        // `cpf` em claro. Ver .scratch/cpf-indice-cego-fase2b. Tolerante
-        // (`SeConfigurado`), não `hashCpf`/`cifrar` direto: o usuário do Auth já
-        // foi criado (userId acima), então uma exceção aqui teria de correr até
-        // o `dbError` para disparar o rollback do Auth — não pode. `cpf` em
-        // claro segue sendo a fonte de verdade nesta fase; sem CPF_HASH_KEY o
-        // cadastro continua funcionando, só sem o índice cego ainda.
-        const cpfHash = hashCpfSeConfigurado(cpf)
-        const cpfEnc = cifrarSeConfigurado(cpf, aadDe('pacientes', 'cpf', pacienteId))
+        // Fase 2b (S-06, ticket 03): índice cego + envelope cifrado são a ÚNICA
+        // forma gravada — `cpf` em claro parou de ser escrito (ver a migration
+        // do corte). `hashCpf`/`cifrar` direto, não as variantes tolerantes:
+        // sem `CPF_HASH_KEY`/`PII_KEY_K1` a escrita falha fechada, e como o
+        // usuário do Auth já foi criado (userId acima), o rollback é o mesmo
+        // dos outros caminhos de falha desta rota.
+        let cpfHash: string
+        let cpfEnc: string
+        try {
+          cpfHash = hashCpf(cpf)
+          cpfEnc = cifrar(cpf, aadDe('pacientes', 'cpf', pacienteId))
+        } catch (cryptoError) {
+          await supabase.auth.admin.deleteUser(userId)
+          request.log.error(
+            { err: cryptoError },
+            'Falha ao gerar índice cego do CPF — cadastro abortado',
+          )
+          throw app.httpErrors.internalServerError('Falha ao criar paciente')
+        }
         const { data, error } = await supabase
           .from('pacientes')
           .insert({
@@ -154,9 +164,8 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
             auth_user_id: userId,
             nome,
             email,
-            cpf,
-            ...(cpfHash ? { cpf_hash: cpfHash } : {}),
-            ...(cpfEnc ? { cpf_enc: cpfEnc } : {}),
+            cpf_hash: cpfHash,
+            cpf_enc: cpfEnc,
             sexo,
             data_nascimento: dataNascimento,
             ...(telefone ? { telefone } : {}),

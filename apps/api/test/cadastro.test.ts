@@ -155,7 +155,9 @@ describe('POST /cadastro — claim do paciente-fantasma (P-01)', () => {
 
     expect(res.statusCode).toBe(201)
     const insert = calls.find((c) => c.op === 'insert')
-    expect(insert?.payload).toMatchObject({ cpf: CPF_DIGITOS, data_nascimento: CORPO.dataNascimento })
+    expect(insert?.payload).toMatchObject({ data_nascimento: CORPO.dataNascimento })
+    // Fase 2b (S-06, ticket 03): `cpf` em claro parou de ser gravado.
+    expect(insert?.payload).not.toHaveProperty('cpf')
   })
 
   // Fase 2b (S-06, ticket 02): a busca do fantasma passa a ser pelo índice
@@ -180,15 +182,15 @@ describe('POST /cadastro — claim do paciente-fantasma (P-01)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Fase 2b (S-06) — índice cego de pacientes.cpf, escrita dupla
+// Fase 2b (S-06), ticket 03 — o corte: `cpf` em claro para de ser gravado
 // ---------------------------------------------------------------------------
-// Ticket 01: a criação de paciente novo passa a gravar cpf_hash e cpf_enc além
-// do cpf em claro já gravado hoje. O claim do fantasma NÃO entra aqui — ele não
-// altera `cpf`, então cpf_hash/cpf_enc do fantasma já vieram corretos de quando
-// a recepção o criou (integracao.ts).
+// A criação de paciente novo grava só cpf_hash e cpf_enc — `cpf` em claro não
+// entra mais no INSERT. O claim do fantasma NÃO entra aqui — ele não altera
+// `cpf`, então cpf_hash/cpf_enc do fantasma já vieram corretos de quando a
+// recepção o criou (integracao.ts).
 
-describe('POST /cadastro — fase 2b: escrita dupla do índice cego', () => {
-  it('paciente novo grava cpf_hash e cpf_enc corretos, junto do cpf em claro', async () => {
+describe('POST /cadastro — fase 2b, ticket 03: corte da escrita de cpf em claro', () => {
+  it('paciente novo grava cpf_hash e cpf_enc corretos, e nunca cpf em claro', async () => {
     await montar((call) => {
       if (call.op === 'select') return { data: null, error: null }
       return { data: { ...fantasma(), auth_user_id: USER_ID }, error: null }
@@ -199,7 +201,7 @@ describe('POST /cadastro — fase 2b: escrita dupla do índice cego', () => {
     const insert = calls.find((c) => c.op === 'insert')
     const gravado = insert?.payload as Record<string, unknown>
 
-    expect(gravado.cpf).toBe(CPF_DIGITOS)
+    expect(gravado).not.toHaveProperty('cpf')
     expect(gravado.cpf_hash).toBe(hashCpf(CPF_DIGITOS))
 
     const id = gravado.id as string
@@ -231,14 +233,11 @@ describe('POST /cadastro — fase 2b: escrita dupla do índice cego', () => {
     expect(res.body).not.toContain('cpf_enc')
   })
 
-  // Ticket 01 (escrita): a escrita do índice cego usa as variantes tolerantes
-  // (`SeConfigurado`) — sem a chave, o INSERT segue gravando `cpf` em claro
-  // sem `cpf_hash`/`cpf_enc`. Ticket 02 (busca) muda o outro lado: a busca do
-  // fantasma passa a usar `hashCpf` direto (não a variante tolerante), porque
-  // sem `cpf_hash` não há como achar a linha por CPF de outro jeito. Por isso,
-  // sem CPF_HASH_KEY, o cadastro agora FALHA na busca — antes de sequer criar
-  // o usuário no Auth, então não há risco de conta órfã (`createUser` nem
-  // chega a ser chamado).
+  // A busca (ticket 02) já usa `hashCpf` direto, sem variante tolerante: sem
+  // `cpf_hash` não há como achar a linha por CPF de outro jeito. Por isso, sem
+  // CPF_HASH_KEY, o cadastro FALHA na busca — antes de sequer criar o usuário
+  // no Auth, então não há risco de conta órfã (`createUser` nem chega a ser
+  // chamado).
   it('sem CPF_HASH_KEY, o cadastro falha na busca — antes de tocar no Auth', async () => {
     vi.stubEnv('CPF_HASH_KEY', '')
     await montar(cenarioFantasma())
@@ -247,6 +246,24 @@ describe('POST /cadastro — fase 2b: escrita dupla do índice cego', () => {
     expect(res.statusCode).toBe(500)
     expect(createUser).not.toHaveBeenCalled()
     expect(calls).toHaveLength(0)
+  })
+
+  // A busca (por CPF já cadastrado) usa `hashCpf`, não `cifrar` — não depende
+  // de PII_KEY_K1. Só o INSERT do paciente novo chega a chamar `cifrar` (para
+  // `cpf_enc`), e é aí que a ausência da chave precisa falhar fechado: o
+  // usuário do Auth já foi criado neste ponto, então a rota tem que desfazê-lo
+  // antes de responder — no mesmo espírito das outras recusas desta rota.
+  it('sem PII_KEY_K1, o INSERT falha fechado e desfaz o usuário do Auth', async () => {
+    vi.stubEnv('PII_KEY_K1', '')
+    await montar((call) => {
+      if (call.op === 'select') return { data: null, error: null }
+      return { data: null, error: null }
+    })
+    const res = await cadastrar()
+
+    expect(res.statusCode).toBe(500)
+    expect(deleteUser).toHaveBeenCalledWith(USER_ID)
+    expect(calls.some((c) => c.op === 'insert')).toBe(false)
   })
 })
 

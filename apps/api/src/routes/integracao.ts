@@ -27,14 +27,7 @@ import {
   criarAgendamentoRecepcaoSchema,
 } from '../schemas/recepcao.js'
 import { nomeArquivoDe, type DocumentoRow } from '../lib/mappers.js'
-import {
-  aadDe,
-  cifrar,
-  cifrarSeConfigurado,
-  decifrarCpfPaciente,
-  hashCpf,
-  hashCpfSeConfigurado,
-} from '../lib/crypto.js'
+import { aadDe, cifrar, decifrarCpfPaciente, hashCpf } from '../lib/crypto.js'
 
 // Rotas consumidas PELO FlowLab (server-to-server, autenticadas por API key).
 // Ficam num arquivo separado de propósito: este módulo não importa `authenticate`,
@@ -196,6 +189,26 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       }
       const { cpf, dataNascimento, motivo, autorizadoPor, documentoConferido } = bodyParsed.data
 
+      // Calculado ANTES da RPC, com as variantes que falham fechado (não as
+      // tolerantes): sem `CPF_HASH_KEY`/`PII_KEY_K1` a correção falha aqui, e a
+      // RPC nem chega a rodar — nenhuma trilha, nenhuma invalidação de cache de
+      // laudos, nenhuma escrita (S-06, ticket 03). Envolto em try/catch, como
+      // os outros dois pontos que calculam o índice cego na escrita, para não
+      // vazar a mensagem interna de crypto.ts (chave ausente/malformada) para
+      // o FlowLab — só o 500 genérico sai daqui.
+      let cpfHash: string
+      let cpfEnc: string
+      try {
+        cpfHash = hashCpf(cpf)
+        cpfEnc = cifrar(cpf, aadDe('pacientes', 'cpf', paramParsed.data.pacienteId))
+      } catch (cryptoError) {
+        request.log.error(
+          { err: cryptoError, pacienteId: paramParsed.data.pacienteId },
+          'Falha ao gerar índice cego do CPF — correção de identidade abortada',
+        )
+        throw app.httpErrors.internalServerError('Falha ao corrigir identidade')
+      }
+
       const { data, error } = await supabase.rpc('corrigir_identidade_paciente', {
         p_paciente_id: paramParsed.data.pacienteId,
         p_cpf_novo: cpf,
@@ -235,43 +248,33 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
         corrigidoEm: string
       }
 
-      // Fase 2b (S-06): a RPC já gravou o `cpf` novo — este UPDATE mantém
-      // `cpf_hash`/`cpf_enc` sincronizados com ele, para as três formas nunca
-      // ficarem dessincronizadas. Fica FORA da função SQL de propósito: a
-      // chave de cifra/hash nunca entra no banco (§ S-06, cabeçalho de
-      // crypto.ts). Best-effort e não falha a resposta — o CPF já foi
-      // corrigido, que é o efeito que a recepção pediu.
+      // A RPC não grava mais `cpf` em claro (S-06, ticket 03) — só
+      // `data_nascimento`. Este UPDATE é quem grava `cpf_hash`/`cpf_enc` com o
+      // CPF novo, usando os valores já calculados (e já validados) acima. Fica
+      // FORA da função SQL de propósito: a chave de cifra/hash nunca entra no
+      // banco (§ S-06, cabeçalho de crypto.ts). Best-effort e não falha a
+      // resposta — o CPF já foi corrigido (a trilha e o cache de laudos já
+      // refletem a troca), que é o efeito que a recepção pediu.
       try {
         const { error: syncError } = await supabase
           .from('pacientes')
-          .update({
-            cpf_hash: hashCpf(cpf),
-            cpf_enc: cifrar(cpf, aadDe('pacientes', 'cpf', resultado.pacienteId)),
-          })
+          .update({ cpf_hash: cpfHash, cpf_enc: cpfEnc })
           .eq('id', resultado.pacienteId)
         if (syncError) throw syncError
       } catch (syncError) {
+        // Diferente de antes do ticket 03: NÃO zera cpf_hash/cpf_enc para o
+        // backfill "reencontrar" a linha. Zerar faria backfillPacientes() (que
+        // só enxerga `cpf` em claro, e este agora ficou parado no valor
+        // ANTERIOR à correção — a RPC parou de escrevê-lo) regenerar o par a
+        // partir do CPF ERRADO, silenciosamente. A linha fica com o índice
+        // cego do CPF anterior (não apaga nada), e a correção precisa ser
+        // reaplicada manualmente — pior que uma escrita perdida seria uma
+        // escrita errada que ninguém percebe.
         request.log.error(
           { err: syncError, pacienteId: resultado.pacienteId },
-          'CPF corrigido, mas cpf_hash/cpf_enc não sincronizaram — zerando para o backfill reencontrar',
+          'CPF corrigido, mas cpf_hash/cpf_enc não sincronizaram — linha ficou com o índice cego do ' +
+            'CPF anterior; reaplique a correção manualmente',
         )
-        // Um cpf_hash/cpf_enc do CPF ANTERIOR (não nulo, só desatualizado) é
-        // pior que ausente: verificarBackfill() só enxerga pendência via
-        // `.is('cpf_hash', null)`, então uma linha stale ficaria invisível para
-        // sempre — o corte do ticket 03 avançaria achando que esta linha já
-        // estava migrada. Zerar as duas devolve a linha ao estado "pendente":
-        // o próximo backfillCripto a re-gera a partir do `cpf` (já correto,
-        // gravado pela RPC acima).
-        const { error: limpezaError } = await supabase
-          .from('pacientes')
-          .update({ cpf_hash: null, cpf_enc: null })
-          .eq('id', resultado.pacienteId)
-        if (limpezaError) {
-          request.log.error(
-            { err: limpezaError, pacienteId: resultado.pacienteId },
-            'Falha também ao zerar cpf_hash/cpf_enc — linha ficou com índice cego do CPF anterior, corrija manualmente',
-          )
-        }
       }
 
       // Trilha permanente é a da tabela; este log é o eco operacional. Sem CPF
@@ -385,22 +388,30 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
           // de `cpf_enc` é `pacientes:cpf:<id>` e precisa existir ANTES de cifrar
           // — mesmo motivo do `insertAwaiting` de exam_results.
           const novoPacienteId = randomUUID()
-          // Fase 2b (S-06): índice cego + envelope cifrado, lado a lado com o
-          // `cpf` em claro. Ver .scratch/cpf-indice-cego-fase2b. Tolerante
-          // (`SeConfigurado`): `cpf` em claro segue a fonte de verdade nesta
-          // fase, e o find-or-create da recepção não pode 500 no FlowLab só
-          // porque falta o índice cego — o mesmo espírito de nunca ter deixado
-          // este caminho depender de PII_KEY_K1 antes desta fase.
-          const cpfHash = hashCpfSeConfigurado(cpfNorm)
-          const cpfEnc = cifrarSeConfigurado(cpfNorm, aadDe('pacientes', 'cpf', novoPacienteId))
+          // Fase 2b (S-06, ticket 03): índice cego + envelope cifrado são a
+          // ÚNICA forma gravada — `cpf` em claro parou de ser escrito (ver a
+          // migration do corte). `hashCpf`/`cifrar` direto, não as variantes
+          // tolerantes: sem `CPF_HASH_KEY`/`PII_KEY_K1` a criação do fantasma
+          // falha fechada, antes de qualquer INSERT.
+          let cpfHash: string
+          let cpfEnc: string
+          try {
+            cpfHash = hashCpf(cpfNorm)
+            cpfEnc = cifrar(cpfNorm, aadDe('pacientes', 'cpf', novoPacienteId))
+          } catch (cryptoError) {
+            request.log.error(
+              { err: cryptoError },
+              'Falha ao gerar índice cego do CPF — paciente não criado',
+            )
+            throw app.httpErrors.internalServerError('Falha ao criar paciente')
+          }
           const { data: criado, error: insErr } = await supabase
             .from('pacientes')
             .insert({
               id: novoPacienteId,
               nome,
-              cpf: cpfNorm,
-              ...(cpfHash ? { cpf_hash: cpfHash } : {}),
-              ...(cpfEnc ? { cpf_enc: cpfEnc } : {}),
+              cpf_hash: cpfHash,
+              cpf_enc: cpfEnc,
               data_nascimento: dataNascimento,
               ...(telefone ? { telefone } : {}),
             })
