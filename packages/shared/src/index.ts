@@ -384,8 +384,9 @@ export interface RespostaLaudos {
 // Consulta administrativa de dev (GET /api/v1/admin/resultados-por-cpf)
 // ---------------------------------------------------------------------------
 // Restrita ao e-mail de ADMIN_EMAIL/VITE_ADMIN_EMAIL, e só fora de produção —
-// ver middlewares/adminAuth.ts. Cobre só a fonte `resultado` do FlowLab; os
-// `laudo` do LIS entram numa fatia seguinte.
+// ver middlewares/adminAuth.ts. Compõe as duas fontes da aba Resultados:
+// `resultado` do FlowLab e `laudo` do cache LIS (exam_results) — este último
+// só o que já está cacheado, sem busca ao vivo no ApLIS/AOL.
 
 // Identidade mínima do paciente-alvo. CPF vem COMPLETO (não mascarado, ao
 // contrário do PacienteBuscaItem da recepção): quem chega até aqui já digitou
@@ -399,4 +400,5 @@ export interface AdminPacienteIdentidade {
 export interface AdminConsultaResultadosResposta {
   paciente: AdminPacienteIdentidade
   resultados: Resultado[]
+  laudos: Laudo[]
 }

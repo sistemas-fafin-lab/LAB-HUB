@@ -47,6 +47,17 @@ async function montaHook(): Promise<{ mod: Modulo; ler: () => ReturnType<Modulo[
   return { mod, ler: () => result.current }
 }
 
+/**
+ * Só importa o módulo, sem montar `useResultados()` — para testar
+ * `combinaExams` (função pura) sem disparar `garanteFrescor()` e o
+ * `Promise.allSettled` de `busca()` em background, que exigiria configurar
+ * `respondeCom` mesmo não sendo o que o teste mede.
+ */
+async function importaModulo(): Promise<Modulo> {
+  vi.resetModules()
+  return import('./useResultados')
+}
+
 function laudo(over: Partial<Laudo> = {}): Laudo {
   return {
     id: 'laudo-1',
@@ -230,5 +241,39 @@ describe('união das duas fontes', () => {
 
     expect(ler().exams.map((e) => e.id)).toEqual(['vigente', 'anterior'])
     expect(ler().exams.map((e) => e.retificado)).toEqual([undefined, true])
+  })
+})
+
+// `combinaExams` é a versão "pura" da mesma composição/ordenação de `busca()`,
+// usada pela consulta administrativa por CPF (ResultsPage): ela já recebe as
+// duas fontes prontas de um único endpoint, sem passar pelo cache de módulo
+// nem pelo Promise.allSettled — mas precisa ordenar do MESMO jeito.
+describe('combinaExams — composição usada pela consulta administrativa', () => {
+  it('une as duas fontes ordenadas por coleta, do mais recente para o mais antigo', async () => {
+    const mod = await importaModulo()
+
+    const exams = mod.combinaExams(
+      [resultado({ liberadoEm: '2026-05-10T00:00:00.000Z' })],
+      [
+        laudo({ id: 'l-1', name: 'Recente', data_coleta: '2026-05-20' }),
+        laudo({ id: 'l-2', name: 'Antigo', data_coleta: '2026-04-01' }),
+      ],
+    )
+
+    expect(exams.map((e) => e.name)).toEqual(['Recente', 'Colesterol', 'Antigo'])
+  })
+
+  it('paciente sem laudo cacheado devolve só os resultado, sem virar lista vazia', async () => {
+    const mod = await importaModulo()
+
+    const exams = mod.combinaExams([resultado()], [])
+
+    expect(exams.map((e) => e.name)).toEqual(['Colesterol'])
+  })
+
+  it('sem resultado nem laudo devolve lista vazia', async () => {
+    const mod = await importaModulo()
+
+    expect(mod.combinaExams([], [])).toEqual([])
   })
 })

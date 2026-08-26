@@ -1,14 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { Paciente, Resultado } from '@lab-hub/shared'
+import type { Laudo, Paciente, Resultado } from '@lab-hub/shared'
 import type { Exam } from '../components/shared/WebHero'
 
 const estado = { exams: [] as Exam[], loading: false, error: null as string | null }
 
-vi.mock('../lib/useResultados', () => ({
-  useResultados: () => estado,
-  atualizaResultados: vi.fn(),
-}))
+// `combinaExams` real (não mockado): a composição/ordenação da consulta admin
+// tem de ser a MESMA usada pela visão normal, e mockar aqui esconderia uma
+// regressão nela. Só `useResultados`/`atualizaResultados` (a conta da sessão)
+// são dublês — a tela não precisa de rede para isso.
+vi.mock('../lib/useResultados', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../lib/useResultados')>()
+  return {
+    ...real,
+    useResultados: () => estado,
+    atualizaResultados: vi.fn(),
+  }
+})
 
 class ApiErrorMock extends Error {
   constructor(readonly status: number, message: string) {
@@ -47,6 +55,34 @@ function resultado(over: Partial<Resultado> = {}): Resultado {
     status: 'ready',
     paineis: [],
     liberadoEm: '2026-07-20T12:00:00.000Z',
+    ...over,
+  }
+}
+
+function laudo(over: Partial<Laudo> = {}): Laudo {
+  return {
+    id: 'laudo-1',
+    name: 'Colesterol Total',
+    category: 'Bioquímica',
+    date: '10 Mai 2026',
+    fullDate: '10 de maio de 2026',
+    data_coleta: '2026-05-10',
+    data_registro: '2026-05-10',
+    data_emissao: '2026-05-12',
+    material: 'Soro',
+    metodo: 'Enzimático',
+    laboratorio: { nome: 'CLAF', cnes: '', endereco: '' },
+    unit: 'CLAF',
+    doctor: 'Dra. Ana Lima',
+    crm: 'CRM/DF 12345',
+    status: 'ready',
+    summary: '',
+    panels: [],
+    exam_type: 'Colesterol',
+    codigo_os: '',
+    codigo_lis: 'REQ-1',
+    source: 'merged',
+    partial: false,
     ...over,
   }
 }
@@ -268,5 +304,108 @@ describe('consulta administrativa por CPF — validação e busca', () => {
 
     expect(screen.queryByText('Maria Alvo')).toBeNull()
     expect(screen.getByText('Exame da sessão')).toBeTruthy()
+  })
+})
+
+// Ticket 02 — laudo LIS cacheado (ver .scratch/consulta-dev-resultados-por-cpf).
+describe('consulta administrativa por CPF — laudos do cache LIS', () => {
+  function buscar(cpf: string) {
+    fireEvent.change(screen.getByPlaceholderText(/Consultar por CPF/), { target: { value: cpf } })
+    fireEvent.click(screen.getByText('Buscar'))
+  }
+
+  it('mostra também os laudos do cache LIS, sem uma segunda representação visual', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValue({
+      paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
+      resultados: [resultado({ exameNome: 'Hemograma completo' })],
+      laudos: [laudo({ name: 'Colesterol Total' })],
+    })
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar(CPF_VALIDO)
+
+    await waitFor(() => expect(screen.getByText('Hemograma completo')).toBeTruthy())
+    // Mesmo `ExamRow` das duas fontes na visão normal — não um card diferente.
+    expect(screen.getByText('Colesterol Total')).toBeTruthy()
+  })
+
+  it('ordena as duas fontes pela mesma regra da visão normal — mais recente primeiro', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValue({
+      paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
+      resultados: [
+        resultado({ id: 'r-antigo', exameNome: 'Resultado antigo', liberadoEm: '2026-01-05T00:00:00.000Z' }),
+      ],
+      laudos: [laudo({ id: 'l-recente', name: 'Laudo recente', data_coleta: '2026-07-01' })],
+    })
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar(CPF_VALIDO)
+
+    await waitFor(() => expect(screen.getByText('Laudo recente')).toBeTruthy())
+    const nomes = screen.getAllByText(/Laudo recente|Resultado antigo/).map((el) => el.textContent)
+    expect(nomes).toEqual(['Laudo recente', 'Resultado antigo'])
+  })
+
+  it('paciente sem laudo cacheado ainda mostra os resultado FlowLab', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValue({
+      paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
+      resultados: [resultado({ exameNome: 'Hemograma completo' })],
+      laudos: [],
+    })
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar(CPF_VALIDO)
+
+    await waitFor(() => expect(screen.getByText('Hemograma completo')).toBeTruthy())
+  })
+})
+
+describe('consulta administrativa por CPF — Atualizar', () => {
+  function buscar(cpf: string) {
+    fireEvent.change(screen.getByPlaceholderText(/Consultar por CPF/), { target: { value: cpf } })
+    fireEvent.click(screen.getByText('Buscar'))
+  }
+
+  it('repete a consulta do CPF exibido, e não a lista própria', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValue({
+      paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
+      resultados: [resultado({ exameNome: 'Hemograma completo' })],
+      laudos: [],
+    })
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar(CPF_VALIDO)
+    await waitFor(() => expect(screen.getByText('Maria Alvo')).toBeTruthy())
+    adminResultadosPorCpf.mockClear()
+
+    fireEvent.click(screen.getByText('Atualizar'))
+
+    await waitFor(() => expect(adminResultadosPorCpf).toHaveBeenCalledWith(CPF_VALIDO))
+  })
+
+  it('falha técnica no Atualizar mostra erro seguro sem apagar o banner', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValueOnce({
+      paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
+      resultados: [resultado({ exameNome: 'Hemograma completo' })],
+      laudos: [],
+    })
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar(CPF_VALIDO)
+    await waitFor(() => expect(screen.getByText('Maria Alvo')).toBeTruthy())
+
+    adminResultadosPorCpf.mockRejectedValueOnce(new ApiErrorMock(500, 'O servidor falhou. Tente de novo em instantes.'))
+    fireEvent.click(screen.getByText('Atualizar'))
+
+    await waitFor(() =>
+      expect(screen.getByText('O servidor falhou. Tente de novo em instantes.')).toBeTruthy(),
+    )
+    // O banner do paciente consultado continua — a falha não vira "sem resultado".
+    expect(screen.getByText('Maria Alvo')).toBeTruthy()
   })
 })

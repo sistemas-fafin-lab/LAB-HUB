@@ -223,6 +223,21 @@ export class LaudoService {
     return { exams, source: 'live' }
   }
 
+  /**
+   * Laudos JÁ CACHEADOS do paciente, sem tocar nos LIS — nem para revalidar em
+   * background. Usado pela consulta administrativa de dev
+   * (GET /admin/resultados-por-cpf): ela nunca pode disparar ApLIS/AOL nem
+   * gravar linha nenhuma, então não pode passar por `fetchAndCacheExams`, que
+   * revalida em background e busca ao vivo quando o cache está vazio.
+   *
+   * Mesma composição do caminho cacheado normal (fusão de pedidos + corte de
+   * fonte) — só sem o efeito colateral de revalidar.
+   */
+  async readCachedExams(pacienteId: string, cpf: string): Promise<Laudo[]> {
+    const cacheados = await this.repo.findByPaciente(pacienteId, cpf)
+    return filtraPorFonte(fundirPedidosPorColeta(cacheados))
+  }
+
   // A resposta já foi enviada quando isto roda: falha aqui não pode derrubar a
   // requisição, só virar log.
   #revalidarEmBackground(

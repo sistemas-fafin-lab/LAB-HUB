@@ -4,10 +4,9 @@ import { WIcon } from '../components/primitives/WIcon'
 import { ExamRow } from '../components/shared/ExamRow'
 import { ExamRowSkeleton } from '../components/shared/ExamRowSkeleton'
 import type { Exam } from '../components/shared/WebHero'
-import { atualizaResultados, useResultados } from '../lib/useResultados'
+import { atualizaResultados, combinaExams, useResultados } from '../lib/useResultados'
 import { ehSessaoAdmin } from '../lib/admin'
 import { api, ApiError } from '../lib/api'
-import { resultadoToExam } from '../lib/mappers'
 import { apenasDigitos, formatarCpf, validarCpf } from '../lib/validators'
 
 type FilterId = 'all' | 'ready' | 'analyzing'
@@ -63,16 +62,16 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
   const [naoEncontrado, setNaoEncontrado] = useState(false)
   const [consultaAdmin, setConsultaAdmin] = useState<AdminConsultaResultadosResposta | null>(null)
 
-  const handleBuscarCpf = async () => {
-    const erro = validarCpf(cpfBusca)
-    setCpfErro(erro)
-    setNaoEncontrado(false)
-    if (erro) return // CPF inválido não dispara requisição.
-
+  // Compartilhado pela busca por CPF novo e pelo Atualizar em modo admin: os
+  // dois só diferem em QUAL cpf consultam — a leitura em si é a mesma (server
+  // já é cache-only, nunca dispara ApLIS/AOL).
+  const consultarCpf = async (cpfDigitos: string) => {
     setBuscandoCpf(true)
     try {
-      const resposta = await api.adminResultadosPorCpf(apenasDigitos(cpfBusca))
+      const resposta = await api.adminResultadosPorCpf(cpfDigitos)
       setConsultaAdmin(resposta)
+      setNaoEncontrado(false)
+      setCpfErro(null)
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 404) {
         setConsultaAdmin(null)
@@ -85,6 +84,22 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
     }
   }
 
+  const handleBuscarCpf = async () => {
+    const erro = validarCpf(cpfBusca)
+    setCpfErro(erro)
+    setNaoEncontrado(false)
+    if (erro) return // CPF inválido não dispara requisição.
+    await consultarCpf(apenasDigitos(cpfBusca))
+  }
+
+  // Repete a consulta do CPF já exibido, só com dados persistidos (mesmo
+  // caminho cache-only do servidor) — nunca a lista PRÓPRIA, que nem está
+  // sendo mostrada em modo admin.
+  const handleAtualizarAdmin = async () => {
+    if (!consultaAdmin) return
+    await consultarCpf(consultaAdmin.paciente.cpf)
+  }
+
   const handleLimparConsultaAdmin = () => {
     setConsultaAdmin(null)
     setNaoEncontrado(false)
@@ -95,7 +110,11 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
   // Em consulta admin, a lista PRÓPRIA é substituída pela do paciente
   // encontrado — nunca as duas misturadas (ver ticket).
   const emConsultaAdmin = consultaAdmin !== null
-  const examsAtivos = emConsultaAdmin ? consultaAdmin.resultados.map(resultadoToExam) : exams
+  // Mesma composição e ordenação da visão normal (combinaExams) — a consulta
+  // admin não pode ter uma segunda representação visual do resultado/laudo.
+  const examsAtivos = emConsultaAdmin
+    ? combinaExams(consultaAdmin.resultados, consultaAdmin.laudos ?? [])
+    : exams
   const carregando = emConsultaAdmin ? false : loading
   const erroAtivo = emConsultaAdmin ? null : error
 
@@ -170,15 +189,18 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
                 {' — CPF '}
                 <span className="font-semibold">{formatarCpf(consultaAdmin.paciente.cpf)}</span>
               </div>
-              <button
-                onClick={handleLimparConsultaAdmin}
-                className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 ${
-                  dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
-                }`}
-              >
-                <WIcon name="x" className="w-3.5 h-3.5" strokeWidth={2.2} />
-                Voltar aos meus resultados
-              </button>
+              <div className="flex items-center gap-2">
+                {cpfErro && <span className="text-xs text-red-500">{cpfErro}</span>}
+                <button
+                  onClick={handleLimparConsultaAdmin}
+                  className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 ${
+                    dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
+                  }`}
+                >
+                  <WIcon name="x" className="w-3.5 h-3.5" strokeWidth={2.2} />
+                  Voltar aos meus resultados
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex items-center gap-3 flex-wrap">
@@ -299,9 +321,24 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
               </>
             )}
           </div>
-          {/* Sem sentido em consulta admin: recarregaria a lista PRÓPRIA, que
-              nem está sendo exibida. */}
-          {!emConsultaAdmin && (
+          {/* Em consulta admin, Atualizar repete o CPF exibido — só leitura do
+              cache já persistido (resultado + laudo), nunca a lista PRÓPRIA. */}
+          {emConsultaAdmin ? (
+            <button
+              onClick={() => void handleAtualizarAdmin()}
+              disabled={buscandoCpf}
+              className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 disabled:opacity-60 ${
+                dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
+              }`}
+            >
+              <WIcon
+                name="refresh-cw"
+                className={`w-3.5 h-3.5 ${buscandoCpf ? 'animate-spin' : ''}`}
+                strokeWidth={2.2}
+              />
+              {buscandoCpf ? 'Atualizando…' : 'Atualizar'}
+            </button>
+          ) : (
             <button
               onClick={handleAtualizar}
               disabled={atualizando}

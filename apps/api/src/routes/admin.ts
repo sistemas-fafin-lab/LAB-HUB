@@ -6,6 +6,7 @@ import { toResultado } from '../lib/mappers.js'
 import { marcarRetificados } from '../lib/retificacao.js'
 import { mensagemZod } from '../lib/validacao.js'
 import { adminConsultaResultadosQuerySchema } from '../schemas/admin.js'
+import { laudoService } from '../laudos/index.js'
 
 // Nunca devolve capacidade de download do paciente-alvo (spec, Implementation
 // Decisions): `laudoUrl`/`declaracaoUrl` são o PATH do arquivo no bucket, não
@@ -17,12 +18,15 @@ function semReferenciaDeArquivo(r: Resultado): Resultado {
 }
 
 // Consulta administrativa de DESENVOLVIMENTO: dado um CPF, devolve a
-// identidade mínima do paciente e os `resultado` FlowLab dele. Read-only —
-// nunca edita nem exclui nada, e não grava trilha de auditoria própria (decisão
-// explícita da spec para esta versão). Autorização (ambiente + e-mail) fica
-// inteira em middlewares/adminAuth.ts; esta rota só resolve o paciente pelo
-// CPF e lista o que já é exposto por GET /resultados, agora para um paciente
-// escolhido pelo servidor (nunca por um id vindo do navegador). Ver
+// identidade mínima do paciente, os `resultado` FlowLab e os `laudo` do cache
+// LIS (exam_results) dele — a mesma composição de fontes da aba Resultados do
+// portal. Read-only — nunca edita nem exclui nada, e não grava trilha de
+// auditoria própria (decisão explícita da spec para esta versão). Autorização
+// (ambiente + e-mail) fica inteira em middlewares/adminAuth.ts; esta rota só
+// resolve o paciente pelo CPF e lista o que já é exposto por GET /resultados e
+// GET /laudos, agora para um paciente escolhido pelo servidor (nunca por um id
+// vindo do navegador). Os laudos vêm só do cache — nunca dispara busca ao vivo
+// no ApLIS/AOL (ver LaudoService#readCachedExams). Ver
 // .scratch/consulta-dev-resultados-por-cpf.
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/admin/resultados-por-cpf', { preHandler: authenticateAdmin }, async (request) => {
@@ -63,9 +67,20 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       semReferenciaDeArquivo,
     )
 
+    // Cache-only: `readCachedExams` nunca chama ApLIS/AOL nem grava linha —
+    // ver o porquê no próprio método. Falha aqui (banco ou descriptografia)
+    // vira 500 seguro: não pode aparecer como "paciente sem laudo".
+    let laudos: Awaited<ReturnType<typeof laudoService.readCachedExams>>
+    try {
+      laudos = await laudoService.readCachedExams(pacienteId, paciente.cpf as string)
+    } catch {
+      throw app.httpErrors.internalServerError('Falha ao consultar laudos')
+    }
+
     return {
       paciente: { id: pacienteId, nome: paciente.nome as string, cpf: paciente.cpf as string },
       resultados,
+      laudos,
     }
   })
 }

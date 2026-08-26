@@ -39,6 +39,30 @@ function ordenaveisDeLaudos(laudos: Laudo[]): ExamOrdenavel[] {
   }))
 }
 
+// Mais recente primeiro pela data de COLETA, com a emissão como desempate —
+// ver o comentário de ExamOrdenavel. Compartilhado entre `busca()` (conta da
+// sessão) e `combinaExams` (consulta administrativa por CPF) para as duas
+// listas ordenarem pela MESMA regra.
+function ordenaPorData(a: ExamOrdenavel, b: ExamOrdenavel): number {
+  return b.coletadoEm.localeCompare(a.coletadoEm) || b.liberadoEm.localeCompare(a.liberadoEm)
+}
+
+/**
+ * Une `resultado` (FlowLab) e `laudo` (LIS) num só array de `Exam`, ordenado
+ * pela mesma regra da visão normal (`busca()` abaixo).
+ *
+ * Usado pela consulta administrativa por CPF (ver ResultsPage): ela recebe as
+ * duas fontes já compostas na resposta de um único endpoint, então não passa
+ * pelo cache de módulo nem pelo `Promise.allSettled` de `busca()` — mas
+ * precisa cair no MESMO mapeamento e na MESMA ordenação, para não criar uma
+ * segunda representação visual do `resultado`/`laudo`.
+ */
+export function combinaExams(resultados: Resultado[], laudos: Laudo[]): Exam[] {
+  return [...ordenaveisDeResultados(resultados), ...ordenaveisDeLaudos(laudos)]
+    .sort(ordenaPorData)
+    .map((o) => o.exam)
+}
+
 // ---------------------------------------------------------------------------
 // Cache de módulo (stale-while-revalidate no cliente)
 //
@@ -120,11 +144,7 @@ async function busca(): Promise<void> {
     if (resResultados.status === 'rejected') console.warn('Falha ao carregar resultados do FlowLab', resResultados.reason)
     if (resLaudos.status === 'rejected') console.warn('Falha ao carregar laudos dos LIS', resLaudos.reason)
 
-    ordenaveis.sort(
-      (a, b) =>
-        b.coletadoEm.localeCompare(a.coletadoEm) ||
-        b.liberadoEm.localeCompare(a.liberadoEm),
-    )
+    ordenaveis.sort(ordenaPorData)
     estado = { exams: ordenaveis.map((o) => o.exam), loading: false, error: null }
     buscadoEm = Date.now()
   }
