@@ -1,4 +1,4 @@
-import { aadDe, decifrar, decifrarJson } from './crypto.js'
+import { aadDe, decifrar, decifrarCpfPaciente, decifrarJson } from './crypto.js'
 import type {
   Agendamento,
   AgendamentoStatus,
@@ -152,7 +152,9 @@ interface PacienteRow {
   auth_user_id: string
   nome: string
   email: string
-  cpf: string
+  // S-06 fase 2b: `cpf` em claro não é mais lido — só `cpf_enc` (ver ticket 02
+  // em .scratch/cpf-indice-cego-fase2b).
+  cpf_enc: string
   sexo: string
   data_nascimento: string
   telefone: string | null
@@ -166,7 +168,7 @@ export function toPaciente(row: PacienteRow): Paciente {
     authUserId: row.auth_user_id,
     nome: row.nome,
     email: row.email,
-    cpf: row.cpf,
+    cpf: decifrarCpfPaciente(row.id, row.cpf_enc),
     sexo: row.sexo as Sexo,
     dataNascimento: row.data_nascimento,
     ...(row.telefone ? { telefone: row.telefone } : {}),

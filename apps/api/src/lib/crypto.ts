@@ -278,13 +278,39 @@ export function cifrarSeConfigurado(texto: string, aad: string): string | null {
  * Versão tolerante de `hashCpf`, no mesmo espírito de `cifrarSeConfigurado`:
  * devolve `null` sem `CPF_HASH_KEY` em vez de lançar.
  *
- * `pacientes.cpf` continua em claro nesta fase (fase 2b, escrita dupla) — sem
- * ela nenhuma busca quebra. Por isso a criação de paciente não pode falhar
- * fechado por causa só do índice cego: derrubar o cadastro (ou deixar um
- * usuário do Auth órfão, criado um passo antes do INSERT) por uma coluna que
- * ainda não é lida por ninguém seria pior que a proteção que ela adianta. Em
- * produção nunca devolve `null` — `validarCriptografia()` já derrubou o boot.
+ * Só para a ESCRITA (grava `cpf_hash` junto do `cpf` em claro no INSERT): sem
+ * a chave, o par cpf_hash/cpf_enc fica de fora e o `cpf` em claro segue sendo
+ * gravado normalmente. Por isso a criação de paciente não pode falhar fechado
+ * só por causa do índice cego: derrubar o cadastro (ou deixar um usuário do
+ * Auth órfão, criado um passo antes do INSERT) por uma coluna que a escrita
+ * ainda trata como best-effort seria pior que a proteção que ela adianta.
+ *
+ * Desde o ticket 02 (busca por `cpf_hash`), isso NÃO vale mais para a busca —
+ * `hashCpf()` direto, sem a variante tolerante, é o que os quatro pontos de
+ * busca usam, e lança sem a chave. Em produção `hashCpfSeConfigurado` nunca
+ * devolve `null` — `validarCriptografia()` já derrubou o boot.
  */
 export function hashCpfSeConfigurado(cpfNormalizado: string): string | null {
   return hashCpfConfigurado() ? hashCpf(cpfNormalizado) : null
+}
+
+/**
+ * Decifra `pacientes.cpf_enc` — usado por todo caminho que exibe o CPF de um
+ * paciente (mappers.ts#toPaciente, routes/admin.ts, routes/integracao.ts).
+ * Centralizado aqui para não duplicar `decifrar(cpfEnc, aadDe('pacientes',
+ * 'cpf', id))` em cada call site.
+ *
+ * PRECONDIÇÃO DE DEPLOY (S-06 fase 2b, ticket 02): só é seguro colocar em
+ * produção depois que `apps/api/src/scripts/backfillCripto.ts` rodar contra a
+ * base inteira e `verificarBackfill()` confirmar zero pendências. Uma linha
+ * gravada antes do ticket 01 (escrita dupla) só ganha `cpf_enc` pelo backfill
+ * — nunca pela API —, então chamar isto para uma linha ainda não migrada
+ * recebe `cpfEnc` nulo e `decifrar` lança. É a mesma disciplina de ordem que
+ * o ticket 03 já exige (`verificarBackfill()` antes de cortar a escrita em
+ * claro) — aqui não há gate em runtime, é operacional: backfill primeiro,
+ * deploy deste código depois. Ver
+ * .scratch/cpf-indice-cego-fase2b/issues/02-migrar-buscas-por-cpf-para-cpf-hash.md.
+ */
+export function decifrarCpfPaciente(pacienteId: string, cpfEnc: string): string {
+  return decifrar(cpfEnc, aadDe('pacientes', 'cpf', pacienteId))
 }

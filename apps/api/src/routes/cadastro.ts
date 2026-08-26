@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase.js'
 import { cadastroSchema } from '../schemas/cadastro.js'
 import { toPaciente } from '../lib/mappers.js'
 import { mensagemZod } from '../lib/validacao.js'
-import { aadDe, cifrarSeConfigurado, hashCpfSeConfigurado } from '../lib/crypto.js'
+import { aadDe, cifrarSeConfigurado, hashCpf, hashCpfSeConfigurado } from '../lib/crypto.js'
 
 // Toggle do fluxo de confirmação de e-mail.
 //  - false (default, fase de testes): NÃO dispara e-mail; o front loga direto.
@@ -36,10 +36,15 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
       //    - com auth_user_id  → já é de uma conta: CPF em uso.
       //    - sem auth_user_id  → fantasma da recepção: reivindicado abaixo, mas
       //      só se a data de nascimento conferir com a que o balcão registrou.
+      // Fase 2b (S-06, ticket 02): busca pelo índice cego — `pacientes.cpf` em
+      // claro não é mais lido por este caminho. PRECONDIÇÃO DE DEPLOY: exige o
+      // backfill de `cpf_hash` já ter rodado contra a base (ver
+      // crypto.ts#decifrarCpfPaciente) — sem isso, o fantasma de uma linha
+      // antiga não é achado e o claim é recusado por engano.
       const { data: existente, error: buscaErr } = await supabase
         .from('pacientes')
         .select('id, auth_user_id, data_nascimento, excluido_em')
-        .eq('cpf', cpf)
+        .eq('cpf_hash', hashCpf(cpf))
         .maybeSingle()
       if (buscaErr) {
         throw app.httpErrors.internalServerError('Falha ao verificar CPF')

@@ -6,6 +6,7 @@ import {
   cifrarJsonSeConfigurado,
   criptografiaConfigurada,
   decifrar,
+  decifrarCpfPaciente,
   decifrarJson,
   hashCpf,
   hashCpfConfigurado,
@@ -254,5 +255,22 @@ describe('hashCpf — índice cego do CPF (fase 2b)', () => {
     const antes = hashCpf('52998224725')
     vi.stubEnv('PII_KEY_K1', K2)
     expect(hashCpf('52998224725')).toBe(antes)
+  })
+})
+
+// Ticket 02 (S-06 fase 2b): helper compartilhado por todo caminho que exibe o
+// CPF de um paciente — centraliza `decifrar(cpfEnc, aadDe('pacientes','cpf',id))`.
+describe('decifrarCpfPaciente', () => {
+  it('decifra o envelope com o AAD pacientes:cpf:<id>', () => {
+    const id = 'pac-1'
+    const cpfEnc = cifrar('52998224725', aadDe('pacientes', 'cpf', id))
+
+    expect(decifrarCpfPaciente(id, cpfEnc)).toBe('52998224725')
+  })
+
+  it('lança se o envelope foi cifrado para outro id (AAD não bate)', () => {
+    const cpfEnc = cifrar('52998224725', aadDe('pacientes', 'cpf', 'pac-1'))
+
+    expect(() => decifrarCpfPaciente('pac-2', cpfEnc)).toThrow()
   })
 })

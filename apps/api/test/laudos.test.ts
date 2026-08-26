@@ -98,7 +98,13 @@ function supaHandler(
     if (call.table === 'pacientes') {
       return (
         scenario.paciente ?? {
-          data: { id: 'pac-1', cpf: CPF, data_nascimento: '2001-01-01', sexo: 'M' },
+          // Fase 2b (S-06, ticket 02): `cpf` em claro não é mais lido — só `cpf_enc`.
+          data: {
+            id: 'pac-1',
+            cpf_enc: cifrar(CPF, aadDe('pacientes', 'cpf', 'pac-1')),
+            data_nascimento: '2001-01-01',
+            sexo: 'M',
+          },
           error: null,
         }
       )

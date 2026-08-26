@@ -15,7 +15,7 @@ vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 
 import { adminRoutes } from '../src/routes/admin.js'
 import { buildApp, createSupabaseMock, type SupaHandler, type SupaResult } from './helpers.js'
-import { aadDe, cifrar, cifrarJson } from '../src/lib/crypto.js'
+import { aadDe, cifrar, cifrarJson, hashCpf } from '../src/lib/crypto.js'
 
 const ADMIN_EMAIL_VAR = 'ADMIN_EMAIL'
 const AMBIENTE = 'NODE_ENV'
@@ -43,8 +43,15 @@ function authHeader(): Record<string, string> {
   return { authorization: 'Bearer token-valido' }
 }
 
+// `cpf_enc`, não `cpf`: fase 2b (S-06, ticket 02) — a coluna em claro não é
+// mais lida por esta rota.
 function pacienteAlvoRow(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return { id: ALVO_ID, nome: 'Maria Alvo', cpf: CPF_VALIDO, ...over }
+  return {
+    id: ALVO_ID,
+    nome: 'Maria Alvo',
+    cpf_enc: cifrar(CPF_VALIDO, aadDe('pacientes', 'cpf', ALVO_ID)),
+    ...over,
+  }
 }
 
 function resultadoRow(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -246,10 +253,12 @@ describe('GET /admin/resultados-por-cpf — validação de CPF', () => {
 
     expect(res.statusCode).toBe(400)
     expect(mock.calls.find((c) => c.table === 'resultados')).toBeUndefined()
-    expect(mock.calls.find((c) => c.table === 'pacientes' && c.filters.cpf)).toBeUndefined()
+    expect(mock.calls.find((c) => c.table === 'pacientes' && c.filters.cpf_hash)).toBeUndefined()
   })
 
-  it('aceita CPF formatado, normalizando para 11 dígitos antes de consultar', async () => {
+  // Fase 2b (S-06, ticket 02): busca pelo índice cego — `cpf` em claro não é
+  // mais lido para achar a linha.
+  it('aceita CPF formatado, normalizando para 11 dígitos antes de consultar por cpf_hash', async () => {
     habilitarAdminDev()
     const mock = setup()
     app = await buildApp(adminRoutes)
@@ -257,8 +266,9 @@ describe('GET /admin/resultados-por-cpf — validação de CPF', () => {
     const res = await buscarPorCpf('529.982.247-25')
 
     expect(res.statusCode).toBe(200)
-    const consultaAlvo = mock.calls.find((c) => c.table === 'pacientes' && c.filters.cpf)
-    expect(consultaAlvo?.filters).toMatchObject({ cpf: CPF_VALIDO, excluido_em: null })
+    const consultaAlvo = mock.calls.find((c) => c.table === 'pacientes' && c.filters.cpf_hash)
+    expect(consultaAlvo?.filters).toMatchObject({ cpf_hash: hashCpf(CPF_VALIDO), excluido_em: null })
+    expect(consultaAlvo?.filters).not.toHaveProperty('cpf')
   })
 })
 
@@ -280,7 +290,7 @@ describe('GET /admin/resultados-por-cpf — resolução do paciente-alvo', () =>
 
     await buscarPorCpf(CPF_VALIDO)
 
-    const consultaAlvo = mock.calls.find((c) => c.table === 'pacientes' && c.filters.cpf)
+    const consultaAlvo = mock.calls.find((c) => c.table === 'pacientes' && c.filters.cpf_hash)
     expect(consultaAlvo?.filters.excluido_em).toBe(null)
   })
 

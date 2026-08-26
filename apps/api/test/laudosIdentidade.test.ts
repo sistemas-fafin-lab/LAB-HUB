@@ -48,8 +48,14 @@ function supaHandler(cenario: Cenario = {}): SupaHandler {
     if (call.table === 'pacientes') {
       // authenticate resolve por auth_user_id; dadosDoPaciente, por id.
       if (call.filters.auth_user_id) return { data: { id: 'pac-1' }, error: null }
+      // Fase 2b (S-06, ticket 02): `cpf` em claro não é mais lido — só `cpf_enc`.
       return {
-        data: { id: 'pac-1', cpf: CPF, data_nascimento: '1990-01-01', sexo: 'M' },
+        data: {
+          id: 'pac-1',
+          cpf_enc: cifrar(CPF, aadDe('pacientes', 'cpf', 'pac-1')),
+          data_nascimento: '1990-01-01',
+          sexo: 'M',
+        },
         error: null,
       }
     }

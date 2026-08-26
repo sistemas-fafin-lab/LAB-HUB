@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js'
+import { hashCpf } from './crypto.js'
 import { expurgarDocumentosDoPaciente, type Log } from './expurgo.js'
 
 // Apagamento TOTAL de um paciente — imagens, resultados, agendamentos e cadastro.
@@ -72,8 +73,11 @@ export interface ResultadoApagamento {
 /**
  * Acha o paciente por CPF ou por id.
  *
- * CPF continua em claro em `pacientes.cpf` — é a chave única e o que sobrou de
- * legível depois do corte do S-06, então é por ele que um operador escolhe.
+ * Busca por CPF via `cpf_hash` (S-06 fase 2b, ticket 02) — é por ele que um
+ * operador escolhe, mas `pacientes.cpf` em claro não é mais lido para achar a
+ * linha. PRECONDIÇÃO DE DEPLOY: exige o backfill de `cpf_hash` já ter rodado
+ * (ver crypto.ts#decifrarCpfPaciente) — sem isso, uma linha antiga (`cpf`
+ * gravado antes do ticket 01) não é achada por CPF, só por `--id`.
  * Devolve `null` quando não existe; quem chama decide se isso é erro.
  */
 export async function resolverPaciente(seletor: {
@@ -84,7 +88,7 @@ export async function resolverPaciente(seletor: {
 
   const { data, error } = await (seletor.id
     ? consulta.eq('id', seletor.id)
-    : consulta.eq('cpf', (seletor.cpf ?? '').replace(/\D/g, ''))
+    : consulta.eq('cpf_hash', hashCpf((seletor.cpf ?? '').replace(/\D/g, '')))
   ).maybeSingle()
 
   if (error) {

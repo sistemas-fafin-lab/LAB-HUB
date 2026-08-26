@@ -19,6 +19,7 @@ import {
   resolverPaciente,
   type PacienteAlvo,
 } from '../src/lib/apagarPaciente.js'
+import { hashCpf } from '../src/lib/crypto.js'
 import type { Log } from '../src/lib/expurgo.js'
 import { createSupabaseMock, type StorageHandler, type SupaHandler } from './helpers.js'
 
@@ -62,14 +63,17 @@ const CENARIO: SupaHandler = (call) => {
 }
 
 describe('resolverPaciente', () => {
-  it('normaliza o CPF antes de consultar — o operador digita com pontuação', async () => {
+  // Fase 2b (S-06, ticket 02): busca pelo índice cego — `cpf` em claro não é
+  // mais lido para achar a linha.
+  it('normaliza o CPF antes de consultar por cpf_hash — o operador digita com pontuação', async () => {
     const mock = montar({
       handler: () => ({ data: [{ id: PAC, nome: 'X', auth_user_id: AUTH, excluido_em: null }], error: null }),
     })
 
     await resolverPaciente({ cpf: '123.456.789-09' })
 
-    expect(mock.calls[0]?.filters.cpf).toBe('12345678909')
+    expect(mock.calls[0]?.filters.cpf_hash).toBe(hashCpf('12345678909'))
+    expect(mock.calls[0]?.filters).not.toHaveProperty('cpf')
   })
 
   it('devolve null quando não existe, em vez de lançar', async () => {

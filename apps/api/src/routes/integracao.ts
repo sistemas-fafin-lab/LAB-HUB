@@ -27,7 +27,14 @@ import {
   criarAgendamentoRecepcaoSchema,
 } from '../schemas/recepcao.js'
 import { nomeArquivoDe, type DocumentoRow } from '../lib/mappers.js'
-import { aadDe, cifrar, cifrarSeConfigurado, hashCpf, hashCpfSeConfigurado } from '../lib/crypto.js'
+import {
+  aadDe,
+  cifrar,
+  cifrarSeConfigurado,
+  decifrarCpfPaciente,
+  hashCpf,
+  hashCpfSeConfigurado,
+} from '../lib/crypto.js'
 
 // Rotas consumidas PELO FlowLab (server-to-server, autenticadas por API key).
 // Ficam num arquivo separado de propósito: este módulo não importa `authenticate`,
@@ -59,10 +66,12 @@ function mascararCpf(cpf: string): string {
 }
 
 // Colunas mínimas do paciente devolvidas ao FlowLab (sem e-mail/telefone/convênio).
+// `cpf_enc`, não `cpf`: fase 2b (S-06, ticket 02) — a coluna em claro não é mais
+// lida por este caminho.
 interface PacienteBuscaRow {
   id: string
   nome: string
-  cpf: string
+  cpf_enc: string
   data_nascimento: string
 }
 
@@ -70,7 +79,7 @@ function toPacienteBuscaItem(row: PacienteBuscaRow): PacienteBuscaItem {
   return {
     id: row.id,
     nome: row.nome,
-    cpfMascarado: mascararCpf(row.cpf),
+    cpfMascarado: mascararCpf(decifrarCpfPaciente(row.id, row.cpf_enc)),
     dataNascimento: row.data_nascimento,
   }
 }
@@ -110,7 +119,7 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
 
       const { data, error } = await supabase
         .from('pacientes')
-        .select('id, nome, cpf, data_nascimento')
+        .select('id, nome, cpf_enc, data_nascimento')
         .ilike('nome', `%${termo}%`)
         .order('nome', { ascending: true })
         .limit(BUSCA_PACIENTES_LIMITE)
@@ -342,7 +351,7 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       if (pacienteId) {
         const { data, error } = await supabase
           .from('pacientes')
-          .select('id, nome, cpf, data_nascimento')
+          .select('id, nome, cpf_enc, data_nascimento')
           .eq('id', pacienteId)
           .maybeSingle()
         if (error) {
@@ -355,10 +364,15 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       } else {
         // Modo NOVO — o refine do schema garante nome+cpf+dataNascimento presentes.
         const cpfNorm = cpf as string
+        // Fase 2b (S-06, ticket 02): busca pelo índice cego — `cpf` em claro não
+        // é mais lido por este caminho. PRECONDIÇÃO DE DEPLOY: exige o backfill
+        // de cpf_hash/cpf_enc já ter rodado (ver crypto.ts#decifrarCpfPaciente)
+        // — sem isso, um paciente/fantasma antigo não é achado por CPF e a
+        // recepção acaba criando um duplicado (que esbarra no `unique(cpf)`).
         const { data: existente, error: buscaErr } = await supabase
           .from('pacientes')
-          .select('id, nome, cpf, data_nascimento')
-          .eq('cpf', cpfNorm)
+          .select('id, nome, cpf_enc, data_nascimento')
+          .eq('cpf_hash', hashCpf(cpfNorm))
           .maybeSingle()
         if (buscaErr) {
           throw app.httpErrors.internalServerError('Falha ao verificar CPF')
@@ -390,15 +404,15 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
               data_nascimento: dataNascimento,
               ...(telefone ? { telefone } : {}),
             })
-            .select('id, nome, cpf, data_nascimento')
+            .select('id, nome, cpf_enc, data_nascimento')
             .single()
           if (insErr || !criado) {
             // Corrida: outro request inseriu o mesmo CPF entre o SELECT e o INSERT.
             if (insErr?.code === '23505') {
               const { data: agora } = await supabase
                 .from('pacientes')
-                .select('id, nome, cpf, data_nascimento')
-                .eq('cpf', cpfNorm)
+                .select('id, nome, cpf_enc, data_nascimento')
+                .eq('cpf_hash', hashCpf(cpfNorm))
                 .single()
               pacienteRow = agora as PacienteBuscaRow
             } else {

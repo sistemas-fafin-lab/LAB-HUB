@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 import { authenticate } from '../middlewares/auth.js'
+import { decifrarCpfPaciente } from '../lib/crypto.js'
 import { registrarAcesso } from '../lib/auditoria.js'
 import { laudoService } from '../laudos/index.js'
 import { laudosDaLinha } from '../laudos/repository.js'
@@ -34,16 +35,17 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
   const dadosDoPaciente = async (
     pacienteId: string,
   ): Promise<{ cpf: string; nascimento: string; sexo: 'M' | 'F' }> => {
+    // Fase 2b (S-06, ticket 02): `cpf` em claro não é mais lido — só `cpf_enc`.
     const { data, error } = await supabase
       .from('pacientes')
-      .select('cpf, data_nascimento, sexo')
+      .select('cpf_enc, data_nascimento, sexo')
       .eq('id', pacienteId)
       .single()
-    if (error || !data?.cpf) {
+    if (error || !data?.cpf_enc) {
       throw app.httpErrors.notFound('Paciente não encontrado')
     }
     return {
-      cpf: data.cpf as string,
+      cpf: decifrarCpfPaciente(pacienteId, data.cpf_enc as string),
       nascimento: data.data_nascimento as string,
       sexo: data.sexo as 'M' | 'F',
     }

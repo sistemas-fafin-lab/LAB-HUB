@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { Resultado } from '@lab-hub/shared'
 import { supabase } from '../lib/supabase.js'
 import { authenticateAdmin } from '../middlewares/adminAuth.js'
+import { decifrarCpfPaciente, hashCpf } from '../lib/crypto.js'
 import { toResultado } from '../lib/mappers.js'
 import { marcarRetificados } from '../lib/retificacao.js'
 import { mensagemZod } from '../lib/validacao.js'
@@ -39,10 +40,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // excluido_em: mesmo corte de exclusão de conta (LGPD art. 18 VI) — um CPF
     // de conta apagada não deve reaparecer numa consulta nova só porque a
     // coluna sobrevive ao expurgo (ver lib/apagarPaciente.ts).
+    // Fase 2b (S-06, ticket 02): busca pelo índice cego — `cpf` em claro não é
+    // mais lido por este caminho. PRECONDIÇÃO DE DEPLOY: exige o backfill de
+    // cpf_hash/cpf_enc já ter rodado (ver crypto.ts#decifrarCpfPaciente).
     const { data: paciente, error } = await supabase
       .from('pacientes')
-      .select('id, nome, cpf')
-      .eq('cpf', cpf)
+      .select('id, nome, cpf_enc')
+      .eq('cpf_hash', hashCpf(cpf))
       .is('excluido_em', null)
       .maybeSingle()
     if (error) {
@@ -53,6 +57,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const pacienteId = paciente.id as string
+    const cpfDecifrado = decifrarCpfPaciente(pacienteId, paciente.cpf_enc as string)
 
     const { data: resultadosRows, error: resultadosError } = await supabase
       .from('resultados')
@@ -72,13 +77,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // vira 500 seguro: não pode aparecer como "paciente sem laudo".
     let laudos: Awaited<ReturnType<typeof laudoService.readCachedExams>>
     try {
-      laudos = await laudoService.readCachedExams(pacienteId, paciente.cpf as string)
+      laudos = await laudoService.readCachedExams(pacienteId, cpfDecifrado)
     } catch {
       throw app.httpErrors.internalServerError('Falha ao consultar laudos')
     }
 
     return {
-      paciente: { id: pacienteId, nome: paciente.nome as string, cpf: paciente.cpf as string },
+      paciente: { id: pacienteId, nome: paciente.nome as string, cpf: cpfDecifrado },
       resultados,
       laudos,
     }

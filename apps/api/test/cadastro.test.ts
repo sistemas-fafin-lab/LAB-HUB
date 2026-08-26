@@ -14,7 +14,7 @@ const h = vi.hoisted(() => {
 vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 
 import { cadastroRoutes } from '../src/routes/cadastro.js'
-import { aadDe, decifrar, hashCpf } from '../src/lib/crypto.js'
+import { aadDe, cifrar, decifrar, hashCpf } from '../src/lib/crypto.js'
 import { buildApp, createSupabaseMock, type SupaCall, type SupaHandler } from './helpers.js'
 
 const PAC_ID = '11111111-1111-1111-1111-111111111111'
@@ -33,6 +33,8 @@ const CORPO = {
 const CPF_DIGITOS = '39053344705'
 
 // Linha que a recepção do FlowLab pré-criou: sem auth_user_id.
+// `cpf_enc` entra sempre — desde o ticket 02, `toPaciente` decifra dali, nunca
+// mais de `cpf` em claro (que a linha continua tendo, mas a API não lê).
 function fantasma(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: PAC_ID,
@@ -40,6 +42,7 @@ function fantasma(over: Record<string, unknown> = {}): Record<string, unknown> {
     nome: 'Maria S.',
     email: null,
     cpf: CPF_DIGITOS,
+    cpf_enc: cifrar(CPF_DIGITOS, aadDe('pacientes', 'cpf', PAC_ID)),
     sexo: 'F',
     data_nascimento: '1990-05-14',
     telefone: null,
@@ -155,12 +158,24 @@ describe('POST /cadastro — claim do paciente-fantasma (P-01)', () => {
     expect(insert?.payload).toMatchObject({ cpf: CPF_DIGITOS, data_nascimento: CORPO.dataNascimento })
   })
 
-  it('busca o fantasma pelo CPF só em dígitos, com a data de nascimento no select', async () => {
+  // Fase 2b (S-06, ticket 02): a busca do fantasma passa a ser pelo índice
+  // cego — `cpf` em claro não é mais lido para achar a linha.
+  it('busca o fantasma pelo índice cego do CPF só em dígitos', async () => {
     await montar(cenarioFantasma())
     await cadastrar()
 
     const select = calls.find((c) => c.op === 'select')
-    expect(select?.filters).toMatchObject({ cpf: CPF_DIGITOS })
+    expect(select?.filters).toMatchObject({ cpf_hash: hashCpf(CPF_DIGITOS) })
+    expect(select?.filters).not.toHaveProperty('cpf')
+  })
+
+  // Regressão do ticket 02: a resposta continua trazendo o CPF certo — só que
+  // agora decifrado de `cpf_enc` no servidor, nunca lido de `cpf` em claro.
+  it('a resposta traz o CPF decifrado de cpf_enc, igual ao que a coluna em claro devolvia', async () => {
+    await montar(cenarioFantasma())
+    const res = await cadastrar()
+
+    expect(res.json().paciente.cpf).toBe(CPF_DIGITOS)
   })
 })
 
@@ -216,30 +231,22 @@ describe('POST /cadastro — fase 2b: escrita dupla do índice cego', () => {
     expect(res.body).not.toContain('cpf_enc')
   })
 
-  // O usuário do Auth já foi criado (createUser, antes do INSERT de pacientes)
-  // quando cpf_hash/cpf_enc entram em cena. Se essa parte lançasse por falta de
-  // CPF_HASH_KEY, a exceção pularia o `dbError` que dispara o rollback
-  // (`deleteUser`) — o usuário do Auth ficaria órfão e um retry com o mesmo
-  // e-mail passaria a falhar com "já em uso" para sempre. Por isso a escrita do
-  // índice cego usa as variantes tolerantes (`SeConfigurado`), não `hashCpf`/
-  // `cifrar` direto: sem a chave, o cadastro segue funcionando só sem elas —
-  // `cpf` em claro continua sendo a fonte de verdade nesta fase.
-  it('sem CPF_HASH_KEY, o cadastro continua funcionando e não deixa o Auth órfão', async () => {
+  // Ticket 01 (escrita): a escrita do índice cego usa as variantes tolerantes
+  // (`SeConfigurado`) — sem a chave, o INSERT segue gravando `cpf` em claro
+  // sem `cpf_hash`/`cpf_enc`. Ticket 02 (busca) muda o outro lado: a busca do
+  // fantasma passa a usar `hashCpf` direto (não a variante tolerante), porque
+  // sem `cpf_hash` não há como achar a linha por CPF de outro jeito. Por isso,
+  // sem CPF_HASH_KEY, o cadastro agora FALHA na busca — antes de sequer criar
+  // o usuário no Auth, então não há risco de conta órfã (`createUser` nem
+  // chega a ser chamado).
+  it('sem CPF_HASH_KEY, o cadastro falha na busca — antes de tocar no Auth', async () => {
     vi.stubEnv('CPF_HASH_KEY', '')
-    await montar((call) => {
-      if (call.op === 'select') return { data: null, error: null }
-      return { data: { ...fantasma(), auth_user_id: USER_ID }, error: null }
-    })
+    await montar(cenarioFantasma())
     const res = await cadastrar()
 
-    expect(res.statusCode).toBe(201)
-    expect(deleteUser).not.toHaveBeenCalled()
-    const insert = calls.find((c) => c.op === 'insert')
-    // Só cpf_hash fica de fora — cpf_enc usa PII_KEY_K1, uma chave independente
-    // que continua configurada neste cenário (as duas checagens são gates
-    // separados, de propósito: ver crypto.ts).
-    expect(insert?.payload).not.toHaveProperty('cpf_hash')
-    expect(insert?.payload).toMatchObject({ cpf: CPF_DIGITOS })
+    expect(res.statusCode).toBe(500)
+    expect(createUser).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
   })
 })
 

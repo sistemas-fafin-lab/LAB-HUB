@@ -211,6 +211,44 @@ describe('GET /integracao/agendamentos/:labhubId/documentos', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Fase 2b (S-06, ticket 02) — busca de pacientes só lê cpf_enc
+// ---------------------------------------------------------------------------
+
+describe('GET /integracao/pacientes/buscar — cpfMascarado vem de cpf_enc decifrado', () => {
+  it('mascara o CPF decifrado de cpf_enc, sem ler pacientes.cpf', async () => {
+    const mock = createSupabaseMock({
+      handler: (call) =>
+        call.table === 'pacientes'
+          ? {
+              data: [
+                {
+                  id: 'pac-1',
+                  nome: 'Maria Souza',
+                  cpf_enc: cifrar('52998224725', aadDe('pacientes', 'cpf', 'pac-1')),
+                  data_nascimento: '1990-01-01',
+                },
+              ],
+              error: null,
+            }
+          : { data: null, error: null },
+    })
+    h.setSb(mock.client)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/integracao/pacientes/buscar?q=Maria',
+      headers: CHAVE,
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().pacientes[0]).toMatchObject({ id: 'pac-1', cpfMascarado: '•••.•••.•••-25' })
+    const select = mock.calls.find((c) => c.table === 'pacientes')
+    expect(select?.filters).not.toHaveProperty('cpf')
+  })
+})
+
 // ── Trilha de auditoria do canal do FlowLab (S-08) ──────────────────────────────
 
 describe('trilha de auditoria de acesso pelo FlowLab (S-08)', () => {
@@ -284,7 +322,17 @@ describe('trilha de auditoria de acesso pelo FlowLab (S-08)', () => {
     const mock = createSupabaseMock({
       handler: (call) =>
         call.table === 'pacientes'
-          ? { data: [{ id: 'pac-1', nome: 'Maria Souza', cpf: '52998224725', data_nascimento: '1990-01-01' }], error: null }
+          ? {
+              data: [
+                {
+                  id: 'pac-1',
+                  nome: 'Maria Souza',
+                  cpf_enc: cifrar('52998224725', aadDe('pacientes', 'cpf', 'pac-1')),
+                  data_nascimento: '1990-01-01',
+                },
+              ],
+              error: null,
+            }
           : { data: null, error: null },
     })
     h.setSb(mock.client)
@@ -575,40 +623,16 @@ describe('POST /integracao/agendamentos — modo NOVO: escrita dupla do índice 
     expect(res.body).not.toContain('cpf_enc')
   })
 
-  // O find-or-create da recepção não pode 500 no FlowLab só porque falta o
-  // índice cego — `cpf` em claro segue sendo a fonte de verdade nesta fase.
-  // Por isso a escrita usa as variantes tolerantes (`SeConfigurado`), não
-  // `hashCpf`/`cifrar` direto.
-  it('sem CPF_HASH_KEY, cria o paciente fantasma mesmo assim (só sem cpf_hash/cpf_enc)', async () => {
+  // Ticket 01 (escrita): sem CPF_HASH_KEY, o INSERT do fantasma tolera a
+  // ausência de cpf_hash/cpf_enc (`SeConfigurado`). Ticket 02 (busca) muda o
+  // outro lado: achar o paciente por CPF passa a exigir `hashCpf` direto — sem
+  // a chave, a busca (que acontece ANTES do insert, no find-or-create) falha
+  // e o find-or-create inteiro 500a, sem chegar a criar paciente nem agendamento.
+  it('sem CPF_HASH_KEY, falha ao buscar o paciente por CPF (não chega a criar nada)', async () => {
     vi.stubEnv('CPF_HASH_KEY', '')
-    let pacienteInserido: Record<string, unknown> | undefined
-
-    const handler: SupaHandler = (call) => {
-      if (call.table === 'pacientes') {
-        if (call.op === 'select') return { data: null, error: null }
-        if (call.op === 'insert') {
-          pacienteInserido = call.payload as Record<string, unknown>
-          return { data: pacienteInserido, error: null }
-        }
-      }
-      if (call.table === 'agendamentos' && call.op === 'insert') {
-        return {
-          data: {
-            id: 'aaaaaaaa-1111-1111-1111-111111111111',
-            paciente_id: pacienteInserido?.id,
-            posto_flowlab_id: POSTO_ID,
-            posto_nome: 'Posto Centro',
-            data_hora: SLOT,
-            status: 'pendente',
-            flowlab_id: null,
-            criado_em: SLOT,
-          },
-          error: null,
-        }
-      }
-      return { data: null, error: null }
-    }
-    h.setSb(createSupabaseMock({ handler }).client)
+    const handler: SupaHandler = () => ({ data: null, error: null })
+    const mock = createSupabaseMock({ handler })
+    h.setSb(mock.client)
     h.setFl({
       getDisponibilidadeRetroativa: async () => [
         { id: POSTO_ID, nome: 'Posto Centro', endereco: 'Rua X, 1', slots: [SLOT] },
@@ -630,12 +654,83 @@ describe('POST /integracao/agendamentos — modo NOVO: escrita dupla do índice 
       },
     })
 
+    expect(res.statusCode).toBe(500)
+    expect(mock.calls.some((c) => c.table === 'pacientes' && c.op === 'insert')).toBe(false)
+    expect(mock.calls.some((c) => c.table === 'agendamentos')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POST /integracao/agendamentos — modo NOVO (ticket 02): a busca do fantasma/
+// paciente existente por CPF passa a ser por cpf_hash, nunca por cpf em claro.
+// ---------------------------------------------------------------------------
+
+describe('POST /integracao/agendamentos — modo NOVO: busca por cpf_hash (ticket 02)', () => {
+  const POSTO_ID = '99999999-9999-9999-9999-999999999999'
+  const SLOT = '2026-08-20T10:00:00.000Z'
+  const CPF_EXISTENTE = '52998224725'
+  const PAC_EXISTENTE = 'pac-existente-1'
+
+  it('reusa paciente existente achado por cpf_hash, e a resposta traz o CPF mascarado certo', async () => {
+    const handler: SupaHandler = (call) => {
+      if (call.table === 'pacientes' && call.op === 'select') {
+        return {
+          data: {
+            id: PAC_EXISTENTE,
+            nome: 'Maria Existente',
+            cpf_enc: cifrar(CPF_EXISTENTE, aadDe('pacientes', 'cpf', PAC_EXISTENTE)),
+            data_nascimento: '1990-05-05',
+          },
+          error: null,
+        }
+      }
+      if (call.table === 'agendamentos' && call.op === 'insert') {
+        return {
+          data: {
+            id: 'aaaaaaaa-2222-2222-2222-222222222222',
+            paciente_id: PAC_EXISTENTE,
+            posto_flowlab_id: POSTO_ID,
+            posto_nome: 'Posto Centro',
+            data_hora: SLOT,
+            status: 'pendente',
+            flowlab_id: null,
+            criado_em: SLOT,
+          },
+          error: null,
+        }
+      }
+      return { data: null, error: null }
+    }
+    const mock = createSupabaseMock({ handler })
+    h.setSb(mock.client)
+    h.setFl({
+      getDisponibilidadeRetroativa: async () => [
+        { id: POSTO_ID, nome: 'Posto Centro', endereco: 'Rua X, 1', slots: [SLOT] },
+      ],
+      invalidarDisponibilidade: () => undefined,
+    })
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integracao/agendamentos',
+      headers: CHAVE,
+      payload: {
+        nome: 'Maria Existente',
+        cpf: '529.982.247-25',
+        dataNascimento: '1990-05-05',
+        postoFlowlabId: POSTO_ID,
+        dataHora: SLOT,
+      },
+    })
+
     expect(res.statusCode).toBe(201)
-    // Só cpf_hash fica de fora — cpf_enc usa PII_KEY_K1, uma chave independente
-    // que continua configurada neste cenário (as duas checagens são gates
-    // separados, de propósito: ver crypto.ts).
-    expect(pacienteInserido).not.toHaveProperty('cpf_hash')
-    expect(pacienteInserido).toMatchObject({ cpf: CPF_NOVO_PACIENTE })
+    expect(res.json().pacienteCriado).toBe(false)
+    expect(res.json().paciente).toMatchObject({ id: PAC_EXISTENTE, cpfMascarado: '•••.•••.•••-25' })
+
+    const busca = mock.calls.find((c) => c.table === 'pacientes' && c.op === 'select')
+    expect(busca?.filters).toMatchObject({ cpf_hash: hashCpf(CPF_EXISTENTE) })
+    expect(busca?.filters).not.toHaveProperty('cpf')
   })
 })
 
