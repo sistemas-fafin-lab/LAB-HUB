@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { cpfValido } from '../lib/cpf.js'
+import { cpfDigitosSchema } from '../lib/cpf.js'
 
 // Schemas do canal de integração usado pela recepção do FlowLab
 // (FlowLab → LAB-HUB, autenticado por API key — ver routes/integracao.ts).
@@ -9,14 +9,6 @@ import { cpfValido } from '../lib/cpf.js'
 export const buscarPacientesQuerySchema = z.object({
   q: z.string().trim().min(2, 'Busca precisa de ao menos 2 caracteres'),
 })
-
-// CPF pode chegar formatado; normalizamos para 11 dígitos e validamos os dígitos
-// verificadores (não só o comprimento) — a linha de paciente é a chave do claim.
-const cpfDigitos = z
-  .string()
-  .transform((s) => s.replace(/\D/g, ''))
-  .refine((s) => /^\d{11}$/.test(s), 'CPF deve ter 11 dígitos')
-  .refine(cpfValido, 'CPF inválido')
 
 // Data de nascimento real: rejeita datas inexistentes (30/02), futuras ou
 // anteriores a 1900. Recebe 'YYYY-MM-DD' (o regex externo já garante o formato).
@@ -47,7 +39,7 @@ export const criarAgendamentoRecepcaoSchema = z
   .object({
     pacienteId: z.string().uuid().optional(),
     nome: z.string().trim().min(1).optional(),
-    cpf: cpfDigitos.optional(),
+    cpf: cpfDigitosSchema.optional(),
     dataNascimento: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida (use YYYY-MM-DD)')
@@ -81,7 +73,7 @@ export const correcaoIdentidadeParamSchema = z.object({
 // ser auditada depois, e uma troca de CPF é exatamente o que se audita primeiro
 // quando algo dá errado. Os limites de tamanho evitam despejo de texto na trilha.
 export const corrigirIdentidadeSchema = z.object({
-  cpf: cpfDigitos,
+  cpf: cpfDigitosSchema,
   dataNascimento: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida (use YYYY-MM-DD)')

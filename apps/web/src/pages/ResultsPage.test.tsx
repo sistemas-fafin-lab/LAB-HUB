@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { Paciente, Resultado } from '@lab-hub/shared'
 import type { Exam } from '../components/shared/WebHero'
 
 const estado = { exams: [] as Exam[], loading: false, error: null as string | null }
@@ -9,7 +10,51 @@ vi.mock('../lib/useResultados', () => ({
   atualizaResultados: vi.fn(),
 }))
 
+class ApiErrorMock extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+const adminResultadosPorCpf = vi.fn()
+vi.mock('../lib/api', () => ({
+  api: { adminResultadosPorCpf: (...args: unknown[]) => adminResultadosPorCpf(...args) },
+  ApiError: ApiErrorMock,
+}))
+
 const { ResultsPage } = await import('./ResultsPage')
+
+const ADMIN_EMAIL = 'teste@gmail.com'
+const CPF_VALIDO = '52998224725' // dígitos verificadores reais
+
+function paciente(email: string): Paciente {
+  return {
+    id: 'pac-1',
+    authUserId: 'auth-1',
+    nome: 'Fulano de Tal',
+    email,
+    cpf: '11111111111',
+    sexo: 'M',
+    dataNascimento: '1990-01-01',
+  }
+}
+
+function resultado(over: Partial<Resultado> = {}): Resultado {
+  return {
+    id: 'res-1',
+    pacienteId: 'alvo-1',
+    exameNome: 'Hemograma completo',
+    status: 'ready',
+    paineis: [],
+    liberadoEm: '2026-07-20T12:00:00.000Z',
+    ...over,
+  }
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+  adminResultadosPorCpf.mockReset()
+})
 
 function exame(over: Partial<Exam> = {}): Exam {
   return {
@@ -28,11 +73,20 @@ function exame(over: Partial<Exam> = {}): Exam {
   } as Exam
 }
 
-function monta(exams: Exam[]) {
+function monta(
+  exams: Exam[],
+  opts: { paciente?: Paciente | null; onOpenExam?: (exam: Exam) => void } = {},
+) {
   estado.exams = exams
   estado.loading = false
   estado.error = null
-  return render(<ResultsPage dark={false} onOpenExam={() => {}} />)
+  return render(
+    <ResultsPage
+      dark={false}
+      onOpenExam={opts.onOpenExam ?? (() => {})}
+      {...(opts.paciente !== undefined ? { paciente: opts.paciente } : {})}
+    />,
+  )
 }
 
 describe('estado vazio', () => {
@@ -61,5 +115,158 @@ describe('promessa da tela', () => {
     // faz o paciente concluir que não fez exames num período em que fez.
     expect(container.textContent).not.toContain('Histórico completo')
     expect(container.textContent).toContain('Resultados mais antigos podem não aparecer')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Consulta administrativa de dev (CPF) — ver .scratch/consulta-dev-resultados-por-cpf
+// ---------------------------------------------------------------------------
+describe('consulta administrativa por CPF — visibilidade do campo', () => {
+  it('não aparece sem sessão', () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    monta([])
+
+    expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
+  })
+
+  it('não aparece para uma sessão com e-mail diferente do configurado', () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    monta([], { paciente: paciente('outro@gmail.com') })
+
+    expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
+  })
+
+  it('não aparece sem VITE_ADMIN_EMAIL configurado, mesmo com o e-mail certo', () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', '')
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
+  })
+
+  it('aparece para a sessão autorizada', () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    expect(screen.getByPlaceholderText(/Consultar por CPF/)).toBeTruthy()
+  })
+
+  it('a visão normal (sem sessão admin) continua igual à de antes — regressão', () => {
+    // Mesmo teste do bloco "estado vazio" acima, sem VITE_ADMIN_EMAIL: garante
+    // que a capacidade nova não vazou para quem não é a sessão autorizada.
+    monta([])
+
+    expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
+    expect(screen.getByText(/Nenhum resultado disponível ainda/)).toBeTruthy()
+  })
+})
+
+describe('consulta administrativa por CPF — validação e busca', () => {
+  function buscar(cpf: string) {
+    fireEvent.change(screen.getByPlaceholderText(/Consultar por CPF/), { target: { value: cpf } })
+    fireEvent.click(screen.getByText('Buscar'))
+  }
+
+  it('CPF inválido mostra erro e não dispara requisição', () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar('123')
+
+    expect(screen.getByText('CPF inválido')).toBeTruthy()
+    expect(adminResultadosPorCpf).not.toHaveBeenCalled()
+  })
+
+  it('Enter dispara a mesma busca que o botão', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValue({
+      paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
+      resultados: [],
+    })
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    fireEvent.change(screen.getByPlaceholderText(/Consultar por CPF/), {
+      target: { value: CPF_VALIDO },
+    })
+    fireEvent.keyDown(screen.getByPlaceholderText(/Consultar por CPF/), { key: 'Enter' })
+
+    await waitFor(() => expect(adminResultadosPorCpf).toHaveBeenCalledWith(CPF_VALIDO))
+  })
+
+  it('sucesso substitui a lista pela do paciente encontrado, com nome e CPF completo', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValue({
+      paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
+      resultados: [resultado({ exameNome: 'Hemograma completo' })],
+    })
+    monta([exame({ name: 'Exame da sessão' })], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar(CPF_VALIDO)
+
+    await waitFor(() => expect(screen.getByText('Maria Alvo')).toBeTruthy())
+    expect(screen.getByText('529.982.247-25')).toBeTruthy()
+    expect(screen.getByText('Hemograma completo')).toBeTruthy()
+    // A lista PRÓPRIA some — as duas listas nunca aparecem misturadas.
+    expect(screen.queryByText('Exame da sessão')).toBeNull()
+  })
+
+  it('linha da consulta admin não abre o detalhe do exame', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValue({
+      paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
+      resultados: [resultado({ exameNome: 'Hemograma completo' })],
+    })
+    const onOpenExam = vi.fn()
+    monta([], { paciente: paciente(ADMIN_EMAIL), onOpenExam })
+
+    buscar(CPF_VALIDO)
+    await waitFor(() => expect(screen.getByText('Hemograma completo')).toBeTruthy())
+    fireEvent.click(screen.getByText('Hemograma completo'))
+
+    expect(onOpenExam).not.toHaveBeenCalled()
+  })
+
+  it('CPF sem paciente correspondente mostra estado distinto de "sem resultado"', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockRejectedValue(new ApiErrorMock(404, 'Paciente não encontrado'))
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar(CPF_VALIDO)
+
+    await waitFor(() =>
+      expect(screen.getByText(/Nenhum paciente encontrado com este CPF/)).toBeTruthy(),
+    )
+  })
+
+  it('paciente encontrado sem resultado mostra mensagem própria, distinta da de paciente não encontrado', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValue({
+      paciente: { id: 'alvo-1', nome: 'Maria Sem Resultado', cpf: CPF_VALIDO },
+      resultados: [],
+    })
+    monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar(CPF_VALIDO)
+
+    await waitFor(() =>
+      expect(screen.getByText('Nenhum resultado encontrado para Maria Sem Resultado.')).toBeTruthy(),
+    )
+    expect(screen.queryByText(/Nenhum paciente encontrado/)).toBeNull()
+  })
+
+  it('"Voltar aos meus resultados" limpa a consulta e restaura a lista própria', async () => {
+    vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+    adminResultadosPorCpf.mockResolvedValue({
+      paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
+      resultados: [resultado()],
+    })
+    monta([exame({ name: 'Exame da sessão' })], { paciente: paciente(ADMIN_EMAIL) })
+
+    buscar(CPF_VALIDO)
+    await waitFor(() => expect(screen.getByText('Maria Alvo')).toBeTruthy())
+
+    fireEvent.click(screen.getByText('Voltar aos meus resultados'))
+
+    expect(screen.queryByText('Maria Alvo')).toBeNull()
+    expect(screen.getByText('Exame da sessão')).toBeTruthy()
   })
 })

@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 // Validação de CPF pelos dígitos verificadores. Opera sobre qualquer string
 // (normaliza para dígitos); rejeita tamanho errado e sequências repetidas
 // (000.000.000-00 … 999.999.999-99), que passam na conta mas não são CPFs reais.
@@ -14,3 +16,12 @@ export function cpfValido(cpf: string): boolean {
 
   return digito(9) === Number(d[9]) && digito(10) === Number(d[10])
 }
+
+// CPF pode chegar formatado; normaliza para 11 dígitos e valida os dígitos
+// verificadores (não só o comprimento) antes de deixar passar. Compartilhado
+// por todo schema que recebe CPF de entrada (recepção, consulta admin).
+export const cpfDigitosSchema = z
+  .string()
+  .transform((s) => s.replace(/\D/g, ''))
+  .refine((s) => /^\d{11}$/.test(s), 'CPF deve ter 11 dígitos')
+  .refine(cpfValido, 'CPF inválido')

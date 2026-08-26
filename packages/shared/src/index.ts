@@ -379,3 +379,24 @@ export interface RespostaLaudos {
   exams: Laudo[]
   source: 'cached' | 'live'
 }
+
+// ---------------------------------------------------------------------------
+// Consulta administrativa de dev (GET /api/v1/admin/resultados-por-cpf)
+// ---------------------------------------------------------------------------
+// Restrita ao e-mail de ADMIN_EMAIL/VITE_ADMIN_EMAIL, e só fora de produção —
+// ver middlewares/adminAuth.ts. Cobre só a fonte `resultado` do FlowLab; os
+// `laudo` do LIS entram numa fatia seguinte.
+
+// Identidade mínima do paciente-alvo. CPF vem COMPLETO (não mascarado, ao
+// contrário do PacienteBuscaItem da recepção): quem chega até aqui já digitou
+// o CPF inteiro e precisa dele para confirmar que encontrou a pessoa certa.
+export interface AdminPacienteIdentidade {
+  id: string
+  nome: string
+  cpf: string
+}
+
+export interface AdminConsultaResultadosResposta {
+  paciente: AdminPacienteIdentidade
+  resultados: Resultado[]
+}

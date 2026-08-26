@@ -9,6 +9,9 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_ANON_KEY?: string
   readonly VITE_UMAMI_TRACKER_SRC?: string
   readonly VITE_UMAMI_WEBSITE_ID?: string
+  // Consulta administrativa de dev (ResultsPage) — ver lib/admin.ts. Só tem
+  // efeito em `import.meta.env.DEV`; sem ela, ninguém vê o campo de CPF.
+  readonly VITE_ADMIN_EMAIL?: string
 }
 
 interface ImportMeta {

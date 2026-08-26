@@ -1,4 +1,4 @@
-import type { DocumentoUrl } from '@lab-hub/shared'
+import type { AdminConsultaResultadosResposta, DocumentoUrl } from '@lab-hub/shared'
 import { supabase } from './supabase'
 
 // Cliente HTTP da API (apps/api). Anexa o JWT do Supabase em cada request.
@@ -82,4 +82,8 @@ export const api = {
   // Signed URL temporária de um documento do paciente (bucket privado).
   documentoUrl: (id: string, download = false): Promise<DocumentoUrl> =>
     request<DocumentoUrl>(`/documentos/${id}/url${download ? '?download=true' : ''}`),
+  // Consulta administrativa de dev: resultados FlowLab de outro paciente por
+  // CPF (ver lib/admin.ts). `cpf` já normalizado para 11 dígitos.
+  adminResultadosPorCpf: (cpf: string): Promise<AdminConsultaResultadosResposta> =>
+    request<AdminConsultaResultadosResposta>(`/admin/resultados-por-cpf?cpf=${cpf}`),
 }

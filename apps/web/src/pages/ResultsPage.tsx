@@ -1,9 +1,14 @@
 import { useState } from 'react'
+import type { AdminConsultaResultadosResposta, Paciente } from '@lab-hub/shared'
 import { WIcon } from '../components/primitives/WIcon'
 import { ExamRow } from '../components/shared/ExamRow'
 import { ExamRowSkeleton } from '../components/shared/ExamRowSkeleton'
 import type { Exam } from '../components/shared/WebHero'
 import { atualizaResultados, useResultados } from '../lib/useResultados'
+import { ehSessaoAdmin } from '../lib/admin'
+import { api, ApiError } from '../lib/api'
+import { resultadoToExam } from '../lib/mappers'
+import { apenasDigitos, formatarCpf, validarCpf } from '../lib/validators'
 
 type FilterId = 'all' | 'ready' | 'analyzing'
 
@@ -36,9 +41,11 @@ const PERIODO_OPTIONS: PeriodoOption[] = [
 interface ResultsPageProps {
   dark: boolean
   onOpenExam: (exam: Exam) => void
+  /** Paciente da sessão — só usado para decidir se a consulta admin aparece. */
+  paciente?: Paciente | null
 }
 
-export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
+export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
   const { exams, loading, error } = useResultados()
   const [filter, setFilter] = useState<FilterId>('all')
   const [query, setQuery]   = useState('')
@@ -46,13 +53,59 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
   const [periodoAberto, setPeriodoAberto] = useState(false)
   const [atualizando, setAtualizando] = useState(false)
 
+  // Consulta administrativa de dev (ver .scratch/consulta-dev-resultados-por-cpf):
+  // campo só aparece para a sessão autorizada, e só fora de produção. Falha
+  // fechada por padrão — sem VITE_ADMIN_EMAIL configurado, isAdmin é sempre false.
+  const isAdmin = ehSessaoAdmin(paciente?.email, import.meta.env.DEV, import.meta.env.VITE_ADMIN_EMAIL)
+  const [cpfBusca, setCpfBusca] = useState('')
+  const [cpfErro, setCpfErro] = useState<string | null>(null)
+  const [buscandoCpf, setBuscandoCpf] = useState(false)
+  const [naoEncontrado, setNaoEncontrado] = useState(false)
+  const [consultaAdmin, setConsultaAdmin] = useState<AdminConsultaResultadosResposta | null>(null)
+
+  const handleBuscarCpf = async () => {
+    const erro = validarCpf(cpfBusca)
+    setCpfErro(erro)
+    setNaoEncontrado(false)
+    if (erro) return // CPF inválido não dispara requisição.
+
+    setBuscandoCpf(true)
+    try {
+      const resposta = await api.adminResultadosPorCpf(apenasDigitos(cpfBusca))
+      setConsultaAdmin(resposta)
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 404) {
+        setConsultaAdmin(null)
+        setNaoEncontrado(true)
+      } else {
+        setCpfErro(err instanceof Error ? err.message : 'Falha ao consultar CPF')
+      }
+    } finally {
+      setBuscandoCpf(false)
+    }
+  }
+
+  const handleLimparConsultaAdmin = () => {
+    setConsultaAdmin(null)
+    setNaoEncontrado(false)
+    setCpfBusca('')
+    setCpfErro(null)
+  }
+
+  // Em consulta admin, a lista PRÓPRIA é substituída pela do paciente
+  // encontrado — nunca as duas misturadas (ver ticket).
+  const emConsultaAdmin = consultaAdmin !== null
+  const examsAtivos = emConsultaAdmin ? consultaAdmin.resultados.map(resultadoToExam) : exams
+  const carregando = emConsultaAdmin ? false : loading
+  const erroAtivo = emConsultaAdmin ? null : error
+
   const periodoSel = PERIODO_OPTIONS.find((p) => p.id === periodo)!
   // Corte em ISO (YYYY-MM-DD) comparável por string com Exam.coletadoEm.
   const corte = periodoSel.dias === null
     ? ''
     : new Date(Date.now() - periodoSel.dias * 86_400_000).toISOString().slice(0, 10)
 
-  const filtered = exams.filter((e) =>
+  const filtered = examsAtivos.filter((e) =>
     (filter === 'all' || e.status === filter) &&
     (!corte || (e.coletadoEm ?? '') >= corte) &&
     (
@@ -60,6 +113,16 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
       e.category.toLowerCase().includes(query.toLowerCase())
     )
   )
+
+  // Estado vazio tem TRÊS mensagens distintas: sem exame nenhum (paciente da
+  // sessão), sem exame nenhum (paciente consultado pelo admin) e "filtro não
+  // casou" — misturar a primeira com a segunda faria o admin ler "ainda não
+  // há resultados" como se fosse sobre a PRÓPRIA conta dele.
+  const mensagemVazia = examsAtivos.length > 0
+    ? 'Nenhum exame corresponde à busca ou aos filtros selecionados.'
+    : emConsultaAdmin
+      ? `Nenhum resultado encontrado para ${consultaAdmin.paciente.nome}.`
+      : 'Nenhum resultado disponível ainda. Assim que o laboratório liberar, ele aparece aqui.'
 
   const handleAtualizar = async () => {
     setAtualizando(true)
@@ -89,6 +152,69 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
           nesse caso, procure a unidade onde fez a coleta.
         </p>
       </div>
+
+      {/* Consulta administrativa de dev — só aparece para a sessão autorizada
+          (ver lib/admin.ts). Read-only: nunca edita nada, e nunca mistura a
+          lista encontrada com a do titular da sessão. */}
+      {isAdmin && (
+        <div
+          className={`rounded-2xl border ${
+            dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
+          } p-4 shadow-sm mb-4`}
+        >
+          {emConsultaAdmin ? (
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className={`text-sm ${dark ? 'text-gray-200' : 'text-slate-700'}`}>
+                Consultando resultados de{' '}
+                <span className="font-semibold">{consultaAdmin.paciente.nome}</span>
+                {' — CPF '}
+                <span className="font-semibold">{formatarCpf(consultaAdmin.paciente.cpf)}</span>
+              </div>
+              <button
+                onClick={handleLimparConsultaAdmin}
+                className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 ${
+                  dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
+                }`}
+              >
+                <WIcon name="x" className="w-3.5 h-3.5" strokeWidth={2.2} />
+                Voltar aos meus resultados
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 flex-wrap">
+              <div
+                className={`flex items-center gap-2 min-w-[220px] ${
+                  dark ? 'bg-gray-800 border-gray-700' : 'bg-slate-50 border-gray-100'
+                } border rounded-xl px-3 h-10`}
+              >
+                <WIcon name="id-card" className="w-4 h-4 text-gray-400" strokeWidth={2.2} />
+                <input
+                  inputMode="numeric"
+                  value={cpfBusca}
+                  onChange={(e) => setCpfBusca(formatarCpf(e.target.value))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleBuscarCpf() }}
+                  placeholder="Consultar por CPF (dev)"
+                  className={`bg-transparent outline-none text-sm flex-1 ${
+                    dark ? 'text-white placeholder:text-gray-400' : 'text-slate-800 placeholder:text-gray-500'
+                  }`}
+                />
+              </div>
+              <button
+                onClick={() => void handleBuscarCpf()}
+                disabled={buscandoCpf}
+                className="h-9 px-3 rounded-lg text-xs font-medium bg-blue-600 text-white inline-flex items-center gap-1.5 disabled:opacity-60"
+              >
+                <WIcon name="search" className="w-3.5 h-3.5" strokeWidth={2.2} />
+                {buscandoCpf ? 'Buscando…' : 'Buscar'}
+              </button>
+              {cpfErro && <span className="text-xs text-red-500">{cpfErro}</span>}
+              {naoEncontrado && (
+                <span className="text-xs text-red-500">Nenhum paciente encontrado com este CPF.</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Toolbar */}
       <div
@@ -173,20 +299,24 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
               </>
             )}
           </div>
-          <button
-            onClick={handleAtualizar}
-            disabled={atualizando}
-            className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 disabled:opacity-60 ${
-              dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
-            }`}
-          >
-            <WIcon
-              name="refresh-cw"
-              className={`w-3.5 h-3.5 ${atualizando ? 'animate-spin' : ''}`}
-              strokeWidth={2.2}
-            />
-            {atualizando ? 'Atualizando…' : 'Atualizar'}
-          </button>
+          {/* Sem sentido em consulta admin: recarregaria a lista PRÓPRIA, que
+              nem está sendo exibida. */}
+          {!emConsultaAdmin && (
+            <button
+              onClick={handleAtualizar}
+              disabled={atualizando}
+              className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 disabled:opacity-60 ${
+                dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
+              }`}
+            >
+              <WIcon
+                name="refresh-cw"
+                className={`w-3.5 h-3.5 ${atualizando ? 'animate-spin' : ''}`}
+                strokeWidth={2.2}
+              />
+              {atualizando ? 'Atualizando…' : 'Atualizar'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -196,22 +326,17 @@ export function ResultsPage({ dark, onOpenExam }: ResultsPageProps) {
           dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
         } p-2 shadow-sm flex flex-col gap-1`}
       >
-        {loading && <ExamRowSkeleton dark={dark} />}
-        {error && !loading && (
-          <div className="text-center text-sm text-red-500 py-10">{error}</div>
+        {carregando && <ExamRowSkeleton dark={dark} />}
+        {erroAtivo && !carregando && (
+          <div className="text-center text-sm text-red-500 py-10">{erroAtivo}</div>
         )}
-        {!loading && !error && filtered.map((e) => (
-          <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(e)} dark={dark} />
+        {!carregando && !erroAtivo && filtered.map((e) => (
+          // Em consulta admin as linhas são só leitura: sem navegação para
+          // detalhe, laudo ou declaração (fora do escopo desta fatia).
+          <ExamRow key={e.id} exam={e} onClick={() => { if (!emConsultaAdmin) onOpenExam(e) }} dark={dark} />
         ))}
-        {/* "Nenhum exame encontrado" servia aos dois casos, e eles não são o
-            mesmo: sem nenhum exame o paciente pode achar que perdeu resultados;
-            com filtro ativo, que não tem exames. */}
-        {!loading && !error && filtered.length === 0 && (
-          <div className="text-center text-sm text-gray-500 py-10">
-            {exams.length === 0
-              ? 'Nenhum resultado disponível ainda. Assim que o laboratório liberar, ele aparece aqui.'
-              : 'Nenhum exame corresponde à busca ou aos filtros selecionados.'}
-          </div>
+        {!carregando && !erroAtivo && filtered.length === 0 && (
+          <div className="text-center text-sm text-gray-500 py-10">{mensagemVazia}</div>
         )}
       </div>
     </div>

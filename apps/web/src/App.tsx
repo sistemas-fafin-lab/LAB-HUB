@@ -133,7 +133,7 @@ function AuthedApp({ onLogout }: AuthedAppProps) {
       />
     )
   } else if (rotaAtual === 'results') {
-    content = <ResultsPage  dark={dark} onOpenExam={handleOpenExam} />
+    content = <ResultsPage  dark={dark} onOpenExam={handleOpenExam} paciente={paciente} />
   } else if (rotaAtual === 'schedule') {
     content = <SchedulePage  dark={dark} initialSelectedId={coletaId} />
   } else if (rotaAtual === 'trends') {
