@@ -202,12 +202,12 @@ export class LaudoService {
         // lista inteira de propósito: paciente que só tem laudo ApLIS tem cache
         // (é só que nada nele é exibível hoje), e cair no caminho ao vivo o
         // faria varrer os LIS a cada requisição para chegar na mesma lista vazia.
-        return { exams: filtraPorFonte(fundirPedidosPorColeta(cacheados)), source: 'cached' }
+        return { exams: LaudoService.#compoe(cacheados), source: 'cached' }
       }
     }
 
     const { laudos, falha } = await this.#buscarAoVivo(pacienteId, cpf, perfil, log)
-    const exams = filtraPorFonte(fundirPedidosPorColeta(laudos))
+    const exams = LaudoService.#compoe(laudos)
 
     // A checagem vem DEPOIS do corte de fonte, e não dentro do #buscarAoVivo,
     // porque é aqui que se sabe o que o paciente realmente vai ver.
@@ -231,11 +231,18 @@ export class LaudoService {
    * revalida em background e busca ao vivo quando o cache está vazio.
    *
    * Mesma composição do caminho cacheado normal (fusão de pedidos + corte de
-   * fonte) — só sem o efeito colateral de revalidar.
+   * fonte, ver #compoe) — só sem o efeito colateral de revalidar.
    */
   async readCachedExams(pacienteId: string, cpf: string): Promise<Laudo[]> {
     const cacheados = await this.repo.findByPaciente(pacienteId, cpf)
-    return filtraPorFonte(fundirPedidosPorColeta(cacheados))
+    return LaudoService.#compoe(cacheados)
+  }
+
+  // Fusão de pedidos + corte de fonte — a composição de exibição, num lugar
+  // só para os três caminhos (cache normal, ao vivo, cache-only do admin)
+  // não poderem divergir silenciosamente.
+  static #compoe(laudos: Laudo[]): Laudo[] {
+    return filtraPorFonte(fundirPedidosPorColeta(laudos))
   }
 
   // A resposta já foi enviada quando isto roda: falha aqui não pode derrubar a
