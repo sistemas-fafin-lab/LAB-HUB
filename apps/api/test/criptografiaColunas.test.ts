@@ -473,6 +473,7 @@ describe('fase 2a — rótulos e identificadores', () => {
     const id = gravado.id as string
 
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(gravado.paciente_id).toBe('pac-1')
     expect(decifrar(gravado.cpf_enc as string, aadDe('exam_results', 'cpf', id))).toBe('52998224725')
     // Corte do S-06: esta é a segunda cópia do CPF fora de `pacientes`. Deixá-la
     // em claro anularia cifrar `pacientes.cpf` na fase 2b, porque o dump ainda

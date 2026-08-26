@@ -217,6 +217,7 @@ export class ExamResultRepository implements IExamResultRepository {
 
     const { error } = await supabase.from(TABELA).insert({
       id,
+      paciente_id: pacienteId,
       // Só cifrado (S-06, o corte). `cifrar` em vez de `cifrarSeConfigurado`: a
       // versão tolerante devolvia null sem chave, o que agora significaria
       // gravar a linha SEM o CPF em lugar nenhum. Falhar é o certo — e em

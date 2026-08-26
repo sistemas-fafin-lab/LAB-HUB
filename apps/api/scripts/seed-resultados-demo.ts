@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { randomUUID } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import type { Laudo, LaudoPainel, PainelResultado } from '@lab-hub/shared'
+import { aadDe, cifrar, cifrarJson, cifrarSeConfigurado } from '../src/lib/crypto.js'
 
 // ---------------------------------------------------------------------------
 // Semeia resultados de DEMONSTRAÇÃO na conta de teste, um por variação VISUAL
@@ -424,29 +425,44 @@ if (soLimpar) {
 
 const agora = new Date().toISOString()
 
+// `cpf`/`result` em claro não existem mais (S-06, corte). Id gerado aqui —
+// como em laudos/repository.ts — porque o AAD é `tabela:coluna:id` e precisa
+// existir antes de cifrar.
 const { error: errLis } = await supabase.from('exam_results').insert(
-  LAUDOS_LIS.map((laudo) => ({
-    paciente_id: paciente.id,
-    cpf: paciente.cpf,
-    codigo_os: laudo.codigo_os || null,
-    codigo_lis: laudo.codigo_lis,
-    // `result` é a LISTA de laudos da linha (ver ExamResultRepository).
-    result: [laudo],
-    cached_at: agora,
-  })),
+  LAUDOS_LIS.map((laudo) => {
+    const id = randomUUID()
+    return {
+      id,
+      paciente_id: paciente.id,
+      cpf_enc: cifrar(paciente.cpf, aadDe('exam_results', 'cpf', id)),
+      codigo_os: laudo.codigo_os || null,
+      codigo_lis: laudo.codigo_lis,
+      // `result` é a LISTA de laudos da linha (ver ExamResultRepository).
+      result_enc: cifrarJson([laudo], aadDe('exam_results', 'result', id)),
+      cached_at: agora,
+    }
+  }),
 )
 if (errLis) throw errLis
 
+// `categoria`/`resumo`/`paineis` em claro não existem mais (S-06, corte).
+// `exame_nome` fica em claro de propósito — participa de
+// uq_resultado_agendamento_exame, que não existe sobre coluna cifrada.
 const { error: errFlow } = await supabase.from('resultados').insert(
-  RESULTADOS_FLOWLAB.map((r) => ({
-    paciente_id: paciente.id,
-    exame_nome: r.exame_nome,
-    categoria: r.categoria,
-    status: r.status,
-    resumo: r.resumo,
-    paineis: r.paineis,
-    liberado_em: r.liberado_em,
-  })),
+  RESULTADOS_FLOWLAB.map((r) => {
+    const id = randomUUID()
+    return {
+      id,
+      paciente_id: paciente.id,
+      exame_nome: r.exame_nome,
+      exame_nome_enc: cifrarSeConfigurado(r.exame_nome, aadDe('resultados', 'exame_nome', id)),
+      categoria_enc: cifrar(r.categoria, aadDe('resultados', 'categoria', id)),
+      status: r.status,
+      ...(r.resumo ? { resumo_enc: cifrar(r.resumo, aadDe('resultados', 'resumo', id)) } : {}),
+      paineis_enc: cifrarJson(r.paineis, aadDe('resultados', 'paineis', id)),
+      liberado_em: r.liberado_em,
+    }
+  }),
 )
 if (errFlow) throw errFlow
 
