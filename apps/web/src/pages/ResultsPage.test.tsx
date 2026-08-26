@@ -255,7 +255,7 @@ describe('consulta administrativa por CPF — validação e busca', () => {
     expect(screen.queryByText('Exame da sessão')).toBeNull()
   })
 
-  it('linha da consulta admin não abre o detalhe do exame', async () => {
+  it('linha da consulta admin abre o detalhe marcado como somente leitura', async () => {
     vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
     adminResultadosPorCpf.mockResolvedValue({
       paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
@@ -268,7 +268,15 @@ describe('consulta administrativa por CPF — validação e busca', () => {
     await waitFor(() => expect(screen.getByText('Hemograma completo')).toBeTruthy())
     fireEvent.click(screen.getByText('Hemograma completo'))
 
-    expect(onOpenExam).not.toHaveBeenCalled()
+    // Os valores do resultado de outro paciente podem ser vistos — mas a flag
+    // é quem faz o detalhe esconder "Ver laudo"/declaração (ver ExamDetailPage
+    // e o campo em WebHero.tsx), que montariam o documento com a identidade
+    // da sessão logada, não a do paciente consultado.
+    expect(onOpenExam).toHaveBeenCalledTimes(1)
+    expect(onOpenExam.mock.calls[0]?.[0]).toMatchObject({
+      name: 'Hemograma completo',
+      somenteLeituraAdmin: true,
+    })
   })
 
   it('CPF sem paciente correspondente mostra estado distinto de "sem resultado"', async () => {

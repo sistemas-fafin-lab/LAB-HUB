@@ -67,6 +67,13 @@ export interface Exam {
   // mudou entre duas versões de um laudo é informação clínica. Só o resultado
   // do FlowLab preenche; o laudo dos LIS não tem esse conceito.
   retificado?: boolean
+  // Aberto a partir da consulta administrativa por CPF (ResultsPage) — é o
+  // resultado de OUTRO paciente, não do titular da sessão. `usePaciente()`
+  // devolveria a conta logada, não a consultada, então qualquer tela que
+  // monte um documento a partir da sessão (ex.: LaudoPage) fica errada aqui;
+  // as telas de detalhe usam esta flag para esconder esse caminho em vez de
+  // imprimir um laudo com a identidade de outra pessoa.
+  somenteLeituraAdmin?: boolean
 }
 
 interface WebHeroProps {

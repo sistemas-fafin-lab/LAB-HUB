@@ -391,9 +391,16 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
           <div className="text-center text-sm text-red-500 py-10">{erroAtivo}</div>
         )}
         {!carregando && !erroAtivo && filtered.map((e) => (
-          // Em consulta admin as linhas são só leitura: sem navegação para
-          // detalhe, laudo ou declaração (fora do escopo desta fatia).
-          <ExamRow key={e.id} exam={e} onClick={() => { if (!emConsultaAdmin) onOpenExam(e) }} dark={dark} />
+          // Em consulta admin o detalhe abre normalmente (só os valores já
+          // vêm na resposta, sem chamada nova) — a marca somenteLeituraAdmin
+          // é quem faz o detalhe esconder "Ver laudo"/declaração, que exigem
+          // a sessão do PRÓPRIO paciente (ver o campo em WebHero.tsx).
+          <ExamRow
+            key={e.id}
+            exam={e}
+            onClick={() => onOpenExam(emConsultaAdmin ? { ...e, somenteLeituraAdmin: true } : e)}
+            dark={dark}
+          />
         ))}
         {!carregando && !erroAtivo && filtered.length === 0 && (
           <div className="text-center text-sm text-gray-500 py-10">{mensagemVazia}</div>

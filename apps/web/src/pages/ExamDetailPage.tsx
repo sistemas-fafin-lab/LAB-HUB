@@ -134,6 +134,23 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
         </div>
       )}
 
+      {/* Sem isso, nada na tela distingue "meu resultado" de "resultado que
+          abri consultando outro paciente pelo modo admin" — o mesmo risco de
+          confusão que a retificação acima evita, mas na identidade do
+          titular em vez da versão do laudo. */}
+      {exam.somenteLeituraAdmin && (
+        <div
+          className={`rounded-xl border px-4 py-3 mb-4 flex items-center gap-2.5 ${
+            dark ? 'bg-blue-950/40 border-blue-900 text-blue-200' : 'bg-blue-50 border-blue-200 text-blue-900'
+          }`}
+        >
+          <WIcon name="eye" className="w-4 h-4 shrink-0" strokeWidth={2.2} />
+          <p className="text-sm leading-snug">
+            Consulta administrativa — este resultado é de outro paciente, somente leitura.
+          </p>
+        </div>
+      )}
+
       {/* Header card */}
       <div
         className={`rounded-2xl border ${
@@ -173,13 +190,20 @@ export function ExamDetailPage({ exam, onBack, dark, onViewLaudo }: ExamDetailPa
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={onViewLaudo}
-              className="bg-blue-50 text-blue-600 rounded-xl px-3 py-2 text-sm font-medium inline-flex items-center gap-1.5 hover:bg-blue-100"
-            >
-              <WIcon name="file-text" className="w-4 h-4" strokeWidth={2.2} />Ver laudo
-            </button>
-            {exam.declaracaoUrl && (
+            {/* "Ver laudo"/declaração montam o documento a partir da sessão
+                LOGADA (usePaciente() em LaudoPage) — em consulta admin isso
+                imprimiria o exame de outro paciente com o CPF/nascimento do
+                admin. Sem correção de identidade nesta fatia, os dois ficam
+                fora quando somenteLeituraAdmin (ver WebHero.tsx). */}
+            {!exam.somenteLeituraAdmin && (
+              <button
+                onClick={onViewLaudo}
+                className="bg-blue-50 text-blue-600 rounded-xl px-3 py-2 text-sm font-medium inline-flex items-center gap-1.5 hover:bg-blue-100"
+              >
+                <WIcon name="file-text" className="w-4 h-4" strokeWidth={2.2} />Ver laudo
+              </button>
+            )}
+            {!exam.somenteLeituraAdmin && exam.declaracaoUrl && (
               <button
                 onClick={() => void handleDownload()}
                 className="bg-blue-600 text-white rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25 hover:bg-blue-700"

@@ -55,6 +55,34 @@ describe('laudo substituído', () => {
   })
 })
 
+// Aberto pela consulta admin (ResultsPage): os valores continuam visíveis,
+// mas "Ver laudo"/declaração montam o documento a partir da sessão LOGADA
+// (usePaciente() em LaudoPage) — em consulta admin isso imprimiria o exame de
+// outro paciente com a identidade de quem está logado. Ver o campo em
+// WebHero.tsx.
+describe('consulta administrativa por CPF', () => {
+  it('mostra os valores e o aviso de somente leitura', () => {
+    monta([painel()], { somenteLeituraAdmin: true })
+
+    expect(screen.getByText('Glicose')).toBeTruthy()
+    expect(screen.getByText(/somente leitura/)).toBeTruthy()
+  })
+
+  it('esconde "Ver laudo" e "Baixar PDF"', () => {
+    monta([painel()], { somenteLeituraAdmin: true, declaracaoUrl: '/algum/path.pdf' })
+
+    expect(screen.queryByText('Ver laudo')).toBeNull()
+    expect(screen.queryByText('Baixar PDF')).toBeNull()
+  })
+
+  it('fora da consulta admin os dois continuam disponíveis', () => {
+    monta([painel()], { declaracaoUrl: '/algum/path.pdf' })
+
+    expect(screen.getByText('Ver laudo')).toBeTruthy()
+    expect(screen.getByText('Baixar PDF')).toBeTruthy()
+  })
+})
+
 describe('coluna Tendência', () => {
   it('não aparece quando nenhum marcador tem série histórica', () => {
     // O laudo dos LIS traz UM valor por marcador (toTrend devolve no máximo um
