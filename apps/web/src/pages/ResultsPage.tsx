@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { AdminConsultaResultadosResposta, Paciente } from '@lab-hub/shared'
 import { WIcon } from '../components/primitives/WIcon'
 import { ExamRow } from '../components/shared/ExamRow'
@@ -62,17 +62,26 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
   const [naoEncontrado, setNaoEncontrado] = useState(false)
   const [consultaAdmin, setConsultaAdmin] = useState<AdminConsultaResultadosResposta | null>(null)
 
+  // Só a resposta do pedido MAIS RECENTE pode alterar o estado. Sem isso, trocar
+  // de CPF rápido (ou um "Voltar" no meio de uma consulta em voo) corre o risco
+  // de uma resposta atrasada de um pedido antigo chegar DEPOIS da mais nova e
+  // sobrescrever a lista do CPF que o admin está olhando agora.
+  const pedidoAdminRef = useRef(0)
+
   // Compartilhado pela busca por CPF novo e pelo Atualizar em modo admin: os
   // dois só diferem em QUAL cpf consultam — a leitura em si é a mesma (server
   // já é cache-only, nunca dispara ApLIS/AOL).
   const consultarCpf = async (cpfDigitos: string) => {
+    const pedidoId = ++pedidoAdminRef.current
     setBuscandoCpf(true)
     try {
       const resposta = await api.adminResultadosPorCpf(cpfDigitos)
+      if (pedidoAdminRef.current !== pedidoId) return // resposta obsoleta — ignorada
       setConsultaAdmin(resposta)
       setNaoEncontrado(false)
       setCpfErro(null)
     } catch (err: unknown) {
+      if (pedidoAdminRef.current !== pedidoId) return // falha obsoleta — ignorada
       if (err instanceof ApiError && err.status === 404) {
         setConsultaAdmin(null)
         setNaoEncontrado(true)
@@ -80,7 +89,7 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
         setCpfErro(err instanceof Error ? err.message : 'Falha ao consultar CPF')
       }
     } finally {
-      setBuscandoCpf(false)
+      if (pedidoAdminRef.current === pedidoId) setBuscandoCpf(false)
     }
   }
 
@@ -101,10 +110,12 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
   }
 
   const handleLimparConsultaAdmin = () => {
+    pedidoAdminRef.current++ // invalida qualquer resposta em voo — não pode repopular depois do Voltar
     setConsultaAdmin(null)
     setNaoEncontrado(false)
     setCpfBusca('')
     setCpfErro(null)
+    setBuscandoCpf(false)
   }
 
   // Em consulta admin, a lista PRÓPRIA é substituída pela do paciente
@@ -115,7 +126,10 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
   const examsAtivos = emConsultaAdmin
     ? combinaExams(consultaAdmin.resultados, consultaAdmin.laudos ?? [])
     : exams
-  const carregando = emConsultaAdmin ? false : loading
+  // Em modo admin, `buscandoCpf` é o único sinal de carregamento: enquanto uma
+  // nova busca (nova CPF ou Atualizar) está em voo, a lista do paciente ANTERIOR
+  // não pode continuar na tela como se já fosse a do CPF recém-submetido.
+  const carregando = emConsultaAdmin ? buscandoCpf : loading
   const erroAtivo = emConsultaAdmin ? null : error
 
   const periodoSel = PERIODO_OPTIONS.find((p) => p.id === periodo)!
@@ -124,14 +138,19 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
     ? ''
     : new Date(Date.now() - periodoSel.dias * 86_400_000).toISOString().slice(0, 10)
 
-  const filtered = examsAtivos.filter((e) =>
-    (filter === 'all' || e.status === filter) &&
-    (!corte || (e.coletadoEm ?? '') >= corte) &&
-    (
-      e.name.toLowerCase().includes(query.toLowerCase()) ||
-      e.category.toLowerCase().includes(query.toLowerCase())
-    )
-  )
+  // Filtros de status/período/texto são só da visão normal (fora de escopo da
+  // consulta admin, ver spec) — em modo admin a lista aparece inteira, mesmo
+  // que filter/query/período tenham ficado com um valor não-padrão de antes.
+  const filtered = emConsultaAdmin
+    ? examsAtivos
+    : examsAtivos.filter((e) =>
+        (filter === 'all' || e.status === filter) &&
+        (!corte || (e.coletadoEm ?? '') >= corte) &&
+        (
+          e.name.toLowerCase().includes(query.toLowerCase()) ||
+          e.category.toLowerCase().includes(query.toLowerCase())
+        )
+      )
 
   // Estado vazio tem TRÊS mensagens distintas: sem exame nenhum (paciente da
   // sessão), sem exame nenhum (paciente consultado pelo admin) e "filtro não
@@ -174,14 +193,17 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
 
       {/* Consulta administrativa de dev — só aparece para a sessão autorizada
           (ver lib/admin.ts). Read-only: nunca edita nada, e nunca mistura a
-          lista encontrada com a do titular da sessão. */}
+          lista encontrada com a do titular da sessão. O campo de CPF fica
+          sempre visível (mesmo já em consulta) para o admin poder trocar de
+          paciente sem sair da aba; o banner com nome/CPF/Atualizar/Voltar só
+          aparece quando há uma consulta ativa. */}
       {isAdmin && (
         <div
           className={`rounded-2xl border ${
             dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-          } p-4 shadow-sm mb-4`}
+          } p-4 shadow-sm mb-4 flex flex-col gap-3`}
         >
-          {emConsultaAdmin ? (
+          {emConsultaAdmin && (
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className={`text-sm ${dark ? 'text-gray-200' : 'text-slate-700'}`}>
                 Consultando resultados de{' '}
@@ -190,7 +212,22 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
                 <span className="font-semibold">{formatarCpf(consultaAdmin.paciente.cpf)}</span>
               </div>
               <div className="flex items-center gap-2">
-                {cpfErro && <span className="text-xs text-red-500">{cpfErro}</span>}
+                {/* Em consulta admin, Atualizar repete o CPF exibido — só leitura do
+                    cache já persistido (resultado + laudo), nunca a lista PRÓPRIA. */}
+                <button
+                  onClick={() => void handleAtualizarAdmin()}
+                  disabled={buscandoCpf}
+                  className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 disabled:opacity-60 ${
+                    dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
+                  }`}
+                >
+                  <WIcon
+                    name="refresh-cw"
+                    className={`w-3.5 h-3.5 ${buscandoCpf ? 'animate-spin' : ''}`}
+                    strokeWidth={2.2}
+                  />
+                  {buscandoCpf ? 'Atualizando…' : 'Atualizar'}
+                </button>
                 <button
                   onClick={handleLimparConsultaAdmin}
                   className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 ${
@@ -202,143 +239,129 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
                 </button>
               </div>
             </div>
-          ) : (
-            <div className="flex items-center gap-3 flex-wrap">
-              <div
-                className={`flex items-center gap-2 min-w-[220px] ${
-                  dark ? 'bg-gray-800 border-gray-700' : 'bg-slate-50 border-gray-100'
-                } border rounded-xl px-3 h-10`}
-              >
-                <WIcon name="id-card" className="w-4 h-4 text-gray-400" strokeWidth={2.2} />
-                <input
-                  inputMode="numeric"
-                  value={cpfBusca}
-                  onChange={(e) => setCpfBusca(formatarCpf(e.target.value))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void handleBuscarCpf() }}
-                  placeholder="Consultar por CPF (dev)"
-                  className={`bg-transparent outline-none text-sm flex-1 ${
-                    dark ? 'text-white placeholder:text-gray-400' : 'text-slate-800 placeholder:text-gray-500'
-                  }`}
-                />
-              </div>
-              <button
-                onClick={() => void handleBuscarCpf()}
-                disabled={buscandoCpf}
-                className="h-9 px-3 rounded-lg text-xs font-medium bg-blue-600 text-white inline-flex items-center gap-1.5 disabled:opacity-60"
-              >
-                <WIcon name="search" className="w-3.5 h-3.5" strokeWidth={2.2} />
-                {buscandoCpf ? 'Buscando…' : 'Buscar'}
-              </button>
-              {cpfErro && <span className="text-xs text-red-500">{cpfErro}</span>}
-              {naoEncontrado && (
-                <span className="text-xs text-red-500">Nenhum paciente encontrado com este CPF.</span>
-              )}
-            </div>
           )}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div
+              className={`flex items-center gap-2 min-w-[220px] ${
+                dark ? 'bg-gray-800 border-gray-700' : 'bg-slate-50 border-gray-100'
+              } border rounded-xl px-3 h-10`}
+            >
+              <WIcon name="id-card" className="w-4 h-4 text-gray-400" strokeWidth={2.2} />
+              <input
+                inputMode="numeric"
+                value={cpfBusca}
+                onChange={(e) => setCpfBusca(formatarCpf(e.target.value))}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleBuscarCpf() }}
+                placeholder="Consultar por CPF (dev)"
+                className={`bg-transparent outline-none text-sm flex-1 ${
+                  dark ? 'text-white placeholder:text-gray-400' : 'text-slate-800 placeholder:text-gray-500'
+                }`}
+              />
+            </div>
+            <button
+              onClick={() => void handleBuscarCpf()}
+              disabled={buscandoCpf}
+              className="h-9 px-3 rounded-lg text-xs font-medium bg-blue-600 text-white inline-flex items-center gap-1.5 disabled:opacity-60"
+            >
+              <WIcon name="search" className="w-3.5 h-3.5" strokeWidth={2.2} />
+              {buscandoCpf ? 'Buscando…' : 'Buscar'}
+            </button>
+            {cpfErro && <span className="text-xs text-red-500">{cpfErro}</span>}
+            {naoEncontrado && (
+              <span className="text-xs text-red-500">Nenhum paciente encontrado com este CPF.</span>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Toolbar */}
-      <div
-        className={`rounded-2xl border ${
-          dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-        } p-4 shadow-sm mb-4 flex items-center gap-3 flex-wrap`}
-      >
-        {/* Search */}
+      {/* Toolbar — busca por nome/categoria, filtros de status/período e
+          Atualizar da visão NORMAL. Fica oculta em consulta admin: esses
+          filtros não têm sentido para a lista de terceiro, e aplicá-los sem
+          a UI visível esconderia resultados do admin sem explicação (ver
+          ticket 03). */}
+      {!emConsultaAdmin && (
         <div
-          className={`flex items-center gap-2 flex-1 min-w-[260px] ${
-            dark ? 'bg-gray-800 border-gray-700' : 'bg-slate-50 border-gray-100'
-          } border rounded-xl px-3 h-10`}
+          className={`rounded-2xl border ${
+            dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
+          } p-4 shadow-sm mb-4 flex items-center gap-3 flex-wrap`}
         >
-          <WIcon name="search" className="w-4 h-4 text-gray-400" strokeWidth={2.2} />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por nome ou categoria…"
-            className={`bg-transparent outline-none text-sm flex-1 ${
-              dark ? 'text-white placeholder:text-gray-400' : 'text-slate-800 placeholder:text-gray-500'
-            }`}
-          />
-        </div>
-
-        {/* Status filters */}
-        <div className="flex items-center gap-1.5">
-          {FILTER_OPTIONS.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              className={`px-3 h-9 rounded-lg text-xs font-semibold transition ${
-                filter === f.id
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
-                  : dark
-                  ? 'bg-gray-800 text-gray-300'
-                  : 'bg-slate-50 text-gray-600'
+          {/* Search */}
+          <div
+            className={`flex items-center gap-2 flex-1 min-w-[260px] ${
+              dark ? 'bg-gray-800 border-gray-700' : 'bg-slate-50 border-gray-100'
+            } border rounded-xl px-3 h-10`}
+          >
+            <WIcon name="search" className="w-4 h-4 text-gray-400" strokeWidth={2.2} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar por nome ou categoria…"
+              className={`bg-transparent outline-none text-sm flex-1 ${
+                dark ? 'text-white placeholder:text-gray-400' : 'text-slate-800 placeholder:text-gray-500'
               }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Período / Atualizar — antes `hidden md:flex`, o que deixava quem está
-            no celular sem filtro de período E sem como recarregar a lista. */}
-        <div className="flex items-center gap-1.5 md:ml-auto">
-          <div className="relative">
-            <button
-              onClick={() => setPeriodoAberto((v) => !v)}
-              className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 ${
-                periodo !== 'all'
-                  ? 'border-blue-200 text-blue-700 bg-blue-50'
-                  : dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
-              }`}
-            >
-              <WIcon name="calendar" className="w-3.5 h-3.5" strokeWidth={2.2} />
-              {periodo === 'all' ? 'Período' : periodoSel.label}
-            </button>
-            {periodoAberto && (
-              <>
-                {/* Backdrop invisível: clicar fora fecha o menu. */}
-                <div className="fixed inset-0 z-10" onClick={() => setPeriodoAberto(false)} />
-                <div
-                  className={`absolute right-0 top-full mt-1 z-20 w-44 rounded-xl border shadow-lg p-1 ${
-                    dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'
-                  }`}
-                >
-                  {PERIODO_OPTIONS.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => { setPeriodo(p.id); setPeriodoAberto(false) }}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition ${
-                        periodo === p.id
-                          ? 'bg-blue-600 text-white'
-                          : dark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
+            />
           </div>
-          {/* Em consulta admin, Atualizar repete o CPF exibido — só leitura do
-              cache já persistido (resultado + laudo), nunca a lista PRÓPRIA. */}
-          {emConsultaAdmin ? (
-            <button
-              onClick={() => void handleAtualizarAdmin()}
-              disabled={buscandoCpf}
-              className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 disabled:opacity-60 ${
-                dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
-              }`}
-            >
-              <WIcon
-                name="refresh-cw"
-                className={`w-3.5 h-3.5 ${buscandoCpf ? 'animate-spin' : ''}`}
-                strokeWidth={2.2}
-              />
-              {buscandoCpf ? 'Atualizando…' : 'Atualizar'}
-            </button>
-          ) : (
+
+          {/* Status filters */}
+          <div className="flex items-center gap-1.5">
+            {FILTER_OPTIONS.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id)}
+                className={`px-3 h-9 rounded-lg text-xs font-semibold transition ${
+                  filter === f.id
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
+                    : dark
+                    ? 'bg-gray-800 text-gray-300'
+                    : 'bg-slate-50 text-gray-600'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Período / Atualizar — antes `hidden md:flex`, o que deixava quem está
+              no celular sem filtro de período E sem como recarregar a lista. */}
+          <div className="flex items-center gap-1.5 md:ml-auto">
+            <div className="relative">
+              <button
+                onClick={() => setPeriodoAberto((v) => !v)}
+                className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 ${
+                  periodo !== 'all'
+                    ? 'border-blue-200 text-blue-700 bg-blue-50'
+                    : dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
+                }`}
+              >
+                <WIcon name="calendar" className="w-3.5 h-3.5" strokeWidth={2.2} />
+                {periodo === 'all' ? 'Período' : periodoSel.label}
+              </button>
+              {periodoAberto && (
+                <>
+                  {/* Backdrop invisível: clicar fora fecha o menu. */}
+                  <div className="fixed inset-0 z-10" onClick={() => setPeriodoAberto(false)} />
+                  <div
+                    className={`absolute right-0 top-full mt-1 z-20 w-44 rounded-xl border shadow-lg p-1 ${
+                      dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'
+                    }`}
+                  >
+                    {PERIODO_OPTIONS.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => { setPeriodo(p.id); setPeriodoAberto(false) }}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition ${
+                          periodo === p.id
+                            ? 'bg-blue-600 text-white'
+                            : dark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
             <button
               onClick={handleAtualizar}
               disabled={atualizando}
@@ -353,9 +376,9 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
               />
               {atualizando ? 'Atualizando…' : 'Atualizar'}
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* List */}
       <div
