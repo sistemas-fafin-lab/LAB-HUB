@@ -14,6 +14,7 @@ const h = vi.hoisted(() => {
 vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 
 import { cadastroRoutes } from '../src/routes/cadastro.js'
+import { aadDe, decifrar, hashCpf } from '../src/lib/crypto.js'
 import { buildApp, createSupabaseMock, type SupaCall, type SupaHandler } from './helpers.js'
 
 const PAC_ID = '11111111-1111-1111-1111-111111111111'
@@ -86,6 +87,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   await app?.close()
+  vi.unstubAllEnvs()
 })
 
 describe('POST /cadastro — claim do paciente-fantasma (P-01)', () => {
@@ -159,6 +161,85 @@ describe('POST /cadastro — claim do paciente-fantasma (P-01)', () => {
 
     const select = calls.find((c) => c.op === 'select')
     expect(select?.filters).toMatchObject({ cpf: CPF_DIGITOS })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fase 2b (S-06) — índice cego de pacientes.cpf, escrita dupla
+// ---------------------------------------------------------------------------
+// Ticket 01: a criação de paciente novo passa a gravar cpf_hash e cpf_enc além
+// do cpf em claro já gravado hoje. O claim do fantasma NÃO entra aqui — ele não
+// altera `cpf`, então cpf_hash/cpf_enc do fantasma já vieram corretos de quando
+// a recepção o criou (integracao.ts).
+
+describe('POST /cadastro — fase 2b: escrita dupla do índice cego', () => {
+  it('paciente novo grava cpf_hash e cpf_enc corretos, junto do cpf em claro', async () => {
+    await montar((call) => {
+      if (call.op === 'select') return { data: null, error: null }
+      return { data: { ...fantasma(), auth_user_id: USER_ID }, error: null }
+    })
+    const res = await cadastrar()
+
+    expect(res.statusCode).toBe(201)
+    const insert = calls.find((c) => c.op === 'insert')
+    const gravado = insert?.payload as Record<string, unknown>
+
+    expect(gravado.cpf).toBe(CPF_DIGITOS)
+    expect(gravado.cpf_hash).toBe(hashCpf(CPF_DIGITOS))
+
+    const id = gravado.id as string
+    expect(id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(decifrar(gravado.cpf_enc as string, aadDe('pacientes', 'cpf', id))).toBe(CPF_DIGITOS)
+  })
+
+  it('o claim do fantasma não mexe em cpf_hash/cpf_enc — cpf não muda nesse caminho', async () => {
+    await montar(cenarioFantasma())
+    await cadastrar()
+
+    const update = calls.find((c) => c.op === 'update')
+    expect(update?.payload).not.toHaveProperty('cpf')
+    expect(update?.payload).not.toHaveProperty('cpf_hash')
+    expect(update?.payload).not.toHaveProperty('cpf_enc')
+  })
+
+  it('a resposta do cadastro não expõe cpf_hash nem o envelope cru de cpf_enc', async () => {
+    await montar((call) => {
+      if (call.op === 'select') return { data: null, error: null }
+      return { data: { ...fantasma(), auth_user_id: USER_ID }, error: null }
+    })
+    const res = await cadastrar()
+
+    const corpo = res.json()
+    expect(corpo.paciente).not.toHaveProperty('cpfHash')
+    expect(corpo.paciente).not.toHaveProperty('cpfEnc')
+    expect(res.body).not.toContain('cpf_hash')
+    expect(res.body).not.toContain('cpf_enc')
+  })
+
+  // O usuário do Auth já foi criado (createUser, antes do INSERT de pacientes)
+  // quando cpf_hash/cpf_enc entram em cena. Se essa parte lançasse por falta de
+  // CPF_HASH_KEY, a exceção pularia o `dbError` que dispara o rollback
+  // (`deleteUser`) — o usuário do Auth ficaria órfão e um retry com o mesmo
+  // e-mail passaria a falhar com "já em uso" para sempre. Por isso a escrita do
+  // índice cego usa as variantes tolerantes (`SeConfigurado`), não `hashCpf`/
+  // `cifrar` direto: sem a chave, o cadastro segue funcionando só sem elas —
+  // `cpf` em claro continua sendo a fonte de verdade nesta fase.
+  it('sem CPF_HASH_KEY, o cadastro continua funcionando e não deixa o Auth órfão', async () => {
+    vi.stubEnv('CPF_HASH_KEY', '')
+    await montar((call) => {
+      if (call.op === 'select') return { data: null, error: null }
+      return { data: { ...fantasma(), auth_user_id: USER_ID }, error: null }
+    })
+    const res = await cadastrar()
+
+    expect(res.statusCode).toBe(201)
+    expect(deleteUser).not.toHaveBeenCalled()
+    const insert = calls.find((c) => c.op === 'insert')
+    // Só cpf_hash fica de fora — cpf_enc usa PII_KEY_K1, uma chave independente
+    // que continua configurada neste cenário (as duas checagens são gates
+    // separados, de propósito: ver crypto.ts).
+    expect(insert?.payload).not.toHaveProperty('cpf_hash')
+    expect(insert?.payload).toMatchObject({ cpf: CPF_DIGITOS })
   })
 })
 

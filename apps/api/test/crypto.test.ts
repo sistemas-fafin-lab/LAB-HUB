@@ -7,6 +7,8 @@ import {
   criptografiaConfigurada,
   decifrar,
   decifrarJson,
+  hashCpf,
+  hashCpfConfigurado,
   validarCriptografia,
 } from '../src/lib/crypto.js'
 
@@ -168,5 +170,89 @@ describe('boot', () => {
     vi.stubEnv('PII_KEY_K1', '')
     expect(criptografiaConfigurada()).toBe(false)
     expect(cifrarJsonSeConfigurado({ a: 1 }, 'x')).toBeNull()
+  })
+
+  // CPF_HASH_KEY (fase 2b) segue o MESMO padrão fail-closed da PII_KEY_K1, mas
+  // é uma checagem INDEPENDENTE — nenhuma das duas mascara a ausência da outra.
+  it('em produção, sem CPF_HASH_KEY, o boot falha', () => {
+    vi.stubEnv('CPF_HASH_KEY', '')
+    vi.stubEnv('NODE_ENV', 'production')
+
+    expect(() => validarCriptografia()).toThrow(/CPF_HASH_KEY é obrigatória em produção/)
+  })
+
+  it('fora de produção, sem CPF_HASH_KEY, avisa e segue', () => {
+    vi.stubEnv('CPF_HASH_KEY', '')
+    vi.stubEnv('NODE_ENV', 'test')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    expect(() => validarCriptografia()).not.toThrow()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('CPF_HASH_KEY ausente'))
+    warn.mockRestore()
+  })
+
+  it('chave de índice cego malformada derruba o boot mesmo fora de produção', () => {
+    vi.stubEnv('CPF_HASH_KEY', 'nao-e-base64-de-32-bytes')
+    vi.stubEnv('NODE_ENV', 'test')
+    expect(() => validarCriptografia()).toThrow(/HMAC/)
+  })
+
+  it('PII_KEY_K1 ausente não esconde a checagem de CPF_HASH_KEY', () => {
+    vi.stubEnv('PII_KEY_K1', '')
+    vi.stubEnv('CPF_HASH_KEY', '')
+    vi.stubEnv('NODE_ENV', 'test')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    validarCriptografia()
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('PII_KEY_K1 ausente'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('CPF_HASH_KEY ausente'))
+    warn.mockRestore()
+  })
+})
+
+describe('hashCpf — índice cego do CPF (fase 2b)', () => {
+  it('o mesmo CPF normalizado sempre produz o mesmo hash', () => {
+    expect(hashCpf('52998224725')).toBe(hashCpf('52998224725'))
+  })
+
+  it('CPFs diferentes produzem hashes diferentes', () => {
+    expect(hashCpf('52998224725')).not.toBe(hashCpf('11144477735'))
+  })
+
+  it('a saída não depende de formatação, desde que normalizado antes', () => {
+    const semMascara = '52998224725'
+    const comMascaraNormalizada = '529.982.247-25'.replace(/\D/g, '')
+    expect(hashCpf(semMascara)).toBe(hashCpf(comMascaraNormalizada))
+  })
+
+  it('não é reversível a olho: a saída não contém o CPF nem parece com ele', () => {
+    const hash = hashCpf('52998224725')
+    expect(hash).not.toContain('52998224725')
+  })
+
+  it('hashCpfConfigurado reflete a presença da chave', () => {
+    expect(hashCpfConfigurado()).toBe(true)
+    vi.stubEnv('CPF_HASH_KEY', '')
+    expect(hashCpfConfigurado()).toBe(false)
+  })
+
+  it('sem CPF_HASH_KEY, hashCpf falha fechado em vez de devolver algo', () => {
+    vi.stubEnv('CPF_HASH_KEY', '')
+    expect(() => hashCpf('52998224725')).toThrow(/CPF_HASH_KEY não configurada/)
+  })
+
+  it('recusa CPF_HASH_KEY que não tem 32 bytes', () => {
+    vi.stubEnv('CPF_HASH_KEY', Buffer.alloc(16).toString('base64'))
+    expect(() => hashCpf('52998224725')).toThrow(/HMAC/)
+  })
+
+  // A separação de chaves é o ponto central do desenho (spec § Implementation
+  // Decisions): reaproveitar PII_KEY_K1 para o HMAC anularia a independência
+  // entre as duas primitivas.
+  it('usa CPF_HASH_KEY, não PII_KEY_K1 — trocar uma não afeta a outra', () => {
+    const antes = hashCpf('52998224725')
+    vi.stubEnv('PII_KEY_K1', K2)
+    expect(hashCpf('52998224725')).toBe(antes)
   })
 })

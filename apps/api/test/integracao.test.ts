@@ -1,20 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 
-// Proxy hoisted p/ o singleton supabase.
+// Proxies hoisted p/ os singletons supabase e flowlab.
 const h = vi.hoisted(() => {
   let sb: Record<string, unknown> | null = null
+  let fl: Record<string, unknown> | null = null
   return {
     sbProxy: new Proxy({}, { get: (_t, p: string) => sb?.[p] }),
+    flProxy: new Proxy({}, { get: (_t, p: string) => fl?.[p] }),
     setSb: (x: Record<string, unknown>) => {
       sb = x
+    },
+    setFl: (x: Record<string, unknown>) => {
+      fl = x
     },
   }
 })
 vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
+vi.mock('../src/lib/flowlab.js', () => ({ flowlab: h.flProxy }))
 
 import { integracaoRoutes } from '../src/routes/integracao.js'
-import { aadDe, cifrar } from '../src/lib/crypto.js'
+import { aadDe, cifrar, decifrar, hashCpf } from '../src/lib/crypto.js'
 import {
   buildApp,
   createSupabaseMock,
@@ -81,6 +87,7 @@ let app: FastifyInstance
 afterEach(async () => {
   await app?.close()
   vi.clearAllMocks()
+  vi.unstubAllEnvs()
 })
 
 describe('GET /integracao/agendamentos/:labhubId/documentos', () => {
@@ -488,6 +495,151 @@ describe('POST /integracao/agendamentos/:labhubId/documentos', () => {
 })
 
 // ---------------------------------------------------------------------------
+// POST /integracao/agendamentos — modo NOVO (find-or-create por CPF)
+//
+// Fase 2b (S-06, ticket 01): o paciente "fantasma" criado aqui pela recepção
+// passa a gravar cpf_hash e cpf_enc além do cpf em claro já gravado hoje.
+// ---------------------------------------------------------------------------
+
+describe('POST /integracao/agendamentos — modo NOVO: escrita dupla do índice cego', () => {
+  const POSTO_ID = '99999999-9999-9999-9999-999999999999'
+  const SLOT = '2026-08-20T10:00:00.000Z'
+  const CPF_NOVO_PACIENTE = '52998224725'
+
+  it('cria o paciente fantasma gravando cpf_hash e cpf_enc, junto do cpf em claro', async () => {
+    let pacienteInserido: Record<string, unknown> | undefined
+
+    const handler: SupaHandler = (call) => {
+      if (call.table === 'pacientes') {
+        if (call.op === 'select') return { data: null, error: null } // ninguém com este CPF ainda
+        if (call.op === 'insert') {
+          pacienteInserido = call.payload as Record<string, unknown>
+          return { data: pacienteInserido, error: null } // ecoa o que foi gravado
+        }
+      }
+      if (call.table === 'agendamentos' && call.op === 'insert') {
+        return {
+          data: {
+            id: 'aaaaaaaa-1111-1111-1111-111111111111',
+            paciente_id: pacienteInserido?.id,
+            posto_flowlab_id: POSTO_ID,
+            posto_nome: 'Posto Centro',
+            data_hora: SLOT,
+            status: 'pendente',
+            flowlab_id: null,
+            criado_em: SLOT,
+          },
+          error: null,
+        }
+      }
+      // Lock do sincronizarAgendamento não encontra nada → 'em_andamento'; o
+      // teste não precisa que o FlowLab seja chamado (best-effort, fora do escopo).
+      return { data: null, error: null }
+    }
+    h.setSb(createSupabaseMock({ handler }).client)
+    h.setFl({
+      getDisponibilidadeRetroativa: async () => [
+        { id: POSTO_ID, nome: 'Posto Centro', endereco: 'Rua X, 1', slots: [SLOT] },
+      ],
+      invalidarDisponibilidade: () => undefined,
+    })
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integracao/agendamentos',
+      headers: CHAVE,
+      payload: {
+        nome: 'Maria Nova',
+        cpf: '529.982.247-25', // formatado de propósito: a API normaliza
+        dataNascimento: '1990-05-05',
+        postoFlowlabId: POSTO_ID,
+        dataHora: SLOT,
+      },
+    })
+
+    expect(res.statusCode).toBe(201)
+    expect(res.json().pacienteCriado).toBe(true)
+    expect(pacienteInserido).toBeDefined()
+    const gravado = pacienteInserido!
+
+    expect(gravado.cpf).toBe(CPF_NOVO_PACIENTE)
+    expect(gravado.cpf_hash).toBe(hashCpf(CPF_NOVO_PACIENTE))
+
+    const id = gravado.id as string
+    expect(id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(decifrar(gravado.cpf_enc as string, aadDe('pacientes', 'cpf', id))).toBe(CPF_NOVO_PACIENTE)
+
+    // A resposta ao FlowLab nunca leva o hash nem o envelope cru.
+    expect(res.body).not.toContain('cpf_hash')
+    expect(res.body).not.toContain('cpf_enc')
+  })
+
+  // O find-or-create da recepção não pode 500 no FlowLab só porque falta o
+  // índice cego — `cpf` em claro segue sendo a fonte de verdade nesta fase.
+  // Por isso a escrita usa as variantes tolerantes (`SeConfigurado`), não
+  // `hashCpf`/`cifrar` direto.
+  it('sem CPF_HASH_KEY, cria o paciente fantasma mesmo assim (só sem cpf_hash/cpf_enc)', async () => {
+    vi.stubEnv('CPF_HASH_KEY', '')
+    let pacienteInserido: Record<string, unknown> | undefined
+
+    const handler: SupaHandler = (call) => {
+      if (call.table === 'pacientes') {
+        if (call.op === 'select') return { data: null, error: null }
+        if (call.op === 'insert') {
+          pacienteInserido = call.payload as Record<string, unknown>
+          return { data: pacienteInserido, error: null }
+        }
+      }
+      if (call.table === 'agendamentos' && call.op === 'insert') {
+        return {
+          data: {
+            id: 'aaaaaaaa-1111-1111-1111-111111111111',
+            paciente_id: pacienteInserido?.id,
+            posto_flowlab_id: POSTO_ID,
+            posto_nome: 'Posto Centro',
+            data_hora: SLOT,
+            status: 'pendente',
+            flowlab_id: null,
+            criado_em: SLOT,
+          },
+          error: null,
+        }
+      }
+      return { data: null, error: null }
+    }
+    h.setSb(createSupabaseMock({ handler }).client)
+    h.setFl({
+      getDisponibilidadeRetroativa: async () => [
+        { id: POSTO_ID, nome: 'Posto Centro', endereco: 'Rua X, 1', slots: [SLOT] },
+      ],
+      invalidarDisponibilidade: () => undefined,
+    })
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integracao/agendamentos',
+      headers: CHAVE,
+      payload: {
+        nome: 'Maria Nova',
+        cpf: '529.982.247-25',
+        dataNascimento: '1990-05-05',
+        postoFlowlabId: POSTO_ID,
+        dataHora: SLOT,
+      },
+    })
+
+    expect(res.statusCode).toBe(201)
+    // Só cpf_hash fica de fora — cpf_enc usa PII_KEY_K1, uma chave independente
+    // que continua configurada neste cenário (as duas checagens são gates
+    // separados, de propósito: ver crypto.ts).
+    expect(pacienteInserido).not.toHaveProperty('cpf_hash')
+    expect(pacienteInserido).toMatchObject({ cpf: CPF_NOVO_PACIENTE })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // POST /integracao/pacientes/:pacienteId/correcao-identidade
 //
 // Depois do claim, CPF e nascimento são imutáveis no banco (trigger da migration
@@ -689,5 +841,104 @@ describe('POST /integracao/pacientes/:pacienteId/correcao-identidade', () => {
     expect(res.statusCode).toBe(500)
     // Mensagem interna do banco não vaza para o cliente.
     expect(res.body).not.toContain('conexão caiu')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fase 2b (S-06) — a RPC troca `cpf`; cpf_hash/cpf_enc precisam acompanhar
+// ---------------------------------------------------------------------------
+
+describe('POST /integracao/pacientes/:pacienteId/correcao-identidade — sincroniza cpf_hash/cpf_enc', () => {
+  it('depois da RPC trocar o cpf, atualiza cpf_hash e cpf_enc com o CPF novo', async () => {
+    let updatePacientes: Record<string, unknown> | undefined
+    const mock = createSupabaseMock({
+      handler: (call) => {
+        if (call.table === 'pacientes' && call.op === 'update') {
+          updatePacientes = call.payload as Record<string, unknown>
+        }
+        return { data: null, error: null }
+      },
+      rpc: RPC_OK,
+    })
+    h.setSb(mock.client)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: CORPO_VALIDO,
+    })
+
+    expect(res.statusCode).toBe(200)
+    const update = mock.calls.find((c) => c.table === 'pacientes' && c.op === 'update')
+    expect(update?.filters).toMatchObject({ id: PAC_ID })
+    expect(updatePacientes?.cpf_hash).toBe(hashCpf(CPF_NOVO))
+    expect(decifrar(updatePacientes?.cpf_enc as string, aadDe('pacientes', 'cpf', PAC_ID))).toBe(
+      CPF_NOVO,
+    )
+  })
+
+  it('se a sincronização falhar, a correção de identidade continua respondendo 200', async () => {
+    // O CPF já foi corrigido pela RPC — é o efeito que a recepção pediu. A
+    // sincronização de cpf_hash/cpf_enc é best-effort e não pode transformar
+    // uma correção bem-sucedida numa resposta de erro (ver o try/catch em
+    // routes/integracao.ts).
+    const mock = createSupabaseMock({
+      handler: (call) => {
+        if (call.table === 'pacientes' && call.op === 'update') {
+          return { data: null, error: { message: 'boom' } }
+        }
+        return { data: null, error: null }
+      },
+      rpc: RPC_OK,
+    })
+    h.setSb(mock.client)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: CORPO_VALIDO,
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().correcaoId).toBe('66666666-6666-6666-6666-666666666666')
+  })
+
+  // Um cpf_hash/cpf_enc do CPF ANTERIOR (não nulo, só desatualizado) é pior que
+  // ausente: verificarBackfill() só enxerga pendência via `.is('cpf_hash',
+  // null)`, então uma linha stale ficaria invisível para sempre. Por isso a
+  // sincronização que falha tenta, em seguida, ZERAR as duas colunas — devolve
+  // a linha ao estado "pendente" para o próximo backfillCripto reencontrá-la.
+  it('se a sincronização falhar, zera cpf_hash/cpf_enc para o backfill reencontrar a linha', async () => {
+    const updates: Record<string, unknown>[] = []
+    let chamada = 0
+    const mock = createSupabaseMock({
+      handler: (call) => {
+        if (call.table === 'pacientes' && call.op === 'update') {
+          chamada += 1
+          updates.push(call.payload as Record<string, unknown>)
+          // 1ª chamada: a sincronização em si, que falha. 2ª: a limpeza, que segue.
+          return chamada === 1 ? { data: null, error: { message: 'boom' } } : { data: null, error: null }
+        }
+        return { data: null, error: null }
+      },
+      rpc: RPC_OK,
+    })
+    h.setSb(mock.client)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_CORRECAO,
+      headers: CHAVE,
+      payload: CORPO_VALIDO,
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(updates).toHaveLength(2)
+    expect(updates[1]).toEqual({ cpf_hash: null, cpf_enc: null })
   })
 })

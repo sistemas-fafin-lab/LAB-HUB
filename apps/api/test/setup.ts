@@ -13,6 +13,9 @@ process.env.FLOWLAB_TIMEOUT_MS ??= '100'
 // Chave fixa e derivada de uma frase: previsível para depuração, e obviamente
 // não é segredo de ninguém.
 process.env.PII_KEY_K1 ??= 'WF3631SjARkjUcTpi9piZLtHPjKZpav49JRXkw8IkrQ='
+// Índice cego de pacientes.cpf (fase 2b). Chave própria, fixa e previsível
+// pelo mesmo motivo da PII_KEY_K1 acima — não é segredo de ninguém.
+process.env.CPF_HASH_KEY ??= 'zltE5dJUinWzLqsk4+pSMILGWqMZ5IQA/20RME7V4ZI='
 
 // LIS (ApLIS/AOL): os testes mockam o fetch, nada sai pela rede.
 process.env.APLIS_BASE_URL ??= 'http://aplis.test/integracao.php'

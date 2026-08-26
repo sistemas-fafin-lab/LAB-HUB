@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     'Backfill de criptografia finalizado',
   )
 
-  if (pendentes.rotulos > 0) {
+  if (pendentes.rotulos > 0 || pendentes.pacientes > 0) {
     log.error(
       { pendentes },
       'Ainda há linhas em claro sem par cifrado — NÃO prossiga para a remoção da coluna em claro',

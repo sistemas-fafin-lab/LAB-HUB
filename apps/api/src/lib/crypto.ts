@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto'
 
 /**
  * Criptografia de coluna para o dado clínico (auditoria § S-06 / Parte 3).
@@ -86,6 +86,54 @@ export function criptografiaConfigurada(): boolean {
 }
 
 /**
+ * Lê `CPF_HASH_KEY` (base64 de 32 bytes) — a chave do índice cego de
+ * `pacientes.cpf` (fase 2b do S-06).
+ *
+ * Mapa PRÓPRIO, separado de `PII_KEY_K*`: HMAC (comparação de igualdade) e
+ * AES-GCM (decifragem para exibição) são primitivas diferentes, e reaproveitar
+ * uma chave entre as duas não ganha nada — só complica a análise de segurança
+ * das duas juntas. Sem `keyId`/rotação por linha de propósito: ao contrário do
+ * envelope AEAD, o índice cego não guarda com qual chave foi gerado, então
+ * rotacionar `CPF_HASH_KEY` é uma operação única e coordenada que recalcula
+ * `cpf_hash` da base inteira — não um deploy que promove `k2` como a de escrita.
+ */
+function lerChaveHash(): Buffer | null {
+  const valor = process.env.CPF_HASH_KEY?.trim()
+  if (!valor) return null
+
+  const bytes = Buffer.from(valor, 'base64')
+  if (bytes.length !== BYTES_CHAVE) {
+    throw new Error(
+      `CPF_HASH_KEY não é uma chave HMAC válida: esperados ${BYTES_CHAVE} bytes em base64, ` +
+        `veio ${bytes.length}. Gere com: openssl rand -base64 32`,
+    )
+  }
+  return bytes
+}
+
+/** Há uma `CPF_HASH_KEY` utilizável? */
+export function hashCpfConfigurado(): boolean {
+  return lerChaveHash() !== null
+}
+
+/**
+ * Índice cego do CPF: HMAC-SHA256 determinístico, em base64. O mesmo CPF
+ * normalizado sempre produz o mesmo hash — é o que sustenta `unique` e
+ * `.eq('cpf_hash', ...)` sem guardar o CPF em claro na coluna de busca.
+ *
+ * Não decifra nada (ao contrário de `cifrar`/`decifrar`): um dump devolve só
+ * "estas linhas têm o mesmo CPF", a mesma informação que o `unique` de hoje já
+ * expõe — nunca o número em si.
+ */
+export function hashCpf(cpfNormalizado: string): string {
+  const chave = lerChaveHash()
+  if (!chave) {
+    throw new Error('CPF_HASH_KEY não configurada: não é possível gerar o índice cego do CPF')
+  }
+  return createHmac('sha256', chave).update(cpfNormalizado, 'utf8').digest('base64')
+}
+
+/**
  * Validação de boot, no espírito do `resolverCorsOrigin()` (P-03): configuração
  * de segurança que depende de lembrança é configuração que um dia falta.
  *
@@ -101,24 +149,44 @@ export function criptografiaConfigurada(): boolean {
 export function validarCriptografia(): void {
   const { atual } = lerChaves() // lança se alguma chave estiver malformada
 
-  if (atual) return
-
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'PII_KEY_K1 é obrigatória em produção: sem ela o dado clínico seria gravado em texto puro ' +
-        '(auditoria § S-06). Gere com `openssl rand -base64 32`, guarde em cofre SEPARADO do backup ' +
-        'do banco e defina no .env antes de subir o container.',
+  if (!atual) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'PII_KEY_K1 é obrigatória em produção: sem ela o dado clínico seria gravado em texto puro ' +
+          '(auditoria § S-06). Gere com `openssl rand -base64 32`, guarde em cofre SEPARADO do backup ' +
+          'do banco e defina no .env antes de subir o container.',
+      )
+    }
+    // Depois do corte do S-06 a coluna em claro não é mais escrita: sem chave o
+    // dado não vai para lugar nenhum, então a escrita FALHA em vez de degradar
+    // para texto puro. O aviso mudou junto — dizer "será gravado em texto puro"
+    // agora seria mentira, e mentira em aviso de segurança é pior que silêncio.
+    console.warn(
+      '[cripto] PII_KEY_K1 ausente: gravar dado clínico vai FALHAR (a coluna em ' +
+        'claro deixou de ser escrita — auditoria § S-06). Leitura de linha antiga ' +
+        'continua funcionando. Em produção o boot falharia aqui.',
     )
   }
-  // Depois do corte do S-06 a coluna em claro não é mais escrita: sem chave o
-  // dado não vai para lugar nenhum, então a escrita FALHA em vez de degradar
-  // para texto puro. O aviso mudou junto — dizer "será gravado em texto puro"
-  // agora seria mentira, e mentira em aviso de segurança é pior que silêncio.
-  console.warn(
-    '[cripto] PII_KEY_K1 ausente: gravar dado clínico vai FALHAR (a coluna em ' +
-      'claro deixou de ser escrita — auditoria § S-06). Leitura de linha antiga ' +
-      'continua funcionando. Em produção o boot falharia aqui.',
-  )
+
+  if (!lerChaveHash()) {
+    // Mesmo espírito do PII_KEY_K1 acima, para o índice cego do CPF (fase 2b).
+    // `pacientes.cpf` continua em claro enquanto esta fase durar, então a
+    // ausência daqui não interrompe busca nem cadastro — só deixa cpf_hash/
+    // cpf_enc sem gravar, o que o ticket 03 (corte) não pode herdar.
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'CPF_HASH_KEY é obrigatória em produção: sem ela o índice cego de pacientes.cpf (auditoria ' +
+          '§ S-06, fase 2b) não pode ser gerado. Gere com `openssl rand -base64 32` — uma chave PRÓPRIA, ' +
+          'nunca reaproveitada de PII_KEY_* — guarde em cofre SEPARADO do backup do banco e defina no ' +
+          '.env antes de subir o container.',
+      )
+    }
+    console.warn(
+      '[cripto] CPF_HASH_KEY ausente: pacientes.cpf_hash/cpf_enc não serão gravados (fase 2b do ' +
+        'S-06). cpf em claro continua sendo a fonte de verdade enquanto isso. Em produção o boot ' +
+        'falharia aqui.',
+    )
+  }
 }
 
 /**
@@ -204,4 +272,19 @@ export function cifrarJsonSeConfigurado(valor: unknown, aad: string): string | n
 
 export function cifrarSeConfigurado(texto: string, aad: string): string | null {
   return criptografiaConfigurada() ? cifrar(texto, aad) : null
+}
+
+/**
+ * Versão tolerante de `hashCpf`, no mesmo espírito de `cifrarSeConfigurado`:
+ * devolve `null` sem `CPF_HASH_KEY` em vez de lançar.
+ *
+ * `pacientes.cpf` continua em claro nesta fase (fase 2b, escrita dupla) — sem
+ * ela nenhuma busca quebra. Por isso a criação de paciente não pode falhar
+ * fechado por causa só do índice cego: derrubar o cadastro (ou deixar um
+ * usuário do Auth órfão, criado um passo antes do INSERT) por uma coluna que
+ * ainda não é lida por ninguém seria pior que a proteção que ela adianta. Em
+ * produção nunca devolve `null` — `validarCriptografia()` já derrubou o boot.
+ */
+export function hashCpfSeConfigurado(cpfNormalizado: string): string | null {
+  return hashCpfConfigurado() ? hashCpf(cpfNormalizado) : null
 }
