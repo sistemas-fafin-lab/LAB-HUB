@@ -209,9 +209,50 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
         throw app.httpErrors.internalServerError('Falha ao corrigir identidade')
       }
 
+      // `pacientes.cpf` em claro saiu no drop (S-06, ticket 04) — a RPC não tem
+      // mais de onde ler o CPF anterior, e não tem a chave para decifrar
+      // `cpf_enc` sozinha (§ S-06, cabeçalho de crypto.ts). A API busca e
+      // decifra aqui, ANTES da troca: neste ponto `cpf_enc` ainda guarda o
+      // valor de antes, porque o UPDATE que o substitui só roda DEPOIS da RPC
+      // voltar (ver abaixo). É o único jeito de continuar mascarando o CPF
+      // anterior na resposta e de gravar a trilha com o valor de antes da troca.
+      //
+      // Sem lock: ao contrário do `select ... for update` que a RPC faz logo
+      // em seguida, esta leitura não serializa contra outra correção
+      // concorrente do MESMO paciente. Duas requisições coladas (duplo clique,
+      // retry do FlowLab) podem ler o mesmo `cpf_enc` "antigo" e a trilha da
+      // segunda correção registraria um `cpf_anterior` uma correção defasado.
+      // Aceito pelo mesmo motivo do resto desta rota: operação rara, manual,
+      // limitada a 10/min — não o caminho a otimizar por uma trava que exigiria
+      // reestruturar a RPC (ticket 03) para também escrever cpf_hash/cpf_enc.
+      const { data: pacAtual, error: pacAtualErr } = await supabase
+        .from('pacientes')
+        .select('cpf_enc')
+        .eq('id', paramParsed.data.pacienteId)
+        .maybeSingle()
+      if (pacAtualErr) {
+        throw app.httpErrors.internalServerError('Falha ao corrigir identidade')
+      }
+      if (!pacAtual) {
+        throw app.httpErrors.notFound('Paciente não encontrado')
+      }
+
+      let cpfAnteriorTexto: string
+      try {
+        cpfAnteriorTexto = decifrarCpfPaciente(paramParsed.data.pacienteId, pacAtual.cpf_enc as string)
+      } catch (cryptoError) {
+        request.log.error(
+          { err: cryptoError, pacienteId: paramParsed.data.pacienteId },
+          'Falha ao decifrar o CPF anterior — correção de identidade abortada',
+        )
+        throw app.httpErrors.internalServerError('Falha ao corrigir identidade')
+      }
+
       const { data, error } = await supabase.rpc('corrigir_identidade_paciente', {
         p_paciente_id: paramParsed.data.pacienteId,
         p_cpf_novo: cpf,
+        p_cpf_hash_novo: cpfHash,
+        p_cpf_anterior_texto: cpfAnteriorTexto,
         p_nascimento_novo: dataNascimento,
         p_motivo: motivo,
         p_autorizado_por: autorizadoPor,
@@ -243,18 +284,18 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       const resultado = data as {
         correcaoId: string
         pacienteId: string
-        cpfAnterior: string
         laudosInvalidados: number
         corrigidoEm: string
       }
 
-      // A RPC não grava mais `cpf` em claro (S-06, ticket 03) — só
-      // `data_nascimento`. Este UPDATE é quem grava `cpf_hash`/`cpf_enc` com o
-      // CPF novo, usando os valores já calculados (e já validados) acima. Fica
-      // FORA da função SQL de propósito: a chave de cifra/hash nunca entra no
-      // banco (§ S-06, cabeçalho de crypto.ts). Best-effort e não falha a
-      // resposta — o CPF já foi corrigido (a trilha e o cache de laudos já
-      // refletem a troca), que é o efeito que a recepção pediu.
+      // A RPC não grava `cpf` (a coluna em claro foi dropada, ticket 04) nem
+      // `cpf_hash`/`cpf_enc` — só `data_nascimento`. Este UPDATE é quem grava
+      // `cpf_hash`/`cpf_enc` com o CPF novo, usando os valores já calculados (e
+      // já validados) acima. Fica FORA da função SQL de propósito: a chave de
+      // cifra/hash nunca entra no banco (§ S-06, cabeçalho de crypto.ts).
+      // Best-effort e não falha a resposta — o CPF já foi corrigido (a trilha
+      // e o cache de laudos já refletem a troca), que é o efeito que a
+      // recepção pediu.
       try {
         const { error: syncError } = await supabase
           .from('pacientes')
@@ -262,14 +303,14 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
           .eq('id', resultado.pacienteId)
         if (syncError) throw syncError
       } catch (syncError) {
-        // Diferente de antes do ticket 03: NÃO zera cpf_hash/cpf_enc para o
-        // backfill "reencontrar" a linha. Zerar faria backfillPacientes() (que
-        // só enxerga `cpf` em claro, e este agora ficou parado no valor
-        // ANTERIOR à correção — a RPC parou de escrevê-lo) regenerar o par a
-        // partir do CPF ERRADO, silenciosamente. A linha fica com o índice
-        // cego do CPF anterior (não apaga nada), e a correção precisa ser
-        // reaplicada manualmente — pior que uma escrita perdida seria uma
-        // escrita errada que ninguém percebe.
+        // Não há mais backfill de CPF para "reencontrar" a linha (o ticket 04
+        // removeu backfillPacientes() junto do drop de `pacientes.cpf` — não
+        // sobrou coluna em claro para migrar). Por isso NÃO zera cpf_hash/
+        // cpf_enc: zerar deixaria a linha sem nenhuma forma de busca até
+        // alguém notar, e nada mais recalcula o par a partir do CPF novo. A
+        // linha fica com o índice cego do CPF anterior (não apaga nada), e a
+        // correção precisa ser reaplicada manualmente — pior que uma escrita
+        // perdida seria uma escrita errada que ninguém percebe.
         request.log.error(
           { err: syncError, pacienteId: resultado.pacienteId },
           'CPF corrigido, mas cpf_hash/cpf_enc não sincronizaram — linha ficou com o índice cego do ' +
@@ -295,7 +336,10 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
         pacienteId: resultado.pacienteId,
         // Mascarado pelo mesmo motivo do typeahead: confirma para o operador que a
         // linha certa foi alterada sem devolver o documento inteiro pelo canal.
-        cpfAnteriorMascarado: mascararCpf(resultado.cpfAnterior),
+        // Vem do CPF que a própria API decifrou ANTES de chamar a RPC (ver acima)
+        // — a RPC não devolve mais `cpfAnterior` (ticket 04): a API já tinha o
+        // valor decifrado, devolvê-lo de volta seria eco.
+        cpfAnteriorMascarado: mascararCpf(cpfAnteriorTexto),
         laudosInvalidados: resultado.laudosInvalidados,
         corrigidoEm: resultado.corrigidoEm,
       }
@@ -371,7 +415,8 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
         // é mais lido por este caminho. PRECONDIÇÃO DE DEPLOY: exige o backfill
         // de cpf_hash/cpf_enc já ter rodado (ver crypto.ts#decifrarCpfPaciente)
         // — sem isso, um paciente/fantasma antigo não é achado por CPF e a
-        // recepção acaba criando um duplicado (que esbarra no `unique(cpf)`).
+        // recepção acaba criando um duplicado (que esbarra no `unique(cpf_hash)`,
+        // a fonte definitiva de unicidade desde o drop de `cpf` — ticket 04).
         const { data: existente, error: buscaErr } = await supabase
           .from('pacientes')
           .select('id, nome, cpf_enc, data_nascimento')

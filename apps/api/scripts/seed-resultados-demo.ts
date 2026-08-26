@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { randomUUID } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import type { Laudo, LaudoPainel, PainelResultado } from '@lab-hub/shared'
-import { aadDe, cifrar, cifrarJson, cifrarSeConfigurado } from '../src/lib/crypto.js'
+import { aadDe, cifrar, cifrarJson, cifrarSeConfigurado, decifrarCpfPaciente } from '../src/lib/crypto.js'
 
 // ---------------------------------------------------------------------------
 // Semeia resultados de DEMONSTRAÇÃO na conta de teste, um por variação VISUAL
@@ -390,7 +390,7 @@ const NOMES_FLOWLAB = RESULTADOS_FLOWLAB.map((r) => r.exame_nome)
 
 const { data: paciente, error: errPaciente } = await supabase
   .from('pacientes')
-  .select('id, nome, cpf')
+  .select('id, nome, cpf_enc')
   .eq('email', email)
   .maybeSingle()
 
@@ -399,6 +399,10 @@ if (!paciente) {
   console.error(`Nenhum paciente com e-mail ${email}.`)
   process.exit(1)
 }
+
+// `pacientes.cpf` em claro foi dropada (S-06 fase 2b, ticket 04) — só sobrou
+// `cpf_enc`, decifrado aqui do mesmo jeito que o resto da API.
+const cpfPaciente = decifrarCpfPaciente(paciente.id as string, paciente.cpf_enc as string)
 
 console.log(`Paciente: ${paciente.nome} (${paciente.id})`)
 
@@ -434,7 +438,7 @@ const { error: errLis } = await supabase.from('exam_results').insert(
     return {
       id,
       paciente_id: paciente.id,
-      cpf_enc: cifrar(paciente.cpf, aadDe('exam_results', 'cpf', id)),
+      cpf_enc: cifrar(cpfPaciente, aadDe('exam_results', 'cpf', id)),
       codigo_os: laudo.codigo_os || null,
       codigo_lis: laudo.codigo_lis,
       // `result` é a LISTA de laudos da linha (ver ExamResultRepository).

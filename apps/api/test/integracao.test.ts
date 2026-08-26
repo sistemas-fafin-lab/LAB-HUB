@@ -782,6 +782,13 @@ const PAC_ID = '55555555-5555-5555-5555-555555555555'
 const CPF_NOVO = '52998224725' // dígitos verificadores válidos
 const URL_CORRECAO = `/integracao/pacientes/${PAC_ID}/correcao-identidade`
 
+// Fase 2b (S-06), ticket 04 — `pacientes.cpf` em claro saiu: a rota agora
+// busca e decifra o `cpf_enc` ATUAL do paciente antes de chamar a RPC (é dali
+// que vem o CPF anterior mascarado na resposta). Este é o valor que os mocks
+// de `pacientes` devolvem para essa busca em todo o describe abaixo.
+const CPF_ANTERIOR = '12345678909'
+const pacienteAtualRow = () => ({ cpf_enc: cifrar(CPF_ANTERIOR, aadDe('pacientes', 'cpf', PAC_ID)) })
+
 const CORPO_VALIDO = {
   cpf: '529.982.247-25', // formatado de propósito: a API normaliza
   dataNascimento: '1990-05-05',
@@ -792,18 +799,24 @@ const CORPO_VALIDO = {
 
 function setupCorrecao(rpc?: RpcHandler) {
   const mock = createSupabaseMock({
-    handler: supaHandler(),
+    handler: (call) => {
+      if (call.table === 'pacientes' && call.op === 'select') {
+        return { data: pacienteAtualRow(), error: null }
+      }
+      return supaHandler()(call)
+    },
     ...(rpc ? { rpc } : {}),
   })
   h.setSb(mock.client)
   return mock
 }
 
+// Sem `cpfAnterior` (ticket 04): a API já decifrou o CPF anterior antes de
+// chamar a RPC e monta `cpfAnteriorMascarado` a partir dele, não do retorno.
 const RPC_OK: RpcHandler = () => ({
   data: {
     correcaoId: '66666666-6666-6666-6666-666666666666',
     pacienteId: PAC_ID,
-    cpfAnterior: '12345678909',
     nascimentoAnterior: '1990-05-05',
     laudosInvalidados: 3,
     corrigidoEm: '2026-07-30T12:00:00.000Z',
@@ -855,6 +868,8 @@ describe('POST /integracao/pacientes/:pacienteId/correcao-identidade', () => {
     expect(mock.rpcCalls[0]?.args).toEqual({
       p_paciente_id: PAC_ID,
       p_cpf_novo: CPF_NOVO, // máscara removida
+      p_cpf_hash_novo: hashCpf(CPF_NOVO),
+      p_cpf_anterior_texto: CPF_ANTERIOR,
       p_nascimento_novo: '1990-05-05',
       p_motivo: 'CPF digitado errado no cadastro do balcão',
       p_autorizado_por: 'recepcao.ana',
@@ -984,6 +999,9 @@ describe('POST /integracao/pacientes/:pacienteId/correcao-identidade — sincron
     let updatePacientes: Record<string, unknown> | undefined
     const mock = createSupabaseMock({
       handler: (call) => {
+        if (call.table === 'pacientes' && call.op === 'select') {
+          return { data: pacienteAtualRow(), error: null }
+        }
         if (call.table === 'pacientes' && call.op === 'update') {
           updatePacientes = call.payload as Record<string, unknown>
         }
@@ -1017,6 +1035,9 @@ describe('POST /integracao/pacientes/:pacienteId/correcao-identidade — sincron
     // routes/integracao.ts).
     const mock = createSupabaseMock({
       handler: (call) => {
+        if (call.table === 'pacientes' && call.op === 'select') {
+          return { data: pacienteAtualRow(), error: null }
+        }
         if (call.table === 'pacientes' && call.op === 'update') {
           return { data: null, error: { message: 'boom' } }
         }
@@ -1047,6 +1068,9 @@ describe('POST /integracao/pacientes/:pacienteId/correcao-identidade — sincron
     const updates: Record<string, unknown>[] = []
     const mock = createSupabaseMock({
       handler: (call) => {
+        if (call.table === 'pacientes' && call.op === 'select') {
+          return { data: pacienteAtualRow(), error: null }
+        }
         if (call.table === 'pacientes' && call.op === 'update') {
           updates.push(call.payload as Record<string, unknown>)
           return { data: null, error: { message: 'boom' } }

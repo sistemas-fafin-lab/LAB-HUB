@@ -39,12 +39,12 @@ alter table public.pacientes add column if not exists cpf_hash text;
 alter table public.pacientes add column if not exists cpf_enc  text;
 
 comment on column public.pacientes.cpf_hash is
-  'Índice cego do CPF: HMAC-SHA256 determinístico (chave CPF_HASH_KEY, fora do banco, ' ||
-  'NUNCA reaproveitada de PII_KEY_*), em base64. Sustenta busca exata e unicidade sem expor ' ||
+  'Índice cego do CPF: HMAC-SHA256 determinístico (chave CPF_HASH_KEY, fora do banco, '
+  'NUNCA reaproveitada de PII_KEY_*), em base64. Sustenta busca exata e unicidade sem expor '
   'o CPF em texto puro num dump. Nunca exposto ao cliente. Ver § S-06 fase 2b.';
 
 comment on column public.pacientes.cpf_enc is
-  'CPF cifrado em AES-256-GCM pela API, para exibição. Envelope v1:<keyId>:<iv>:<tag>:<ct>, ' ||
+  'CPF cifrado em AES-256-GCM pela API, para exibição. Envelope v1:<keyId>:<iv>:<tag>:<ct>, '
   'AAD = pacientes:cpf:<id>. Não comparado em SQL — comparação é sempre via cpf_hash. Ver § S-06.';
 
 -- Sem mexer em privilégio: grant de tabela cobre coluna nova automaticamente, e
