@@ -14,7 +14,7 @@ const h = vi.hoisted(() => {
 vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 
 import { adminRoutes } from '../src/routes/admin.js'
-import { buildApp, createSupabaseMock, type SupaHandler, type SupaResult } from './helpers.js'
+import { buildApp, createLoggerSpy, createSupabaseMock, type SupaHandler, type SupaResult } from './helpers.js'
 import { aadDe, cifrar, cifrarJson, hashCpf } from '../src/lib/crypto.js'
 
 const ADMIN_EMAIL_VAR = 'ADMIN_EMAIL'
@@ -293,6 +293,67 @@ describe('GET /admin/resultados-por-cpf — autorização', () => {
     const res = await buscarPorCpf(CPF_VALIDO)
 
     expect(res.statusCode).toBe(200)
+  })
+})
+
+// Ticket 02 — log estruturado da consulta admin bem-sucedida (sem trilha em
+// banco: o log é o único registro desta entrega, ver
+// .scratch/consulta-admin-cpf-producao/issues/02-log-auditoria-consulta-admin.md).
+describe('GET /admin/resultados-por-cpf — log de auditoria', () => {
+  it('consulta autorizada com sucesso emite log com o e-mail do admin e o horário, sem o CPF', async () => {
+    habilitarAdminDev()
+    setup()
+    const log = createLoggerSpy()
+    app = await buildApp(adminRoutes, { logger: log })
+
+    const res = await buscarPorCpf(CPF_VALIDO)
+
+    expect(res.statusCode).toBe(200)
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ adminEmail: ADMIN_EMAIL, horario: expect.any(String) }),
+      'Consulta administrativa por CPF autorizada',
+    )
+    const [payload] = (log.info as ReturnType<typeof vi.fn>).mock.calls[0] as [Record<string, unknown>]
+    expect(JSON.stringify(payload)).not.toContain(CPF_VALIDO)
+  })
+
+  it('disjuntor desligado em produção nega e não emite a linha de sucesso', async () => {
+    process.env[AMBIENTE] = 'production'
+    delete process.env[ADMIN_RESULTS_ENABLED_VAR]
+    process.env[ADMIN_EMAIL_VAR] = ADMIN_EMAIL
+    setup()
+    const log = createLoggerSpy()
+    app = await buildApp(adminRoutes, { logger: log })
+
+    const res = await buscarPorCpf(CPF_VALIDO)
+
+    expect(res.statusCode).toBe(403)
+    expect(log.info).not.toHaveBeenCalled()
+  })
+
+  it('e-mail da sessão não autorizado nega e não emite a linha de sucesso', async () => {
+    habilitarAdminDev()
+    setup({ getUser: { data: { user: { id: 'auth-user-2', email: 'outro@gmail.com' } }, error: null } })
+    const log = createLoggerSpy()
+    app = await buildApp(adminRoutes, { logger: log })
+
+    const res = await buscarPorCpf(CPF_VALIDO)
+
+    expect(res.statusCode).toBe(403)
+    expect(log.info).not.toHaveBeenCalled()
+  })
+
+  it('configuração ausente nega e não emite a linha de sucesso', async () => {
+    delete process.env[AMBIENTE]
+    delete process.env[ADMIN_EMAIL_VAR]
+    setup()
+    const log = createLoggerSpy()
+    app = await buildApp(adminRoutes, { logger: log })
+
+    const res = await buscarPorCpf(CPF_VALIDO)
+
+    expect(res.statusCode).toBe(403)
+    expect(log.info).not.toHaveBeenCalled()
   })
 })
 

@@ -46,4 +46,16 @@ export async function authenticateAdmin(request: FastifyRequest): Promise<void> 
   if (!emailHabilitado || emailSessao !== emailHabilitado) {
     throw request.server.httpErrors.forbidden('Acesso não autorizado')
   }
+
+  // Log de auditoria (ticket 02): só a linha de SUCESSO existe — qualquer throw
+  // acima (disjuntor desligado, e-mail não autorizado, config ausente) já saiu
+  // da função antes de chegar aqui, então uma negação nunca gera esta linha.
+  // O CPF consultado não é lido nem passa por este middleware — não há como
+  // esta linha vazá-lo. `request.log` é o pino do server.ts, com CAMPOS_REDIGIDOS
+  // já configurado (ver lib/http.ts): mesmo mecanismo de redação dos demais
+  // logs HTTP, reaproveitado aqui em vez de reinventado.
+  request.log.info(
+    { adminEmail: emailSessao, horario: new Date().toISOString() },
+    'Consulta administrativa por CPF autorizada',
+  )
 }

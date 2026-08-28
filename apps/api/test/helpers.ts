@@ -1,16 +1,43 @@
 import { createHmac } from 'node:crypto'
-import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify'
+import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyPluginAsync } from 'fastify'
 import sensible from '@fastify/sensible'
 import { vi } from 'vitest'
 
 // App de teste mínimo: só sensible (p/ app.httpErrors) + a rota sob teste.
 // Não registra rate-limit/cors — o `config.rateLimit` das rotas é ignorado sem o plugin.
-export async function buildApp(route: FastifyPluginAsync): Promise<FastifyInstance> {
-  const app = Fastify()
+// `logger` é opcional: sem ele o comportamento é o de sempre (logger desligado,
+// `request.log` vira um stub mudo). Passe o resultado de `createLoggerSpy()`
+// quando o teste precisar afirmar o que foi (ou não) logado.
+export async function buildApp(
+  route: FastifyPluginAsync,
+  opts: { logger?: FastifyBaseLogger } = {},
+): Promise<FastifyInstance> {
+  // `disableRequestLogging` corta o "incoming request"/"request completed"
+  // automático do Fastify — sem isto, todo teste que passa um `logger` veria
+  // esse ruído genérico misturado às chamadas de log da própria rota.
+  const app = Fastify(opts.logger ? { loggerInstance: opts.logger, disableRequestLogging: true } : undefined)
   await app.register(sensible)
   await app.register(route)
   await app.ready()
   return app
+}
+
+// Logger fake compatível com o Fastify (precisa de info/error/debug/fatal/warn/
+// trace/child — ver validateLogger em fastify/lib/logger-factory.js). O
+// `request.log` de cada requisição é, na verdade, um CHILD logger
+// (`logger.child(...)`); `child` devolve o próprio objeto para que os spies
+// vistos pelo teste sejam os mesmos que a rota chamou.
+export function createLoggerSpy(): FastifyBaseLogger {
+  const logger: Partial<FastifyBaseLogger> = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    fatal: vi.fn(),
+    trace: vi.fn(),
+  }
+  logger.child = vi.fn(() => logger as FastifyBaseLogger)
+  return logger as FastifyBaseLogger
 }
 
 // Assinatura HMAC-SHA256 igual à que o FlowLab enviaria no header x-webhook-signature.
