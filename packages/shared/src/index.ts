@@ -381,10 +381,11 @@ export interface RespostaLaudos {
 }
 
 // ---------------------------------------------------------------------------
-// Consulta administrativa de dev (GET /api/v1/admin/resultados-por-cpf)
+// Consulta administrativa (GET /api/v1/admin/resultados-por-cpf)
 // ---------------------------------------------------------------------------
-// Restrita ao e-mail de ADMIN_EMAIL/VITE_ADMIN_EMAIL, e só fora de produção —
-// ver middlewares/adminAuth.ts. Compõe as duas fontes da aba Resultados:
+// Restrita ao e-mail de ADMIN_EMAIL/VITE_ADMIN_EMAIL; em produção, exige
+// também o disjuntor ADMIN_RESULTS_ENABLED/VITE_ADMIN_RESULTS_ENABLED — ver
+// middlewares/adminAuth.ts. Compõe as duas fontes da aba Resultados:
 // `resultado` do FlowLab e `laudo` do cache LIS (exam_results) — este último
 // só o que já está cacheado, sem busca ao vivo no ApLIS/AOL.
 

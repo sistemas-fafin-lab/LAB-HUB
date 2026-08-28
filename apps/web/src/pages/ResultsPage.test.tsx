@@ -204,6 +204,66 @@ describe('consulta administrativa por CPF — visibilidade do campo', () => {
     expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
     expect(screen.getByText(/Nenhum resultado disponível ainda/)).toBeTruthy()
   })
+
+  // Fora de dev (build de produção), a visibilidade do campo passa a exigir
+  // também o disjuntor — ver .scratch/consulta-admin-cpf-producao.
+  describe('fora do modo de desenvolvimento — matriz de disjuntor + e-mail', () => {
+    it('não aparece com disjuntor ligado e e-mail batendo, mas ainda em dev — precondição', () => {
+      // Sanity check da matriz abaixo: confirma que só stubar DEV como false já
+      // muda o resultado, isolando o efeito do disjuntor nos casos seguintes.
+      vi.stubEnv('DEV', true)
+      vi.stubEnv('VITE_ADMIN_RESULTS_ENABLED', 'true')
+      vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+      monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+      expect(screen.getByPlaceholderText(/Consultar por CPF/)).toBeTruthy()
+    })
+
+    it('não aparece com disjuntor desligado, mesmo com e-mail certo', () => {
+      vi.stubEnv('DEV', false)
+      vi.stubEnv('VITE_ADMIN_RESULTS_ENABLED', 'false')
+      vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+      monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+      expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
+    })
+
+    it('não aparece com disjuntor ligado, sem e-mail configurado', () => {
+      vi.stubEnv('DEV', false)
+      vi.stubEnv('VITE_ADMIN_RESULTS_ENABLED', 'true')
+      vi.stubEnv('VITE_ADMIN_EMAIL', '')
+      monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+      expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
+    })
+
+    it('não aparece sem disjuntor e sem e-mail configurados', () => {
+      vi.stubEnv('DEV', false)
+      vi.stubEnv('VITE_ADMIN_RESULTS_ENABLED', 'false')
+      vi.stubEnv('VITE_ADMIN_EMAIL', '')
+      monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+      expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
+    })
+
+    it('aparece com disjuntor ligado e e-mail batendo', () => {
+      vi.stubEnv('DEV', false)
+      vi.stubEnv('VITE_ADMIN_RESULTS_ENABLED', 'true')
+      vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+      monta([], { paciente: paciente(ADMIN_EMAIL) })
+
+      expect(screen.getByPlaceholderText(/Consultar por CPF/)).toBeTruthy()
+    })
+
+    it('não aparece com disjuntor ligado e e-mail da sessão não autorizado', () => {
+      vi.stubEnv('DEV', false)
+      vi.stubEnv('VITE_ADMIN_RESULTS_ENABLED', 'true')
+      vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
+      monta([], { paciente: paciente('outro@gmail.com') })
+
+      expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
+    })
+  })
 })
 
 describe('consulta administrativa por CPF — validação e busca', () => {

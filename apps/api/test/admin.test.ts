@@ -18,13 +18,17 @@ import { buildApp, createSupabaseMock, type SupaHandler, type SupaResult } from 
 import { aadDe, cifrar, cifrarJson, hashCpf } from '../src/lib/crypto.js'
 
 const ADMIN_EMAIL_VAR = 'ADMIN_EMAIL'
+const ADMIN_RESULTS_ENABLED_VAR = 'ADMIN_RESULTS_ENABLED'
 const AMBIENTE = 'NODE_ENV'
 const originalAdminEmail = process.env[ADMIN_EMAIL_VAR]
+const originalAdminResultsEnabled = process.env[ADMIN_RESULTS_ENABLED_VAR]
 const originalAmbiente = process.env[AMBIENTE]
 
 afterEach(() => {
   if (originalAdminEmail === undefined) delete process.env[ADMIN_EMAIL_VAR]
   else process.env[ADMIN_EMAIL_VAR] = originalAdminEmail
+  if (originalAdminResultsEnabled === undefined) delete process.env[ADMIN_RESULTS_ENABLED_VAR]
+  else process.env[ADMIN_RESULTS_ENABLED_VAR] = originalAdminResultsEnabled
   if (originalAmbiente === undefined) delete process.env[AMBIENTE]
   else process.env[AMBIENTE] = originalAmbiente
 })
@@ -199,8 +203,21 @@ describe('GET /admin/resultados-por-cpf — autorização', () => {
     expect(res.statusCode).toBe(401)
   })
 
-  it('em produção, mesmo com ADMIN_EMAIL configurado e e-mail batendo, nega (403)', async () => {
+  it('em produção, com disjuntor ligado e e-mail batendo, autoriza (200)', async () => {
     process.env[AMBIENTE] = 'production'
+    process.env[ADMIN_RESULTS_ENABLED_VAR] = 'true'
+    process.env[ADMIN_EMAIL_VAR] = ADMIN_EMAIL
+    setup()
+    app = await buildApp(adminRoutes)
+
+    const res = await buscarPorCpf(CPF_VALIDO)
+
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('em produção, com disjuntor desligado e e-mail correto, nega (403)', async () => {
+    process.env[AMBIENTE] = 'production'
+    delete process.env[ADMIN_RESULTS_ENABLED_VAR]
     process.env[ADMIN_EMAIL_VAR] = ADMIN_EMAIL
     const mock = setup()
     app = await buildApp(adminRoutes)
@@ -209,6 +226,42 @@ describe('GET /admin/resultados-por-cpf — autorização', () => {
 
     expect(res.statusCode).toBe(403)
     expect(mock.calls.find((c) => c.table === 'resultados')).toBeUndefined()
+  })
+
+  it('em produção, com disjuntor ligado num valor diferente de "true", nega (403)', async () => {
+    process.env[AMBIENTE] = 'production'
+    process.env[ADMIN_RESULTS_ENABLED_VAR] = 'TRUE'
+    process.env[ADMIN_EMAIL_VAR] = ADMIN_EMAIL
+    setup()
+    app = await buildApp(adminRoutes)
+
+    const res = await buscarPorCpf(CPF_VALIDO)
+
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('em produção, com disjuntor ligado e e-mail não autorizado, nega (403)', async () => {
+    process.env[AMBIENTE] = 'production'
+    process.env[ADMIN_RESULTS_ENABLED_VAR] = 'true'
+    process.env[ADMIN_EMAIL_VAR] = ADMIN_EMAIL
+    setup({ getUser: { data: { user: { id: 'auth-user-2', email: 'outro@gmail.com' } }, error: null } })
+    app = await buildApp(adminRoutes)
+
+    const res = await buscarPorCpf(CPF_VALIDO)
+
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('em produção, sem disjuntor e sem e-mail autorizado configurados, nega (403)', async () => {
+    process.env[AMBIENTE] = 'production'
+    delete process.env[ADMIN_RESULTS_ENABLED_VAR]
+    delete process.env[ADMIN_EMAIL_VAR]
+    setup()
+    app = await buildApp(adminRoutes)
+
+    const res = await buscarPorCpf(CPF_VALIDO)
+
+    expect(res.statusCode).toBe(403)
   })
 
   it('fora de produção, sem ADMIN_EMAIL configurado, nega (403)', async () => {

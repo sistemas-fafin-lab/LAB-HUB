@@ -18,17 +18,17 @@ function semReferenciaDeArquivo(r: Resultado): Resultado {
   return resto
 }
 
-// Consulta administrativa de DESENVOLVIMENTO: dado um CPF, devolve a
-// identidade mínima do paciente, os `resultado` FlowLab e os `laudo` do cache
-// LIS (exam_results) dele — a mesma composição de fontes da aba Resultados do
-// portal. Read-only — nunca edita nem exclui nada, e não grava trilha de
-// auditoria própria (decisão explícita da spec para esta versão). Autorização
-// (ambiente + e-mail) fica inteira em middlewares/adminAuth.ts; esta rota só
-// resolve o paciente pelo CPF e lista o que já é exposto por GET /resultados e
-// GET /laudos, agora para um paciente escolhido pelo servidor (nunca por um id
-// vindo do navegador). Os laudos vêm só do cache — nunca dispara busca ao vivo
-// no ApLIS/AOL (ver LaudoService#readCachedExams). Ver
-// .scratch/consulta-dev-resultados-por-cpf.
+// Consulta administrativa: dado um CPF, devolve a identidade mínima do
+// paciente, os `resultado` FlowLab e os `laudo` do cache LIS (exam_results)
+// dele — a mesma composição de fontes da aba Resultados do portal. Read-only —
+// nunca edita nem exclui nada, e não grava trilha de auditoria própria ainda
+// (ver .scratch/consulta-admin-cpf-producao/issues/02-log-auditoria-consulta-admin.md).
+// Autorização (disjuntor + e-mail, também em produção) fica inteira em
+// middlewares/adminAuth.ts; esta rota só resolve o paciente pelo CPF e lista o
+// que já é exposto por GET /resultados e GET /laudos, agora para um paciente
+// escolhido pelo servidor (nunca por um id vindo do navegador). Os laudos vêm
+// só do cache — nunca dispara busca ao vivo no ApLIS/AOL (ver
+// LaudoService#readCachedExams). Ver .scratch/consulta-admin-cpf-producao.
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/admin/resultados-por-cpf', { preHandler: authenticateAdmin }, async (request) => {
     const parsed = adminConsultaResultadosQuerySchema.safeParse(request.query)

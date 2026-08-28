@@ -2,15 +2,19 @@ import type { FastifyRequest } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 
 /**
- * E-mail autorizado a usar a consulta administrativa — só fora de produção.
+ * E-mail autorizado a usar a consulta administrativa.
  *
- * As duas travas (ambiente + config) implementam o "falha fechada" do ticket:
- * em produção a função nem lê `ADMIN_EMAIL` (um valor esquecido lá não reabre
- * nada), e em local/dev sem a variável configurada não existe e-mail nenhum
- * para comparar — os dois casos negam por ausência, nunca autorizam por ela.
+ * Fora de produção, a checagem é só o e-mail (comportamento original, sem
+ * exigir disjuntor). Em produção, o disjuntor `ADMIN_RESULTS_ENABLED` (exigido
+ * exatamente `"true"`, sem trim — qualquer outro valor, incluindo ausência, é
+ * "desligado") precisa estar ligado ANTES de `ADMIN_EMAIL` sequer ser lido —
+ * um valor esquecido lá não reabre nada sozinho. Falha fechada em qualquer
+ * combinação incompleta: disjuntor desligado, ou e-mail ausente/vazio.
  */
 function emailAdminHabilitado(): string | null {
-  if (process.env.NODE_ENV === 'production') return null
+  if (process.env.NODE_ENV === 'production' && process.env.ADMIN_RESULTS_ENABLED !== 'true') {
+    return null
+  }
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase()
   return email || null
 }

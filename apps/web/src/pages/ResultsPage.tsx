@@ -52,10 +52,16 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
   const [periodoAberto, setPeriodoAberto] = useState(false)
   const [atualizando, setAtualizando] = useState(false)
 
-  // Consulta administrativa de dev (ver .scratch/consulta-dev-resultados-por-cpf):
-  // campo só aparece para a sessão autorizada, e só fora de produção. Falha
+  // Consulta administrativa (ver .scratch/consulta-admin-cpf-producao): campo só
+  // aparece para a sessão autorizada. Em dev, checagem de e-mail sem disjuntor;
+  // fora de dev, exige também VITE_ADMIN_RESULTS_ENABLED === 'true'. Falha
   // fechada por padrão — sem VITE_ADMIN_EMAIL configurado, isAdmin é sempre false.
-  const isAdmin = ehSessaoAdmin(paciente?.email, import.meta.env.DEV, import.meta.env.VITE_ADMIN_EMAIL)
+  const isAdmin = ehSessaoAdmin(
+    paciente?.email,
+    import.meta.env.DEV,
+    import.meta.env.VITE_ADMIN_EMAIL,
+    import.meta.env.VITE_ADMIN_RESULTS_ENABLED === 'true',
+  )
   const [cpfBusca, setCpfBusca] = useState('')
   const [cpfErro, setCpfErro] = useState<string | null>(null)
   const [buscandoCpf, setBuscandoCpf] = useState(false)
@@ -252,7 +258,7 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
                 value={cpfBusca}
                 onChange={(e) => setCpfBusca(formatarCpf(e.target.value))}
                 onKeyDown={(e) => { if (e.key === 'Enter') void handleBuscarCpf() }}
-                placeholder="Consultar por CPF (dev)"
+                placeholder="Consultar por CPF"
                 className={`bg-transparent outline-none text-sm flex-1 ${
                   dark ? 'text-white placeholder:text-gray-400' : 'text-slate-800 placeholder:text-gray-500'
                 }`}
