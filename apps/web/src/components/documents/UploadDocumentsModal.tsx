@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { TipoDocumento } from '@lab-hub/shared'
 import { WIcon } from '../primitives/WIcon'
 import { WFileInput } from '../primitives/WFileInput'
+import { ConfirmFileModal } from './ConfirmFileModal'
 import { DOC_META, TONE_CLASSES, formatarTamanho, validarArquivo } from '../../lib/documentos'
 import { track } from '../../lib/analytics'
 
@@ -47,6 +48,8 @@ export function UploadDocumentsModal({
 }: UploadDocumentsModalProps) {
   const [itens, setItens] = useState<ItemFila[]>([])
   const [enviando, setEnviando] = useState(false)
+  // Arquivos escolhidos aguardando confirmação — só entram na fila após o "Adicionar".
+  const [arquivosPendentes, setArquivosPendentes] = useState<File[] | null>(null)
 
   const fechar = useCallback(() => {
     if (!enviando) onFechar()
@@ -69,6 +72,7 @@ export function UploadDocumentsModal({
   const atualizar = (id: string, muda: (i: ItemFila) => ItemFila) =>
     setItens((prev) => prev.map((i) => (i.id === id ? muda(i) : i)))
 
+  // Chamado só após a confirmação — a escolha em si (WFileInput) apenas abre o modal.
   const adicionar = (files: File[]) => {
     setItens((prev) => [
       ...prev,
@@ -87,6 +91,12 @@ export function UploadDocumentsModal({
         }
       }),
     ])
+  }
+
+  const confirmarAdicao = () => {
+    if (!arquivosPendentes) return
+    adicionar(arquivosPendentes)
+    setArquivosPendentes(null)
   }
 
   const enviarTudo = async () => {
@@ -179,7 +189,7 @@ export function UploadDocumentsModal({
 
         <div className="p-5 overflow-y-auto flex flex-col gap-3">
           <WFileInput
-            onSelect={adicionar}
+            onSelect={setArquivosPendentes}
             multiple
             disabled={enviando}
             dark={dark}
@@ -240,6 +250,15 @@ export function UploadDocumentsModal({
           </button>
         </div>
       </div>
+
+      {arquivosPendentes && (
+        <ConfirmFileModal
+          files={arquivosPendentes}
+          onConfirm={confirmarAdicao}
+          onCancel={() => setArquivosPendentes(null)}
+          dark={dark}
+        />
+      )}
     </div>
   )
 }
