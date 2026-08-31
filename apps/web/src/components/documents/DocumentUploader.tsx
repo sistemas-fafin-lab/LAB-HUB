@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { TipoDocumento } from '@lab-hub/shared'
 import { WIcon } from '../primitives/WIcon'
 import { WFileInput } from '../primitives/WFileInput'
+import { ConfirmFileModal } from './ConfirmFileModal'
 import { DOC_META, validarArquivo } from '../../lib/documentos'
 
 interface DocumentUploaderProps {
@@ -18,15 +19,23 @@ interface DocumentUploaderProps {
 export function DocumentUploader({ tipos, onEnviar, enviando, dark }: DocumentUploaderProps) {
   const [tipo, setTipo] = useState<TipoDocumento>(tipos[0] ?? 'outro')
   const [recusa, setRecusa] = useState<string | null>(null)
+  // Arquivo escolhido aguardando confirmação — nada sobe até o paciente confirmar.
+  const [pendente, setPendente] = useState<File | null>(null)
 
-  const enviar = ([file]: File[]) => {
+  const selecionar = ([file]: File[]) => {
     if (!file) return
     // Recusa localmente o que a API recusaria depois — sem gastar o upload.
     const problema = validarArquivo(file)
     setRecusa(problema)
     if (problema) return
+    setPendente(file)
+  }
+
+  const confirmar = () => {
+    if (!pendente) return
     // O erro do envio já é exibido pelo chamador (via hook); aqui só evitamos o unhandled.
-    void onEnviar(file, tipo).catch(() => {})
+    void onEnviar(pendente, tipo).catch(() => {})
+    setPendente(null)
   }
 
   return (
@@ -64,7 +73,7 @@ export function DocumentUploader({ tipos, onEnviar, enviando, dark }: DocumentUp
         </div>
       ) : (
         <WFileInput
-          onSelect={enviar}
+          onSelect={selecionar}
           dark={dark}
           hint="JPG, PNG, WEBP ou PDF · até 10 MB"
         />
@@ -75,6 +84,15 @@ export function DocumentUploader({ tipos, onEnviar, enviando, dark }: DocumentUp
           <WIcon name="alert-circle" className="w-3.5 h-3.5 mt-px shrink-0" strokeWidth={2.2} />
           <span>{recusa}</span>
         </div>
+      )}
+
+      {pendente && (
+        <ConfirmFileModal
+          files={[pendente]}
+          onConfirm={confirmar}
+          onCancel={() => setPendente(null)}
+          dark={dark}
+        />
       )}
     </div>
   )
