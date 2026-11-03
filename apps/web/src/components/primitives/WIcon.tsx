@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { Icone } from '../icones/Icone'
 
 interface WIconProps {
   name: string
@@ -6,20 +6,13 @@ interface WIconProps {
   strokeWidth?: number
 }
 
+// Fachada das telas antigas sobre o registro de ícones (components/icones).
+// O <span inline-flex> em volta é o mesmo de quando o ícone vinha do Lucide por
+// CDN: mantém o layout das telas que ainda usam WIcon idêntico.
 export function WIcon({ name, className = 'w-5 h-5', strokeWidth = 2 }: WIconProps) {
-  const ref = useRef<HTMLSpanElement>(null)
-
-  useEffect(() => {
-    type LucideWindow = Window & typeof globalThis & { lucide?: { createIcons: (opts: object) => void } }
-    const win = window as LucideWindow
-    if (!ref.current || !win.lucide) return
-    ref.current.innerHTML = ''
-    const el = document.createElement('i')
-    el.setAttribute('data-lucide', name)
-    el.className = className
-    ref.current.appendChild(el)
-    win.lucide.createIcons({ attrs: { 'stroke-width': strokeWidth } })
-  }, [name, className, strokeWidth])
-
-  return <span ref={ref} className="inline-flex" />
+  return (
+    <span className="inline-flex">
+      <Icone name={name} className={className} strokeWidth={strokeWidth} />
+    </span>
+  )
 }

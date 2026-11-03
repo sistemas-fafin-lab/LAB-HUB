@@ -1,4 +1,6 @@
 import { StrictMode } from 'react'
+import './styles/fontes'
+import './styles/index.css'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { AuthProvider } from './lib/AuthContext'

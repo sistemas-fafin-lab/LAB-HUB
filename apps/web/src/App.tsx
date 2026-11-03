@@ -29,13 +29,6 @@ import type { Exam } from './components/shared/WebHero'
 export function App() {
   const { session, loading, signOut } = useAuth()
 
-  // Passada única no mount como fallback: cada WIcon já cria o próprio ícone no seu
-  // useEffect, então não é preciso re-rodar createIcons a cada render.
-  useEffect(() => {
-    const win = window as Window & typeof globalThis & { lucide?: { createIcons: (opts: object) => void } }
-    win.lucide?.createIcons({ attrs: { 'stroke-width': 2 } })
-  }, [])
-
   // Segue o tema salvo (a classe `dark` já foi aplicada em main.tsx) para quem
   // usa o modo escuro não tomar um flash branco enquanto a sessão carrega.
   if (loading) {

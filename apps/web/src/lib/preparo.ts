@@ -25,7 +25,7 @@ export const JEJUM_LABEL = `${JEJUM_MIN_H} a ${JEJUM_IDEAL_MAX_H} horas`
 
 export interface RegraPreparo {
   id: string
-  /** Nome Lucide kebab-case. WIcon não tipa: nome errado some sem erro. */
+  /** Nome kebab-case do registro de ícones (components/icones/registro.ts). Nome fora dele some e avisa em dev. */
   icon: string
   titulo: string
   texto: string

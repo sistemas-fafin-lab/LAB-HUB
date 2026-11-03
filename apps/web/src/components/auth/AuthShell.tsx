@@ -15,7 +15,7 @@ const DESTAQUES = [
   { icone: 'history', texto: 'Histórico completo dos exames' },
 ] as const
 
-// Inter é a fonte da marca e já vem do Google Fonts. Fica escopada ao auth (em
+// Inter é a fonte da marca, servida localmente (styles/fontes.ts). Fica escopada ao auth (em
 // vez de virar o `sans` global) para não mudar a tipografia do app inteiro.
 const FONTE_AUTH = "'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif"
 
