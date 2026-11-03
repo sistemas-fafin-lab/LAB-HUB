@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { IconButton } from './IconButton'
+import { focaveis } from './teclado'
 
 export interface DialogProps {
   open?: boolean
@@ -30,9 +31,35 @@ export function Dialog({ open = true, title, description, children, footer, onCl
     return () => anterior?.focus()
   }, [modal])
   useEffect(() => {
-    if (!modal || !onClose) return
+    if (!modal) return
     const tecla = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose?.()
+        return
+      }
+      if (e.key === 'Tab') prenderFoco(e)
+    }
+    // Tab e Shift+Tab circulam só dentro da caixa (aria-modal promete isso).
+    const prenderFoco = (e: KeyboardEvent) => {
+      const painel = painelRef.current
+      if (!painel) return
+      const itens = focaveis(painel)
+      const primeiro = itens[0]
+      const ultimo = itens[itens.length - 1]
+      const ativo = document.activeElement
+      if (!primeiro || !ultimo) {
+        e.preventDefault()
+        painel.focus()
+        return
+      }
+      const fora = !(ativo instanceof Node) || !painel.contains(ativo)
+      if (e.shiftKey && (fora || ativo === primeiro || ativo === painel)) {
+        e.preventDefault()
+        ultimo.focus()
+      } else if (!e.shiftKey && (fora || ativo === ultimo)) {
+        e.preventDefault()
+        primeiro.focus()
+      }
     }
     window.addEventListener('keydown', tecla)
     return () => window.removeEventListener('keydown', tecla)

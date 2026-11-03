@@ -10,7 +10,7 @@ export function Skel({ className = '' }: { className?: string }) {
 /** Esqueleto de lista com o nó animado da marca. */
 export function SkeletonRows({ n = 4 }: { n?: number }) {
   return (
-    <div className="divide-y divide-line" aria-busy="true" aria-label="Carregando">
+    <div className="divide-y divide-line" role="status" aria-busy="true" aria-label="Carregando">
       {Array.from({ length: n }, (_, i) => (
         <div key={i} className="grid grid-cols-[28px_minmax(0,1fr)_110px] items-center gap-4 px-5 py-4">
           <Node loading size={26} />

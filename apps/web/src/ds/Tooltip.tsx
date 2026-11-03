@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { focaveis } from './teclado'
 import type { CSSProperties, ReactNode } from 'react'
 
 export type TooltipSide = 'top' | 'bottom' | 'left' | 'right'
@@ -22,11 +23,28 @@ const POSICAO: Record<TooltipSide, CSSProperties> = {
 export function Tooltip({ content, children, side = 'top', open, style }: TooltipProps) {
   const [ativo, setAtivo] = useState(false)
   const visivel = open ?? ativo
+  const id = useId()
+  const raiz = useRef<HTMLSpanElement>(null)
+  // O texto do tooltip vira a descrição acessível do controle que ele
+  // acompanha: o leitor de tela anuncia ao focar, mesmo com o tooltip
+  // escondido (aria-describedby lê o conteúdo de elementos ocultos).
+  useEffect(() => {
+    const alvo = raiz.current ? focaveis(raiz.current)[0] : undefined
+    if (!alvo) return
+    const anterior = alvo.getAttribute('aria-describedby')
+    alvo.setAttribute('aria-describedby', anterior ? `${anterior} ${id}` : id)
+    return () => {
+      if (anterior) alvo.setAttribute('aria-describedby', anterior)
+      else alvo.removeAttribute('aria-describedby')
+    }
+  }, [id])
   return (
-    // Abre também com o foco do filho (teclado), não só com o mouse. O texto é
-    // complemento visual: o filho precisa ter nome acessível próprio (ex.: o
-    // `label` do IconButton).
+    // Abre também com o foco do filho (teclado), não só com o mouse; Esc fecha.
     <span
+      ref={raiz}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') setAtivo(false)
+      }}
       onMouseEnter={() => setAtivo(true)}
       onMouseLeave={() => setAtivo(false)}
       onFocus={() => setAtivo(true)}
@@ -35,8 +53,8 @@ export function Tooltip({ content, children, side = 'top', open, style }: Toolti
     >
       {children}
       <span
+        id={id}
         role="tooltip"
-        aria-hidden={!visivel}
         style={{
           position: 'absolute',
           ...POSICAO[side],

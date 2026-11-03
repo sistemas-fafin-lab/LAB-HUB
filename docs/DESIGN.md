@@ -32,7 +32,7 @@ Referência visual aprovada: [`docs/prototipo-v2.html`](prototipo-v2.html) (dado
 - **Formas:** cartões raio 20, controles raio 12, blocos de ícone e avatares com raio de 15%. O destaque da visão geral e o painel do acesso usam o `Grafismo` (recorte em L da marca).
 - **Assinaturas:** ponto final dos títulos como bloco azul (`.lh-dot`, já no `PageHeader`); contadores sobrescritos no menu (`.lh-supc`); o nó (`Node`) como indicador de etapas e de carregamento.
 - **Escuro:** fundo tinta `#0B1A33`, cartões navy `#1C3C6B`. A classe `dark` no `<html>` continua vindo de `lib/tema.ts`, aplicada antes do primeiro render (sem flash); só os valores mudam, via `--lh-*`. Os componentes do DS recebem ajustes em `tema.css` (`.dark .lh-in …`) — use `Field`/`SelectField` do portal em vez de `DS.Input`/`DS.Select` puros.
-- **Acessibilidade:** foco visível em todos os controles (anel azul); Esc fecha caixas e menus (`Modal`, `useDismiss`); `prefers-reduced-motion` desliga animações; alvos de toque de 44 px no mobile. Checkbox, Radio, Switch, Tag e Card clicáveis respondem ao teclado.
+- **Acessibilidade:** foco visível em todos os controles (anel azul); Esc fecha caixas e menus (`Modal`, `useDismiss`); `prefers-reduced-motion` desliga animações; alvos de toque de 44 px no mobile. Checkbox, Radio (setas), Switch, Tag e Card clicáveis respondem ao teclado; Tabs seguem o padrão WAI-ARIA (setas, Home/End, só a aba ativa no Tab); o Dialog prende o foco, recebe-o ao abrir e o devolve ao fechar; o texto do Tooltip vira a descrição acessível do controle que ele acompanha.
 
 ## Dados
 
