@@ -4,7 +4,7 @@ import { useContagemResultados } from "../../lib/useResultados";
 import type { AppRoute } from "./Topbar";
 
 interface SidebarProps {
-  route: AppRoute;
+  route: AppRoute | null; // null: nenhuma tela do menu (ex.: 404)
   onNav: (route: AppRoute) => void;
   dark: boolean;
 }

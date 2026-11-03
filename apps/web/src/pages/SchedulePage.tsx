@@ -8,26 +8,28 @@ import { ColetaTimeline } from "../components/schedule/ColetaTimeline";
 import { useAgendamentos } from "../lib/useAgendamentos";
 import { api } from "../lib/api";
 import { track } from "../lib/analytics";
+import type { AbaColetas } from "../lib/rotas";
 
 interface SchedulePageProps {
   dark: boolean;
-  // Quando vem da Home ("Detalhes" da próxima coleta): abre já na linha do
-  // tempo desse agendamento, na aba "Minhas coletas".
-  initialSelectedId?: string | null;
+  // Aba e coleta aberta vêm da URL (/agendar, /coletas, /coleta/:id): recarregar
+  // a página ou usar voltar/avançar mantém o paciente onde estava. A página só
+  // pede a troca; quem muda a URL é o App.
+  aba: AbaColetas;
+  selectedId: string | null;
+  onAba: (aba: AbaColetas) => void;
+  onAbrirColeta: (id: string) => void;
+  onFecharColeta: () => void;
 }
-
-type ColetaTab = "agendar" | "minhas";
 
 export function SchedulePage({
   dark,
-  initialSelectedId = null,
+  aba: tab,
+  selectedId,
+  onAba: setTab,
+  onAbrirColeta,
+  onFecharColeta,
 }: SchedulePageProps) {
-  const [tab, setTab] = useState<ColetaTab>(
-    initialSelectedId ? "minhas" : "agendar",
-  );
-  const [selectedId, setSelectedId] = useState<string | null>(
-    initialSelectedId,
-  );
   const [resyncingId, setResyncingId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -73,7 +75,8 @@ export function SchedulePage({
   ];
 
   // Detalhe (linha do tempo) de um agendamento — ocupa a tela inteira, com o seu
-  // próprio "Voltar". Cai fora se o item sumir da lista após um reload.
+  // próprio "Voltar". Enquanto a lista carrega, ou se o item não existir (link
+  // antigo, coleta de outra conta), mostra a lista de "Minhas coletas".
   const selected = selectedId
     ? (agendamentos.find((a) => a.id === selectedId) ?? null)
     : null;
@@ -82,7 +85,7 @@ export function SchedulePage({
       <ColetaTimeline
         agendamento={selected}
         dark={dark}
-        onBack={() => setSelectedId(null)}
+        onBack={onFecharColeta}
       />
     );
   }
@@ -126,8 +129,7 @@ export function SchedulePage({
           // no momento de maior motivação ("adiante seu check-in").
           onBooked={(ag) => {
             reload();
-            setSelectedId(ag.id);
-            setTab("minhas");
+            onAbrirColeta(ag.id);
           }}
         />
       ) : (
@@ -141,7 +143,7 @@ export function SchedulePage({
           cancellingId={cancellingId}
           onCancel={(id) => void handleCancel(id)}
           onAgendar={() => setTab("agendar")}
-          onOpen={setSelectedId}
+          onOpen={onAbrirColeta}
         />
       )}
     </div>
