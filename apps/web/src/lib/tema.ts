@@ -1,9 +1,8 @@
 // Tema claro/escuro — fonte única da preferência do usuário.
 //
-// As telas de autenticação usam as variantes `dark:` do Tailwind (estratégia
-// de classe), então o tema precisa viver na classe `dark` do <html>. O resto
-// do app ainda recebe `dark` por prop e aplica ternários de classe; as duas
-// formas convivem porque leem daqui.
+// O portal v2 (tema `--lh-*`) e as variantes `dark:` do Tailwind seguem a
+// classe `dark` do <html>. As telas antigas ainda recebem `dark` por prop e
+// aplicam ternários de classe; as duas formas convivem porque leem daqui.
 
 const CHAVE = 'labhub:tema'
 

@@ -27,6 +27,7 @@ import {
   caminhoDaAba,
   caminhoInterno,
   ehEntrada,
+  modoDaEntrada,
   caminhoDaColeta,
   caminhoDoExame,
   caminhoDoLaudo,
@@ -79,10 +80,13 @@ export function App() {
 
   const naEntrada = ehEntrada(local.pathname)
   if (session === null) {
-    if (naEntrada) return <AuthGate />
+    if (naEntrada) return <AuthGate comSessao={false} />
     return <Redireciona para={entradaPara(local.pathname + local.search)} />
   }
   if (naEntrada) {
+    // O link de recuperação do e-mail chega já com sessão (o Supabase o troca
+    // por uma): a nova senha é a única tela da entrada que se usa logado.
+    if (modoDaEntrada(local.search) === 'nova-senha') return <AuthGate comSessao />
     const next = new URLSearchParams(local.search).get('next')
     return <Redireciona para={caminhoInterno(next) ?? CAMINHO_DA_TELA.home} />
   }

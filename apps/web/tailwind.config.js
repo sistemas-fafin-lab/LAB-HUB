@@ -1,9 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
-  // darkMode 'class': as telas de autenticação usam variantes `dark:`, que
-  // seguem a classe `dark` no <html> (gerenciada por src/lib/tema.ts). O resto
-  // do app continua recebendo `dark` por prop.
+  // darkMode 'class': as variantes `dark:` e o tema do portal v2 (`.dark` em
+  // styles/lh/tema.css) seguem a classe `dark` no <html>, gerenciada por
+  // src/lib/tema.ts. As telas antigas ainda recebem `dark` por prop.
   darkMode: 'class',
   theme: {
     extend: {

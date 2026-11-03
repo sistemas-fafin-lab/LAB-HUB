@@ -48,12 +48,25 @@ export function validarTelefone(tel: string): string | null {
 // minúscula, uma maiúscula e um dígito. Precisa bater com a do projeto — o Auth
 // recusa depois, e a mensagem dele vem em inglês e sem contexto. Uma regra a
 // mais aqui é melhor que uma recusa opaca lá.
+//
+// As regras ficam numa lista para as telas mostrarem os requisitos (rótulo +
+// atendido ou não) com a MESMA política que valida — na ordem em que o erro
+// é apontado.
+export interface RegraSenha {
+  rotulo: string
+  erro: string
+  atende: (senha: string) => boolean
+}
+
+export const REGRAS_SENHA: readonly RegraSenha[] = [
+  { rotulo: '12 caracteres ou mais', erro: 'Senha deve ter ao menos 12 caracteres', atende: (s) => s.length >= 12 },
+  { rotulo: 'Uma letra minúscula', erro: 'Senha deve ter ao menos uma letra minúscula', atende: (s) => /[a-z]/.test(s) },
+  { rotulo: 'Uma letra maiúscula', erro: 'Senha deve ter ao menos uma letra maiúscula', atende: (s) => /[A-Z]/.test(s) },
+  { rotulo: 'Um número', erro: 'Senha deve ter ao menos um número', atende: (s) => /\d/.test(s) },
+]
+
 export function validarSenha(senha: string): string | null {
-  if (senha.length < 12) return 'Senha deve ter ao menos 12 caracteres'
-  if (!/[a-z]/.test(senha)) return 'Senha deve ter ao menos uma letra minúscula'
-  if (!/[A-Z]/.test(senha)) return 'Senha deve ter ao menos uma letra maiúscula'
-  if (!/\d/.test(senha)) return 'Senha deve ter ao menos um número'
-  return null
+  return REGRAS_SENHA.find((r) => !r.atende(senha))?.erro ?? null
 }
 
 // Espera o formato YYYY-MM-DD emitido pelo <input type="date">.

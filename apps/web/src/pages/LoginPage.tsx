@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { WIcon } from '../components/primitives/WIcon'
-import { AuthField } from '../components/auth/AuthField'
-import { BotaoOlho } from '../components/auth/BotaoOlho'
+import { Btn, Field } from '../components/portal'
+import { AvisoErro, CampoSenha } from '../components/acesso/pecas'
 import { supabase } from '../lib/supabase'
 import { validarEmail } from '../lib/validators'
+import { mensagemErroLogin } from '../lib/errosAuth'
 import { track } from '../lib/analytics'
 
 type FieldErrors = {
@@ -12,36 +12,24 @@ type FieldErrors = {
   password?: string | undefined
 }
 
-// O Supabase responde em inglês. Traduz o que o paciente lê; o track() continua
-// enviando a mensagem crua para não quebrar a série histórica no Umami.
-function mensagemErroLogin(original: string): string {
-  const m = original.toLowerCase()
-  if (m.includes('invalid login credentials')) return 'E-mail ou senha incorretos.'
-  if (m.includes('email not confirmed')) {
-    return 'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.'
-  }
-  if (m.includes('rate limit') || m.includes('for security purposes')) {
-    return 'Muitas tentativas seguidas. Aguarde um instante e tente de novo.'
-  }
-  return 'Não foi possível entrar agora. Tente novamente em instantes.'
+// No login não aplicamos a política de senha (senhas legadas podem ser menores),
+// apenas exigimos que a senha não fique vazia.
+const validarSenhaLogin = (senha: string): string | null => (senha ? null : 'Informe sua senha')
+
+interface LoginPageProps {
+  onEsqueciSenha: () => void
 }
 
 // ---------------------------------------------------------------------------
 // LoginPage — corpo do formulário de entrada. A moldura (painel da marca,
-// card, abas) vem do AuthShell/AuthGate.
+// título, abas) vem do AuthGate.
 // ---------------------------------------------------------------------------
-export function LoginPage() {
+export function LoginPage({ onEsqueciSenha }: LoginPageProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [mostrarSenha, setMostrarSenha] = useState(false)
   const [errors, setErrors] = useState<FieldErrors>({})
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-
-  // No login não aplicamos o mínimo de 8 caracteres (senhas legadas podem ser menores),
-  // apenas exigimos que a senha não fique vazia.
-  const validarSenhaLogin = (senha: string): string | null =>
-    senha ? null : 'Informe sua senha'
 
   const setFieldError = (field: keyof FieldErrors, msg: string | null) =>
     setErrors((prev) => ({ ...prev, [field]: msg ?? undefined }))
@@ -76,60 +64,40 @@ export function LoginPage() {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-3">
-      <AuthField id="login-email" label="E-mail" icon="mail" error={errors.email}>
-        {(c) => (
-          <input
-            {...c}
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onBlur={() => handleBlur('email', email, validarEmail)}
-            placeholder="voce@email.com"
-            autoComplete="username"
-          />
-        )}
-      </AuthField>
+    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+      {error !== null && <AvisoErro>{error}</AvisoErro>}
 
-      <AuthField
+      <Field
+        id="login-email"
+        label="E-mail"
+        type="email"
+        icon="mail"
+        value={email}
+        onChange={setEmail}
+        onBlur={() => handleBlur('email', email, validarEmail)}
+        error={errors.email}
+        placeholder="voce@email.com"
+        autoComplete="username"
+      />
+
+      <CampoSenha
         id="login-senha"
-        label="Senha"
-        icon="lock"
+        value={password}
+        onChange={setPassword}
+        onBlur={() => handleBlur('password', password, validarSenhaLogin)}
         error={errors.password}
-        slotDireito={
-          <BotaoOlho visivel={mostrarSenha} onToggle={() => setMostrarSenha((v) => !v)} />
-        }
-      >
-        {(c) => (
-          <input
-            {...c}
-            type={mostrarSenha ? 'text' : 'password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onBlur={() => handleBlur('password', password, validarSenhaLogin)}
-            placeholder="Senha"
-            autoComplete="current-password"
-          />
-        )}
-      </AuthField>
+        autoComplete="current-password"
+      />
 
-      {error !== null && (
-        <div
-          role="alert"
-          className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/30 rounded-lg px-3 py-2"
-        >
-          {error}
-        </div>
-      )}
+      <div className="flex justify-end -my-2">
+        <button type="button" onClick={onEsqueciSenha} className="min-h-[44px] inline-flex items-center text-[14px] font-medium text-link hover:underline">
+          Esqueci minha senha
+        </button>
+      </div>
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="mt-2 w-full py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold text-sm inline-flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 transition-all hover:from-blue-600 hover:to-blue-700 hover:shadow-xl active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100"
-      >
-        {loading ? 'Entrando…' : 'Entrar'}
-        {!loading && <WIcon name="arrow-right" className="w-4 h-4" strokeWidth={2.4} />}
-      </button>
+      <Btn type="submit" size="lg" fullWidth loading={loading} iconRight="arrow-right">
+        {loading ? 'Entrando' : 'Entrar'}
+      </Btn>
     </form>
   )
 }

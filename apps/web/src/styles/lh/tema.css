@@ -485,3 +485,17 @@
     border-radius: 0 !important;
   }
 }
+
+/* Campo de data (cadastro): o ícone do calendário é do navegador; sem isto ele
+   encosta na borda e some no escuro. O calendário que ele abre é do sistema
+   (segue o color-scheme aplicado por lib/tema.ts). */
+.lh-in input[type='date']::-webkit-calendar-picker-indicator {
+  margin-inline-start: 8px;
+  padding: 2px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.lh-in input[type='date']::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}

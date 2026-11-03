@@ -26,13 +26,14 @@ const COR_TEXTO: Partial<Record<DS.ButtonVariant, string>> = {
   inverse: 'var(--lh-action)',
 }
 
-export function Btn({ variant = 'primary', loading = false, icon, children, style, disabled, ...rest }: BtnProps) {
+export function Btn({ variant = 'primary', loading = false, icon, iconRight, children, style, disabled, ...rest }: BtnProps) {
   const cor = COR_TEXTO[variant]
   return (
     <DS.Button
       {...rest}
       variant={variant}
       {...(icon && !loading ? { icon } : {})}
+      {...(iconRight && !loading ? { iconRight } : {})}
       disabled={Boolean(disabled || loading)}
       style={{
         ...(cor ? { color: cor } : null),

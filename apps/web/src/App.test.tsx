@@ -308,6 +308,21 @@ describe('sem sessão', () => {
   })
 })
 
+describe('nova senha pelo link do e-mail', () => {
+  it('com a sessão de recuperação, /entrar?modo=nova-senha mostra o formulário em vez de redirecionar', () => {
+    auth.set(SESSAO)
+    abre('/entrar?modo=nova-senha')
+    expect(caminho()).toBe('/entrar?modo=nova-senha')
+    expect(screen.getByRole('heading', { level: 1, name: 'Crie uma nova senha' })).toBeTruthy()
+  })
+
+  it('com sessão, os outros modos da entrada seguem para o next', () => {
+    auth.set(SESSAO)
+    abre('/entrar?modo=cadastro&next=%2Fresultados')
+    expect(caminho()).toBe('/resultados')
+  })
+})
+
 describe('sair', () => {
   it('quem entra depois de um logout não herda a tela de quem saiu, nem pelo voltar', async () => {
     abre('/resultados')
