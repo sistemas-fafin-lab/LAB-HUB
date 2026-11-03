@@ -1,0 +1,28 @@
+:root{
+--space-1:4px;
+--space-2:8px;
+--space-3:12px;
+--space-4:16px;
+--space-5:20px;
+--space-6:24px;
+--space-8:32px;
+--space-10:40px;
+--space-12:48px;
+--space-16:64px;
+--space-20:80px;
+--space-24:96px;
+/* Radii — the brand's signature is a large, soft corner (logo symbol ≈ 28% of side) */
+--radius-sm:8px;
+--radius-md:12px;
+--radius-lg:20px;
+--radius-xl:32px;
+--radius-2xl:48px;
+--radius-pill:999px;
+--radius-symbol:28%;
+/* Layout */
+--container-max:1200px;
+--gutter:24px;
+--control-height-sm:36px;
+--control-height-md:44px;
+--control-height-lg:56px;
+}

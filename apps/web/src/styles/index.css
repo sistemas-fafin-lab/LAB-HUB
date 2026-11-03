@@ -5,6 +5,7 @@
    Em empate de especificidade, a utility do Tailwind continua ganhando. */
 @import './auth.css';
 @import './laudo.css';
+@import './lh/index.css';
 
 @tailwind base;
 @tailwind components;

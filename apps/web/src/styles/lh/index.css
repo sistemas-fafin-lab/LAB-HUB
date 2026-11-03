@@ -1,0 +1,9 @@
+/* Portal v2 — base visual do LAB Design System: tokens da marca, fontes e
+   tema --lh-* (claro/escuro). Só declara variáveis e classes novas; as regras
+   que no pacote eram globais ficam sob .lh-v2 (ver tema.css). */
+@import './tokens/colors.css';
+@import './tokens/typography.css';
+@import './tokens/spacing.css';
+@import './tokens/effects.css';
+@import './fontes.css';
+@import './tema.css';

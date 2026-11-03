@@ -1,0 +1,49 @@
+:root{
+/* Paleta Cromática (Manual de Marca p.33) */
+--lab-blue:#416ef5;          /* Cor Principal · R65 G110 B245 · Pantone 2129 C */
+--lab-coral:#ff6869;         /* Cor Secundária · R255 G105 B105 · Pantone 6052 C */
+--lab-gray-500:#8e9aa5;      /* Cor Terciária · R140 G155 B165 · Pantone 2163 C */
+--lab-gray-300:#b6c3ce;      /* Cor Terciária · R180 G195 B205 · Pantone 563 C */
+--lab-gray-100:#d6dfea;      /* Cor Terciária · R215 G225 B235 · Pantone 650 C */
+--lab-black:#000000;         /* Cor de Apoio */
+--lab-white:#ffffff;         /* Cor de Apoio */
+--lab-navy:#1c3c6b;          /* Cor do Gradiente · R30 G60 B110 · Pantone 654 C */
+/* Derived tints (not in manual; for UI states only) */
+--lab-blue-700:#2f55c9;
+--lab-blue-600:#3a63de;
+--lab-blue-100:#e6edfe;
+--lab-blue-50:#f2f6ff;
+--lab-coral-100:#ffe8e8;
+--lab-gray-50:#eef2f6;
+--lab-ink:#0b1a33;
+/* Gradients (Elementos de Apoio · Gradientes) */
+--gradient-soft:radial-gradient(60% 70% at 50% 55%,#416ef5 0%,#6fb6f6 45%,#d6ecfa 75%,#ffffff 100%);/* @kind other */
+--gradient-deep:linear-gradient(135deg,#7fd6f6 0%,#416ef5 45%,#1c3c6b 100%);/* @kind other */
+--gradient-deep-fade:linear-gradient(135deg,#7fd6f6 0%,#416ef5 40%,#1c3c6b 70%,#d6dfea 100%);/* @kind other */
+/* Semantic */
+--surface-page:var(--lab-white);
+--surface-muted:var(--lab-gray-100);
+--surface-subtle:var(--lab-gray-50);
+--surface-card:var(--lab-white);
+--surface-brand:var(--lab-blue);
+--surface-accent:var(--lab-coral);
+--surface-inverse:var(--lab-black);
+--text-body:var(--lab-black);
+--text-muted:#5b6672;
+--text-subtle:var(--lab-gray-500);
+--text-brand:var(--lab-blue);
+--text-on-brand:var(--lab-white);
+--text-on-accent:var(--lab-white);
+--border-default:var(--lab-gray-100);
+--border-strong:var(--lab-gray-300);
+--border-brand:var(--lab-blue);
+--focus-ring:0 0 0 3px rgba(65,110,245,.35);
+--action-primary:var(--lab-blue);
+--action-primary-hover:var(--lab-blue-600);
+--action-primary-active:var(--lab-blue-700);
+--action-accent:var(--lab-coral);
+--action-accent-hover:#f25859;
+--status-info:var(--lab-blue);
+--status-alert:var(--lab-coral);
+--status-neutral:var(--lab-gray-500);
+}

@@ -1,0 +1,6 @@
+/* Ranade (títulos do portal v2), servida localmente de public/fonts.
+   DM Sans vem do @fontsource (ver styles/fontes.ts). */
+@font-face { font-family: 'Ranade'; src: url('/fonts/Ranade-300.woff2') format('woff2'); font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Ranade'; src: url('/fonts/Ranade-400.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Ranade'; src: url('/fonts/Ranade-500.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Ranade'; src: url('/fonts/Ranade-700.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
