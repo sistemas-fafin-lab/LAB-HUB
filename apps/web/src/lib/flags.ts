@@ -13,9 +13,9 @@ export const MOSTRAR_ACOMPANHAMENTO = false          // HomePage: card de marcad
 export const MOSTRAR_PROXIMOS_PASSOS_EXTRAS = false  // HomePage: compartilhar/baixar laudos
 export const MOSTRAR_RESULTADO_HERO = false          // HomePage: card "Seu último exame"
 export const MOSTRAR_EXAMES_RECENTES = false         // HomePage: lista "Exames recentes"
-export const MOSTRAR_CHATBOT = false                 // SupportDock: chat "Lia"
-export const MOSTRAR_NOTIFICACOES = false            // Topbar: sino / badge de notificações
-export const MOSTRAR_DEPENDENTES = false             // Topbar: seletor de dependentes (D2 adiado)
+export const MOSTRAR_CHATBOT = false                 // Shell: chat "Lia" (components/shell/Suporte)
+export const MOSTRAR_NOTIFICACOES = false            // Shell: sino de notificações no cabeçalho
+export const MOSTRAR_DEPENDENTES = false             // Shell: seletor de dependentes no menu da conta (D2 adiado)
 export const MOSTRAR_NOVIDADES = false               // Settings: card "receber novidades" (sem backend)
 export const MOSTRAR_ENVIAR_AO_MEDICO = false        // LaudoPage: botão "Enviar ao médico" (sem backend)
 export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compartilhar/2FA (sem backend)
@@ -27,13 +27,13 @@ export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compar
 // folha omite enquanto estiverem ausentes, e não como texto fixo no componente.
 
 // Páginas inteiras ocultas do menu E inacessíveis por acesso direto.
-export const MOSTRAR_RESULTADOS = true               // Sidebar/rota: Resultados (backend real: GET /resultados + GET /laudos)
-export const MOSTRAR_TENDENCIAS = false              // Sidebar/rota: Tendências
-export const MOSTRAR_DOCUMENTOS = true               // Sidebar/rota: Documentos (backend real: GET/POST /documentos)
-export const MOSTRAR_FATURAMENTO = false             // Sidebar/rota: Faturamento
+export const MOSTRAR_RESULTADOS = true               // Menu/rota: Resultados (backend real: GET /resultados + GET /laudos)
+export const MOSTRAR_TENDENCIAS = false              // Menu/rota: Tendências
+export const MOSTRAR_DOCUMENTOS = true               // Menu/rota: Documentos (backend real: GET/POST /documentos)
+export const MOSTRAR_FATURAMENTO = false             // Menu/rota: Faturamento
 
 // ---------------------------------------------------------------------------
-// Fonte única de "rota oculta" — usada pelo Sidebar (esconde o item) e pelo
+// Fonte única de "rota oculta" — usada pelo menu e pela busca do shell (escondem o item) e pelo
 // App (bloqueia acesso direto, caindo na Visão geral). Manter aqui evita que
 // o menu e o roteador divirjam.
 // ---------------------------------------------------------------------------

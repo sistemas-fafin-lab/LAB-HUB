@@ -19,7 +19,7 @@ export function AuthGate() {
   // E-mail da conta recém-criada que ainda precisa ser confirmado.
   const [emailEnviado, setEmailEnviado] = useState<string | null>(null)
 
-  // Mesmo evento e payload usados pelo toggle da Topbar (App.tsx).
+  // Mesmo evento e payload usados pelo botão de tema do cabeçalho (App.tsx).
   const handleToggleDark = () => {
     const next = !dark
     track('tema_alternado', { modo: next ? 'dark' : 'light' })

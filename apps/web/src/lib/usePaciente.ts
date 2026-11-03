@@ -7,7 +7,7 @@ interface UsePaciente {
   loading: boolean
   error: string | null
   // Atualiza o paciente em cache (ex.: após salvar o perfil), refletindo em
-  // toda a UI que consome este estado (Topbar, ProfilePage).
+  // toda a UI que consome este estado (cabeçalho do shell, ProfilePage).
   setPaciente: (p: Paciente) => void
 }
 

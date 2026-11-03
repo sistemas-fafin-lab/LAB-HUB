@@ -1,10 +1,22 @@
-import type { AppRoute } from '../components/layout/Topbar'
 import { casa } from './router'
 
 // ---------------------------------------------------------------------------
 // Tabela de rotas do portal: URL ⇄ tela. Único lugar que conhece os caminhos —
 // menu, busca, páginas e App montam links por aqui.
 // ---------------------------------------------------------------------------
+
+/** Telas do portal autenticado (a 404 fica de fora: não é destino de menu). */
+export type AppRoute =
+  | 'home'
+  | 'results'
+  | 'exam'
+  | 'laudo'
+  | 'schedule'
+  | 'trends'
+  | 'documents'
+  | 'billing'
+  | 'settings'
+  | 'profile'
 
 export type AbaColetas = 'agendar' | 'minhas'
 

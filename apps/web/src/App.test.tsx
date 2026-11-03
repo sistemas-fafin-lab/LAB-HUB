@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import type { Agendamento, Paciente } from '@lab-hub/shared'
 import type { Exam } from './components/shared/WebHero'
@@ -100,6 +100,8 @@ vi.mock('./lib/analytics', () => ({
 }))
 
 const { App } = await import('./App')
+const { avisaSessaoExpirada } = await import('./lib/sessao')
+const { avisar } = await import('./lib/avisos')
 
 const SESSAO = { user: { id: 'auth-1', email: PACIENTE.email } }
 
@@ -226,11 +228,48 @@ describe('navegação e histórico do navegador', () => {
     expect(caminho()).toBe('/coletas')
   })
 
-  it('o menu lateral navega por URL', () => {
+  it('o menu navega por URL e marca a tela atual', () => {
     abre('/')
-    fireEvent.click(screen.getByRole('button', { name: 'Documentos' }))
+    const menu = screen.getByRole('navigation', { name: 'Navegação principal' })
+    fireEvent.click(within(menu).getByRole('link', { name: 'Documentos' }))
     expect(caminho()).toBe('/documentos')
     expect(screen.getByRole('heading', { level: 1, name: 'Documentos' })).toBeTruthy()
+    expect(within(menu).getByRole('link', { name: 'Documentos' }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('"Minhas coletas" e "Agendar coleta" levam cada um à sua aba', () => {
+    abre('/')
+    const menu = screen.getByRole('navigation', { name: 'Navegação principal' })
+    fireEvent.click(within(menu).getByRole('link', { name: 'Minhas coletas' }))
+    expect(caminho()).toBe('/coletas')
+    fireEvent.click(within(menu).getByRole('link', { name: 'Agendar coleta' }))
+    expect(caminho()).toBe('/agendar')
+  })
+
+  it('exame aberto deixa Resultados marcado no menu', () => {
+    abre('/exame/exame-1')
+    const menu = screen.getByRole('navigation', { name: 'Navegação principal' })
+    expect(within(menu).getByRole('link', { name: /^Resultados/ }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('o menu esconde as telas ocultas por flag', () => {
+    abre('/')
+    const menu = screen.getByRole('navigation', { name: 'Navegação principal' })
+    expect(within(menu).queryByRole('link', { name: 'Tendências' })).toBeNull() // MOSTRAR_TENDENCIAS = false
+    expect(within(menu).queryByRole('link', { name: 'Faturamento' })).toBeNull() // MOSTRAR_FATURAMENTO = false
+  })
+
+  it('a gaveta (abaixo de 1024 px) abre, navega e fecha; Esc também fecha', () => {
+    abre('/')
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir menu' }))
+    const gaveta = screen.getByRole('dialog', { name: 'Menu' })
+    fireEvent.click(within(gaveta).getByRole('link', { name: 'Perfil' }))
+    expect(caminho()).toBe('/perfil')
+    expect(screen.queryByRole('dialog', { name: 'Menu' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir menu' }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Menu' })).toBeNull()
   })
 
   it('rota oculta por flag cai na Visão geral', () => {
@@ -275,17 +314,99 @@ describe('sair', () => {
     fireEvent.click(screen.getByText('Hemograma completo'))
     expect(caminho()).toBe('/exame/exame-1')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Perfil' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Perfil' }))
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /Sair/ })))
     expect(caminho()).toBe('/entrar')
 
-    // Volta para o Perfil de quem saiu: sem sessão, cai na entrada SEM `next`.
+    // Volta para a tela de quem saiu: sem sessão, cai na entrada SEM `next`.
+    // Espera o popstate de verdade: a URL já era /entrar antes do voltar, então
+    // esperar só pela URL passaria na hora e deixaria a travessia do jsdom
+    // pendente, disparando no meio do teste seguinte.
+    const voltou = new Promise((ok) => window.addEventListener('popstate', ok, { once: true }))
     act(() => window.history.back())
+    await act(async () => {
+      await voltou
+    })
     await waitFor(() => expect(window.location.pathname).toBe('/entrar'))
     expect(caminho()).toBe('/entrar')
 
     act(() => auth.set(SESSAO))
     expect(caminho()).toBe('/')
+  })
+})
+
+describe('sessão expirada', () => {
+  // O cliente `api` (dublado aqui) avisa por lib/sessao em qualquer 401 — ver
+  // lib/api.test.ts. Aqui se afirma o que o paciente vê depois do aviso.
+  it('um 401 mostra a caixa e "Entrar novamente" leva ao login com next', async () => {
+    abre('/exame/exame-1')
+    act(() => avisaSessaoExpirada())
+
+    const caixa = screen.getByRole('dialog', { name: 'Sua sessão expirou' })
+    await act(async () => fireEvent.click(within(caixa).getByRole('button', { name: 'Entrar novamente' })))
+
+    expect(caminho()).toBe('/entrar?next=%2Fexame%2Fexame-1')
+    expect(screen.getByRole('heading', { level: 1, name: 'Bem-vindo de volta' })).toBeTruthy()
+
+    // Entrar de novo devolve à tela onde a sessão caiu.
+    act(() => auth.set(SESSAO))
+    expect(caminho()).toBe('/exame/exame-1')
+  })
+
+  it('fechar a caixa (Esc) também leva ao login, em vez de deixar a tela quebrada', async () => {
+    abre('/documentos')
+    act(() => avisaSessaoExpirada())
+    await act(async () => fireEvent.keyDown(window, { key: 'Escape' }))
+    expect(caminho()).toBe('/entrar?next=%2Fdocumentos')
+  })
+
+  it('vários 401 seguidos abrem uma caixa só', () => {
+    abre('/')
+    act(() => {
+      avisaSessaoExpirada()
+      avisaSessaoExpirada()
+    })
+    expect(screen.getAllByRole('dialog', { name: 'Sua sessão expirou' })).toHaveLength(1)
+  })
+})
+
+describe('sem conexão', () => {
+  it('a faixa aparece quando a internet cai e some quando volta', () => {
+    const onLine = vi.spyOn(navigator, 'onLine', 'get')
+    try {
+      abre('/')
+      expect(screen.queryByText(/Você está sem conexão/)).toBeNull()
+
+      onLine.mockReturnValue(false)
+      act(() => {
+        window.dispatchEvent(new Event('offline'))
+      })
+      expect(screen.getByText(/Você está sem conexão/)).toBeTruthy()
+
+      onLine.mockReturnValue(true)
+      act(() => {
+        window.dispatchEvent(new Event('online'))
+      })
+      expect(screen.queryByText(/Você está sem conexão/)).toBeNull()
+    } finally {
+      onLine.mockRestore()
+    }
+  })
+})
+
+describe('avisos', () => {
+  it('avisar() mostra o aviso no shell, que fecha no botão', () => {
+    abre('/')
+    act(() => avisar({ title: 'Documento enviado', tone: 'success' }))
+    expect(screen.getAllByRole('status').some((s) => s.textContent?.includes('Documento enviado'))).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }))
+    expect(screen.queryByText('Documento enviado')).toBeNull()
+  })
+
+  it('aviso de erro é anunciado como alerta', () => {
+    abre('/')
+    act(() => avisar({ title: 'Não foi possível enviar', tone: 'alert' }))
+    expect(screen.getByRole('alert').textContent).toContain('Não foi possível enviar')
   })
 })
 

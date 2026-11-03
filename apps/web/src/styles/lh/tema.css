@@ -38,6 +38,10 @@
   --lh-fab-ink: #fff;
   --lh-shadow-float: 0 8px 24px rgba(11, 26, 51, 0.1);
   --lh-scrim: rgba(11, 26, 51, 0.5);
+  /* Avisos (toasts): azul de ação; erro em tinta. Iguais no claro e no escuro. */
+  --lh-toast: #3a63de;
+  --lh-toast-alerta: #0b1a33;
+  --lh-toast-borda: rgba(255, 255, 255, 0.16);
   /* Tokens do DS reapontados para o tema do portal (os componentes do DS leem
      --action-*, --lab-* e --text-* direto no style inline). */
   --action-primary: #3a63de;
@@ -103,11 +107,14 @@
   font-family: 'DM Sans', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-.lh-v2 a {
+/* `:where(:not(.lh-legado a))`: os links das telas antigas, montadas dentro
+   do shell v2 num invólucro .lh-legado, ficam com o estilo de antes. O :where
+   não soma especificidade. */
+.lh-v2 a:where(:not(.lh-legado a)) {
   color: var(--lh-link);
   text-decoration: none;
 }
-.lh-v2 a:hover {
+.lh-v2 a:where(:not(.lh-legado a)):hover {
   color: var(--lh-action-hover);
   text-decoration: underline;
 }
@@ -117,6 +124,13 @@
 .lh-v2 :focus-visible {
   outline: 2px solid var(--lh-brand);
   outline-offset: 2px;
+}
+
+/* Tela antiga montada dentro do shell v2 (ver App.tsx, TELAS_V2): volta a
+   fonte de título antiga. Fonte do texto, cor e suavização vêm das utilities
+   no próprio invólucro (font-sans, text-slate-900/dark:text-gray-100). */
+.lh-legado {
+  --lh-font-display: 'Plus Jakarta Sans', Inter, sans-serif;
 }
 
 /* ---- Peças e assinaturas visuais ---------------------------------------- */
@@ -178,11 +192,17 @@
     background 120ms,
     color 120ms;
 }
-.lh-nav:hover {
+.lh-v2 a.lh-nav {
+  color: var(--lh-muted);
+  text-decoration: none;
+}
+.lh-nav:hover,
+.lh-v2 a.lh-nav:hover {
   background: var(--lh-tint);
   color: var(--lh-ink);
 }
-.lh-nav.is-active {
+.lh-nav.is-active,
+.lh-v2 a.lh-nav.is-active {
   background: var(--lh-subtle);
   color: var(--lh-ink);
   font-weight: 600;
@@ -434,11 +454,11 @@
   background: #1c3c6b;
   color: #fff;
 }
-.dark .lh-v2 [role='checkbox'][aria-checked='false'],
-.dark .lh-v2 [role='radio'] {
+.dark .lh-v2 [role='checkbox'][aria-checked='false']:where(:not(.lh-legado *)),
+.dark .lh-v2 [role='radio']:where(:not(.lh-legado *)) {
   background: transparent !important;
 }
-.dark .lh-v2 [role='tab'][aria-selected='true'] {
+.dark .lh-v2 [role='tab'][aria-selected='true']:where(:not(.lh-legado *)) {
   background: var(--lh-card) !important;
 }
 

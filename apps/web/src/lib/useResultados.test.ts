@@ -5,7 +5,7 @@ import type { Laudo, RespostaLaudos, Resultado } from '@lab-hub/shared'
 // Testes do cache de módulo que serve a tela de Resultados.
 //
 // O estado (`estado`, `buscadoEm`, `buscando`) vive em variáveis de MÓDULO,
-// compartilhadas por ResultsPage, HomePage, TopbarSearch e Sidebar. Isso é o que
+// compartilhadas por ResultsPage, HomePage e a busca e o menu do shell. Isso é o que
 // faz a lista aparecer instantânea ao trocar de tela — e é também o que
 // transforma um bug de limpeza em vazamento de dado clínico entre pacientes.
 // Daí o `resetModules` a cada teste: sem ele um teste herdaria a lista do

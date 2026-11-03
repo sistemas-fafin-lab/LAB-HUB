@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Topbar }      from './components/layout/Topbar'
-import { Sidebar }     from './components/layout/Sidebar'
-import { SupportDock } from './components/layout/SupportDock'
+import { Shell }       from './components/shell/Shell'
+import { itemDaRota }  from './components/shell/menu'
 import { HomePage }        from './pages/HomePage'
 import { ResultsPage }     from './pages/ResultsPage'
 import { ExamDetailPage }  from './pages/ExamDetailPage'
@@ -17,8 +16,7 @@ import { NotFoundPage }    from './pages/NotFoundPage'
 import { useAuth }         from './lib/AuthContext'
 import { usePaciente }     from './lib/usePaciente'
 import { useResultados }   from './lib/useResultados'
-import { iniciais, primeiroNome } from './lib/paciente'
-import { MOSTRAR_CHATBOT, rotaOculta } from './lib/flags'
+import { rotaOculta } from './lib/flags'
 import { track, trackPageview } from './lib/analytics'
 import type { TelaPageview } from './lib/analytics'
 import { Redireciona, navegar, useInterceptaLinks, useLocal } from './lib/router'
@@ -34,8 +32,8 @@ import {
   caminhoDoLaudo,
   resolveRota,
 } from './lib/rotas'
+import type { Rota } from './lib/rotas'
 import { lerTema, salvarTema } from './lib/tema'
-import type { AppRoute } from './components/layout/Topbar'
 import type { Exam } from './components/shared/WebHero'
 
 // Logout feito nesta aba. Enquanto vale, a entrada não guarda `next`: o
@@ -43,6 +41,21 @@ import type { Exam } from './components/shared/WebHero'
 // (talvez outra pessoa) não deve cair nelas. Sessão que expira sozinha não
 // marca isto — aí voltar à tela após o login é justamente o desejado.
 let saiuNestaAba = false
+
+/**
+ * Entrada para quem está sem sessão em `rota`: com `next` para voltar a ela
+ * depois do login — menos da Visão geral (é o destino padrão) e depois de um
+ * logout nesta aba (ver `saiuNestaAba`).
+ */
+function entradaPara(rota: string): string {
+  const semNext = rota === CAMINHO_DA_TELA.home || saiuNestaAba
+  return semNext ? CAMINHO_ENTRAR : `${CAMINHO_ENTRAR}?next=${encodeURIComponent(rota)}`
+}
+
+// Telas já no visual novo: montadas direto na raiz `.lh-v2` do shell. As
+// demais ganham o invólucro `.lh-legado`, que devolve a fonte, a cor e os links
+// do visual antigo (ver styles/lh/tema.css). Cada PR de tela entra aqui.
+const TELAS_V2: ReadonlySet<Rota['tela']> = new Set()
 
 // ---------------------------------------------------------------------------
 // App — porta de autenticação sobre a URL. Sem sessão, qualquer rota vai para
@@ -67,10 +80,7 @@ export function App() {
   const naEntrada = ehEntrada(local.pathname)
   if (session === null) {
     if (naEntrada) return <AuthGate />
-    const rota = local.pathname + local.search
-    const semNext = rota === CAMINHO_DA_TELA.home || saiuNestaAba
-    const destino = semNext ? CAMINHO_ENTRAR : `${CAMINHO_ENTRAR}?next=${encodeURIComponent(rota)}`
-    return <Redireciona para={destino} />
+    return <Redireciona para={entradaPara(local.pathname + local.search)} />
   }
   if (naEntrada) {
     const next = new URLSearchParams(local.search).get('next')
@@ -86,7 +96,18 @@ export function App() {
     navegar(CAMINHO_ENTRAR, { substituir: true })
   }
 
-  return <AuthedApp local={local} onLogout={handleLogout} />
+  // Sessão recusada pela API (401): sai SEM marcar `saiuNestaAba`, para o
+  // login devolver o paciente à tela onde a sessão caiu.
+  const handleSessaoExpirada = async () => {
+    const destino = entradaPara(local.pathname + local.search)
+    try {
+      await signOut()
+    } finally {
+      navegar(destino, { substituir: true })
+    }
+  }
+
+  return <AuthedApp local={local} onLogout={handleLogout} onSessaoExpirada={handleSessaoExpirada} />
 }
 
 // ---------------------------------------------------------------------------
@@ -97,9 +118,10 @@ export function App() {
 interface AuthedAppProps {
   local: Local
   onLogout: () => void | Promise<void>
+  onSessaoExpirada: () => void | Promise<void>
 }
 
-function AuthedApp({ local, onLogout }: AuthedAppProps) {
+function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   const { paciente, setPaciente } = usePaciente()
   const { exams, loading: carregandoExames } = useResultados()
   const [dark, setDark] = useState(lerTema)
@@ -112,14 +134,12 @@ function AuthedApp({ local, onLogout }: AuthedAppProps) {
   // some junto com o shell no logout.
   const examesAbertos = useRef(new Map<string, Exam>())
 
-  const handleNav = (id: AppRoute) => navegar(CAMINHO_DA_TELA[id])
-
   const handleOpenExam = (exam: Exam) => {
     examesAbertos.current.set(exam.id, exam)
     navegar(caminhoDoExame(exam.id))
   }
 
-  // Ponto único do tema: o botão da Topbar e as opções em Configurações passam
+  // Ponto único do tema: o botão do cabeçalho e as opções em Configurações passam
   // por aqui, então um só track() cobre os dois. Fora do updater do setState —
   // em <StrictMode> o updater roda duas vezes e duplicaria o evento.
   const handleSetDark = (next: boolean) => {
@@ -171,7 +191,6 @@ function AuthedApp({ local, onLogout }: AuthedAppProps) {
   // Route → page
   // ---------------------------------------------------------------------------
   let content: React.ReactNode
-  const telaDoMenu: AppRoute | null = rota.tela === 'nao-encontrada' ? null : rota.tela
 
   if (redireciona !== null) {
     content = <Redireciona para={redireciona} />
@@ -241,29 +260,26 @@ function AuthedApp({ local, onLogout }: AuthedAppProps) {
   // ---------------------------------------------------------------------------
   // Shell layout
   // ---------------------------------------------------------------------------
+  // A animação de entrada reinicia por TELA, não por URL: trocar de aba em
+  // Agendas/Coletas não pode desmontar a tela (e perder o agendamento em curso).
+  const chaveDaPagina = rota.tela + (idExame !== null ? `:${idExame}` : '')
   return (
-    <div
-      className={`min-h-screen w-full ${dark ? 'bg-gray-950 text-gray-100' : 'bg-slate-50 text-slate-900'}`}
-      data-screen-label="01 Lab Hub Web"
+    <Shell
+      nome={nome}
+      ativo={itemDaRota(rota)}
+      href={href}
+      chaveDaPagina={chaveDaPagina}
+      dark={dark}
+      onToggleDark={() => handleSetDark(!dark)}
+      onOpenExam={handleOpenExam}
+      onLogout={onLogout}
+      onSessaoExpirada={onSessaoExpirada}
     >
-      <Topbar
-        nome={nome}
-        iniciais={iniciais(nome)}
-        dark={dark}
-        onToggleDark={() => handleSetDark(!dark)}
-        onOpenExam={handleOpenExam}
-        onNav={handleNav}
-      />
-      <div className="flex">
-        <Sidebar route={telaDoMenu} onNav={handleNav} dark={dark} />
-        <main className="flex-1 min-w-0 p-4 md:p-6 lg:p-8">
-          <div className="max-w-7xl mx-auto">
-            {content}
-          </div>
-        </main>
-      </div>
-      {/* Chatbot "Lia" — oculto por flag; sem backend de suporte ainda. */}
-      {MOSTRAR_CHATBOT && <SupportDock dark={dark} primeiroNome={primeiroNome(nome)} />}
-    </div>
+      {TELAS_V2.has(rota.tela) ? (
+        content
+      ) : (
+        <div className="lh-legado font-sans subpixel-antialiased text-slate-900 dark:text-gray-100">{content}</div>
+      )}
+    </Shell>
   )
 }

@@ -1,5 +1,6 @@
 import type { AdminConsultaResultadosResposta, DocumentoUrl } from '@lab-hub/shared'
 import { supabase } from './supabase'
+import { avisaSessaoExpirada } from './sessao'
 
 // Cliente HTTP da API (apps/api). Anexa o JWT do Supabase em cada request.
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3333'
@@ -49,6 +50,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!res.ok) {
+    // 401 = token ausente, vencido ou revogado: o shell mostra a caixa de
+    // sessão expirada. 403 fica de fora — é falta de permissão (ex.: consulta
+    // administrativa por CPF), não sessão vencida.
+    if (res.status === 401) avisaSessaoExpirada()
     let detail = ''
     try {
       const body = (await res.json()) as { message?: string }
