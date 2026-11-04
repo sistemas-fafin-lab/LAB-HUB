@@ -1,5 +1,6 @@
 import type { Laudo, Resultado } from '@lab-hub/shared'
 import type { Exam } from './exame'
+import { nomeDoExame } from './nomeDoExame'
 
 // As duas fontes de resultado do LAB-HUB convergem aqui para o mesmo `Exam`:
 //   Resultado → o que o FlowLab EMPURRA pelo webhook (tabela `resultados`)
@@ -54,7 +55,7 @@ export function resultadoToExam(r: Resultado): Exam {
 
   return {
     id: r.id,
-    name: r.exameNome,
+    name: nomeDoExame(r.exameNome),
     category: r.categoria ?? PLACEHOLDER,
     date: liberado ? shortDate.format(liberado) : PLACEHOLDER,
     fullDate: liberado ? longDate.format(liberado) : PLACEHOLDER,
@@ -99,7 +100,7 @@ export function laudoToExam(l: Laudo): Exam {
   const totalExames = totalExamesDoPedido(l)
   return {
     id: l.id,
-    name: l.name,
+    name: nomeDoExame(l.name),
     category: l.category,
     // O Laudo já vem com as datas formatadas em pt-BR pela API (o mapeamento
     // acontece lá porque os LIS mandam formatos diferentes entre si).

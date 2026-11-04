@@ -219,7 +219,8 @@ describe('todos os campos no papel', () => {
       'Liberação28 de julho de 2026',
       'Laboratório executorLaboratório Central',
       'Data da geração',
-      'COLPOCITOLOGIA ONCÓTICA',
+      // O LIS manda em maiúsculas; o laudo mostra como as outras telas.
+      'Colpocitologia oncótica',
       'Material: Citologia em Meio Líquido',
       'Método: Papanicolaou',
       'Observações do laboratório',
