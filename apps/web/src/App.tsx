@@ -57,7 +57,7 @@ function entradaPara(rota: string): string {
 // Telas já no visual novo: montadas direto na raiz `.lh-v2` do shell. As
 // demais ganham o invólucro `.lh-legado`, que devolve a fonte, a cor e os links
 // do visual antigo (ver styles/lh/tema.css). Cada PR de tela entra aqui.
-const TELAS_V2: ReadonlySet<Rota['tela']> = new Set(['home', 'results', 'exam'])
+const TELAS_V2: ReadonlySet<Rota['tela']> = new Set(['home', 'results', 'exam', 'laudo'])
 
 // ---------------------------------------------------------------------------
 // App — porta de autenticação sobre a URL. Sem sessão, qualquer rota vai para
@@ -217,7 +217,7 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
       )
     } else if (rota.tela === 'laudo') {
       // Voltar do laudo retorna ao detalhe do exame (um nível acima), não à lista.
-      content = <LaudoPage exam={exam} onBack={() => navegar(caminhoDoExame(exam.id))} dark={dark} />
+      content = <LaudoPage exam={exam} onBack={() => navegar(caminhoDoExame(exam.id))} />
     } else {
       content = (
         <ExamDetailPage

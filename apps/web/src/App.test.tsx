@@ -175,7 +175,7 @@ describe('rotas com parâmetro', () => {
 
   it('/laudo/:id abre o laudo daquele exame, com o voltar para o detalhe', () => {
     abre('/laudo/exame-1')
-    fireEvent.click(screen.getByRole('button', { name: /^Voltar$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Exame' }))
     expect(caminho()).toBe('/exame/exame-1')
     expect(screen.getByRole('heading', { level: 1, name: 'Hemograma completo' })).toBeTruthy()
   })
