@@ -1,6 +1,7 @@
 import { WIcon } from '../primitives/WIcon'
 import { WStatus } from '../primitives/WStatus'
 import type { Exam } from './WebHero'
+import { contextoDoExame, responsavelDoExame } from '../../lib/exibicaoExame'
 
 interface ExamRowProps {
   exam: Exam
@@ -8,30 +9,10 @@ interface ExamRowProps {
   dark: boolean
 }
 
-const PLACEHOLDER = '—'
-
-/**
- * Linha da lista de resultados.
- *
- * A data exibida é a da COLETA, a mesma chave por que a lista é ordenada
- * (useResultados). Antes vinha `exam.date`, que é a emissão: uma lista ordenada
- * por coleta mostrando a emissão parece embaralhada para quem lê (um exame com
- * "27 Jul" acima de outro com "28 Jul"). O rótulo "Coleta" tira a ambiguidade,
- * já que agora as duas datas aparecem separadas no laudo.
- */
+/** Linha da lista de resultados. A data e o responsável: ver lib/exibicaoExame. */
 export function ExamRow({ exam, onClick, dark }: ExamRowProps) {
-  const unidade = exam.unit && exam.unit !== PLACEHOLDER ? exam.unit : null
-  const data = exam.dataColetaCurta ? `Coleta ${exam.dataColetaCurta}` : exam.date
-  const contexto = [unidade, data].filter(Boolean).join(' · ')
-
-  // Pedido consolidado não tem médico único — a contagem de exames é mais útil
-  // que um travessão, que parecia um resultado vazio.
-  const responsavel =
-    exam.doctor === PLACEHOLDER && exam.totalExames
-      ? `${exam.totalExames} ${exam.totalExames === 1 ? 'exame' : 'exames'}`
-      : exam.doctor !== PLACEHOLDER
-        ? exam.doctor
-        : null
+  const contexto = contextoDoExame(exam)
+  const responsavel = responsavelDoExame(exam)
 
   return (
     <button

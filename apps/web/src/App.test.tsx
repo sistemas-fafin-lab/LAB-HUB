@@ -153,7 +153,7 @@ beforeEach(() => {
 
 describe('cada tela abre pela própria URL', () => {
   it.each([
-    ['/', 'Que bom te ver de volta.'],
+    ['/', 'Que bom te ver de volta'],
     ['/resultados', 'Seus resultados'],
     ['/agendar', 'Agendas/Coletas'],
     ['/coletas', 'Agendas/Coletas'],
@@ -275,7 +275,7 @@ describe('navegação e histórico do navegador', () => {
   it('rota oculta por flag cai na Visão geral', () => {
     abre('/tendencias') // MOSTRAR_TENDENCIAS = false
     expect(caminho()).toBe('/')
-    expect(screen.getByRole('heading', { level: 1, name: 'Que bom te ver de volta.' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: 'Que bom te ver de volta' })).toBeTruthy()
   })
 })
 
@@ -432,7 +432,37 @@ describe('rota desconhecida', () => {
 
     fireEvent.click(screen.getByRole('link', { name: /Voltar para a visão geral/ }))
     expect(caminho()).toBe('/')
-    expect(screen.getByRole('heading', { level: 1, name: 'Que bom te ver de volta.' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: 'Que bom te ver de volta' })).toBeTruthy()
+  })
+})
+
+describe('Visão geral', () => {
+  it.each([
+    ['Agendar coleta', '/agendar'],
+    ['Minhas coletas', '/coletas'],
+  ])('"%s" leva a %s', (botao, destino) => {
+    agendamentos.lista = []
+    abre('/')
+    // Sem exames nem coletas, "Agendar coleta" aparece no convite e no cartão.
+    fireEvent.click(screen.getAllByRole('button', { name: botao })[0] as HTMLElement)
+    expect(caminho()).toBe(destino)
+  })
+
+  it('o passo da próxima coleta abre /coleta/:id', () => {
+    agendamentos.lista = [
+      {
+        id: 'coleta-7',
+        pacienteId: 'p',
+        postoFlowlabId: 'x',
+        postoNome: 'Unidade Asa Norte',
+        dataHora: new Date(Date.now() + 86_400_000).toISOString(),
+        status: 'confirmado',
+        criadoEm: new Date().toISOString(),
+      },
+    ]
+    abre('/')
+    fireEvent.click(screen.getByRole('button', { name: 'Ver' }))
+    expect(caminho()).toBe('/coleta/coleta-7')
   })
 })
 
