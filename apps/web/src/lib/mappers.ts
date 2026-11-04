@@ -1,6 +1,7 @@
 import type { Laudo, Resultado } from '@lab-hub/shared'
 import type { Exam } from './exame'
 import { nomeDoExame } from './nomeDoExame'
+import { formatador } from './regiao'
 
 // As duas fontes de resultado do LAB-HUB convergem aqui para o mesmo `Exam`:
 //   Resultado → o que o FlowLab EMPURRA pelo webhook (tabela `resultados`)
@@ -11,16 +12,9 @@ import { nomeDoExame } from './nomeDoExame'
 // virem do snapshot do agendamento/laudo.
 const PLACEHOLDER = '—'
 
-const shortDate = new Intl.DateTimeFormat('pt-BR', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-})
-const longDate = new Intl.DateTimeFormat('pt-BR', {
-  day: '2-digit',
-  month: 'long',
-  year: 'numeric',
-})
+// Instantes (liberação) no fuso escolhido nas Configurações.
+const shortDate = { format: (d: Date) => formatador({ day: '2-digit', month: 'short', year: 'numeric' }).format(d) }
+const longDate = { format: (d: Date) => formatador({ day: '2-digit', month: 'long', year: 'numeric' }).format(d) }
 
 const MESES = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',

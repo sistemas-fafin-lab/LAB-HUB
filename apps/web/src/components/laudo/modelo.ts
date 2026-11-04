@@ -10,6 +10,7 @@ import type { Paciente } from '@lab-hub/shared'
 import type { Exam } from '../../lib/exame'
 import { isLaudoEmSecoes } from '../shared/LaudoSecoes'
 import { formatarCpf, formatarData } from '../../lib/validators'
+import { partesNoFuso } from '../../lib/regiao'
 
 // '—' é o placeholder que os mappers usam para campo ausente. Num documento
 // impresso ele não vale nada: a folha omite a linha inteira.
@@ -228,9 +229,10 @@ export function idadePorExtenso(nascimentoIso: string, hoje = new Date()): strin
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(nascimentoIso)
   if (!m) return undefined
 
-  let anos = hoje.getFullYear() - Number(m[1])
-  let meses = hoje.getMonth() + 1 - Number(m[2])
-  if (hoje.getDate() < Number(m[3])) meses -= 1
+  const agora = partesNoFuso(hoje)
+  let anos = agora.ano - Number(m[1])
+  let meses = agora.mes - Number(m[2])
+  if (agora.dia < Number(m[3])) meses -= 1
   if (meses < 0) {
     meses += 12
     anos -= 1
@@ -253,7 +255,8 @@ const MESES = [
 
 /** Data de HOJE por extenso — "gerado em" é sobre esta cópia, não sobre o exame. */
 export function hojePorExtenso(hoje = new Date()): string {
-  return `${String(hoje.getDate()).padStart(2, '0')} de ${MESES[hoje.getMonth()]} de ${hoje.getFullYear()}`
+  const { ano, mes, dia } = partesNoFuso(hoje)
+  return `${String(dia).padStart(2, '0')} de ${MESES[mes - 1]} de ${ano}`
 }
 
 function grupoDe(nome: string | null, panels: Exam['panels']): GrupoLaudo {

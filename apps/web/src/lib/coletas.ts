@@ -1,6 +1,7 @@
 import type { Agendamento, AgendamentoStatus } from '@lab-hub/shared'
 import type { PillTone } from '../components/portal'
 import { formatDia } from './datetime'
+import { diaNoFuso } from './regiao'
 
 // ---------------------------------------------------------------------------
 // Regras das coletas no portal: o que cada status significa para o paciente e
@@ -108,7 +109,8 @@ export function diasDeColeta(slots: readonly string[]): DiaDeColeta[] {
   const porDia = new Map<string, { date: Date; livres: Map<number, string> }>()
   for (const iso of slots) {
     const date = new Date(iso)
-    const key = date.toDateString()
+    // Agrupa pelo dia no fuso escolhido nas Configurações.
+    const key = String(diaNoFuso(date))
     const dia = porDia.get(key) ?? { date, livres: new Map<number, string>() }
     if (date < dia.date) dia.date = date
     dia.livres.set(date.getTime(), iso)

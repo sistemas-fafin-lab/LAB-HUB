@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { SettingsPage } from './SettingsPage'
+import { fusoAtual, salvarFuso } from '../lib/regiao'
 
 const UA_CHROME_WINDOWS =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
@@ -15,7 +16,21 @@ function renderiza(dark = false) {
 
 const painel = (titulo: string) => screen.getByRole('region', { name: titulo })
 
-afterEach(() => vi.unstubAllGlobals())
+function armazenamentoEmMemoria() {
+  // O localStorage do jsdom fica encoberto pelo do Node; um em memória basta.
+  const dados = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => dados.get(k) ?? null,
+    setItem: (k: string, v: string) => void dados.set(k, v),
+    removeItem: (k: string) => void dados.delete(k),
+  })
+}
+
+beforeEach(armazenamentoEmMemoria)
+afterEach(() => {
+  salvarFuso('America/Sao_Paulo')
+  vi.unstubAllGlobals()
+})
 
 describe('cabeçalho', () => {
   it('mostra o título e a descrição', () => {
@@ -65,17 +80,37 @@ describe('flags (desligadas)', () => {
   })
 })
 
-describe('sem controles sem backend', () => {
-  it('idioma, fuso e unidades são só leitura', () => {
+describe('idioma e região', () => {
+  const select = (rotulo: string) =>
+    within(painel('Idioma e região')).getByLabelText(rotulo, { selector: 'select' }) as HTMLSelectElement
+  const opcao = (rotulo: string, texto: string) =>
+    within(select(rotulo)).getByRole('option', { name: texto }) as HTMLOptionElement
+
+  it('abre em Português, Brasília e mg/dL', () => {
     renderiza()
-    const regiao = within(painel('Idioma e região'))
-    expect(regiao.getByText('Português (Brasil)')).toBeTruthy()
-    expect(regiao.getByText('Brasília (GMT-3)')).toBeTruthy()
-    expect(regiao.getByText('Convencionais (mg/dL)')).toBeTruthy()
-    expect(regiao.queryByRole('combobox')).toBeNull()
-    expect(regiao.queryByRole('button')).toBeNull()
+    expect(select('Idioma').value).toBe('pt-BR')
+    expect(select('Fuso horário').value).toBe('America/Sao_Paulo')
+    expect(select('Unidades').value).toBe('metric')
   })
 
+  it('troca o fuso horário e guarda a escolha neste aparelho', () => {
+    renderiza()
+    fireEvent.change(select('Fuso horário'), { target: { value: 'America/Manaus' } })
+    expect(select('Fuso horário').value).toBe('America/Manaus')
+    expect(fusoAtual()).toBe('America/Manaus')
+    expect(localStorage.getItem('labhub:fuso')).toBe('America/Manaus')
+    expect(opcao('Fuso horário', 'Fernando de Noronha (GMT-2)').disabled).toBe(false)
+  })
+
+  it('outros idiomas e o sistema internacional aparecem, mas ainda não podem ser escolhidos', () => {
+    renderiza()
+    expect(opcao('Idioma', 'English (em breve)').disabled).toBe(true)
+    expect(opcao('Idioma', 'Español (em breve)').disabled).toBe(true)
+    expect(opcao('Unidades', 'Sistema internacional (mmol/L) (em breve)').disabled).toBe(true)
+  })
+})
+
+describe('sem controles sem backend', () => {
   it('dispositivos lista só este aparelho, pelo navegador, e não oferece sair de outros', () => {
     vi.stubGlobal('navigator', { userAgent: UA_CHROME_WINDOWS })
     renderiza()

@@ -62,7 +62,7 @@ export function Select({ label, ariaLabel, options, value, defaultValue, onChang
             </option>
           )}
           {options.map((o) => (
-            <option key={o.value} value={o.value}>
+            <option key={o.value} value={o.value} disabled={o.disabled}>
               {o.label}
             </option>
           ))}

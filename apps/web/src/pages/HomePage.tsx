@@ -15,11 +15,12 @@ import {
   rotaOculta,
 } from '../lib/flags'
 import { primeiroNome } from '../lib/paciente'
+import { partesNoFuso } from '../lib/regiao'
 import { useAgendamentos } from '../lib/useAgendamentos'
 import { atualizaResultados, useResultados } from '../lib/useResultados'
 
 function saudacao(agora: Date): string {
-  const hora = agora.getHours()
+  const { hora } = partesNoFuso(agora)
   return hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite'
 }
 

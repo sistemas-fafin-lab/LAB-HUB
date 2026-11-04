@@ -6,6 +6,8 @@ const PROXIMA: Record<string, 1 | -1> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: 
 export interface OpcaoDS {
   value: string
   label: string
+  /** Só no Select: opção visível que ainda não pode ser escolhida. */
+  disabled?: boolean
 }
 
 export interface RadioProps {

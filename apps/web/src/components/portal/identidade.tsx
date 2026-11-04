@@ -1,5 +1,6 @@
 import type { IconName } from '../../ds'
 import { Ico } from './controles'
+import { partesNoFuso } from '../../lib/regiao'
 
 export type AvatarTone = 'brand' | 'navy' | 'gray'
 
@@ -40,18 +41,19 @@ export function IconTile({ name, size = 36, tone = 'subtle' }: { name: IconName;
 const SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'] as const
 const MES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'] as const
 
-/** Bloco de data (dia da semana, dia, mês) da próxima coleta. Data no fuso local. */
+/** Bloco de data (dia da semana, dia, mês) da próxima coleta, no fuso escolhido. */
 export function DateBlock({ date, size = 56 }: { date: Date; size?: number }) {
+  const { diaSemana, dia, mes } = partesNoFuso(date)
   return (
     <span
       className="inline-flex flex-col items-center justify-center shrink-0 text-white bg-action"
       style={{ width: size, height: size, borderRadius: '15%' }}
     >
-      <span className="text-[10px] font-semibold uppercase tracking-[.06em] leading-none">{SEMANA[date.getDay()]}</span>
+      <span className="text-[10px] font-semibold uppercase tracking-[.06em] leading-none">{SEMANA[diaSemana]}</span>
       <span className="font-display font-medium leading-none my-1" style={{ fontSize: Math.round(size * 0.4) }}>
-        {date.getDate()}
+        {dia}
       </span>
-      <span className="text-[10px] leading-none">{MES[date.getMonth()]}</span>
+      <span className="text-[10px] leading-none">{MES[mes - 1]}</span>
     </span>
   )
 }

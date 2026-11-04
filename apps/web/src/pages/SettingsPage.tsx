@@ -2,9 +2,10 @@ import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as DS from '../ds'
 import type { IconName } from '../ds'
-import { Btn, IconTile, Ico, PageHeader, Panel, PanelHead, Pill } from '../components/portal'
+import { Btn, IconTile, Ico, PageHeader, Panel, PanelHead, Pill, SelectField } from '../components/portal'
 import type { IconTileTone } from '../components/portal'
 import { MOSTRAR_NOVIDADES, MOSTRAR_PRIVACIDADE_EXTRAS } from '../lib/flags'
+import { FUSOS, IDIOMAS, UNIDADES, salvarFuso, useFuso } from '../lib/regiao'
 
 interface SettingsPageProps {
   dark: boolean
@@ -105,16 +106,10 @@ const TEMAS = [
   { escuro: true, rotulo: 'Escuro', page: '#0b1a33', card: '#1c3c6b' },
 ] as const
 
-// Só leitura: idioma, fuso e unidades ainda não mudam nada no portal.
-const REGIAO = [
-  { rotulo: 'Idioma', valor: 'Português (Brasil)' },
-  { rotulo: 'Fuso horário', valor: 'Brasília (GMT-3)' },
-  { rotulo: 'Unidades', valor: 'Convencionais (mg/dL)' },
-] as const
-
 export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
   const [pref, setPref] = useState<Prefs>(PREFS_INICIAIS)
   const aparelho = aparelhoAtual()
+  const fuso = useFuso()
 
   const alternar = (k: keyof Prefs, titulo: string) => (
     <DS.Switch label={titulo} checked={pref[k]} onChange={(v) => setPref((p) => ({ ...p, [k]: v }))} />
@@ -197,14 +192,20 @@ export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
           </Secao>
 
           <Secao titulo="Idioma e região">
-            <dl className="flex flex-col gap-2 mt-1">
-              {REGIAO.map((r) => (
-                <div key={r.rotulo} className="flex items-center justify-between gap-3 p-3 rounded-[12px] bg-subtle">
-                  <dt className="text-[14px]">{r.rotulo}</dt>
-                  <dd className="text-[14px] font-semibold text-right">{r.valor}</dd>
-                </div>
-              ))}
-            </dl>
+            {/* Só o fuso muda o portal; idioma e unidades têm uma opção ativa (lib/regiao). */}
+            <div className="flex flex-col gap-3">
+              <SelectField label="Idioma" options={IDIOMAS} value="pt-BR" />
+              <SelectField
+                label="Fuso horário"
+                options={FUSOS}
+                value={fuso}
+                onChange={(v) => {
+                  const escolhido = FUSOS.find((f) => f.value === v)
+                  if (escolhido) salvarFuso(escolhido.value)
+                }}
+              />
+              <SelectField label="Unidades" options={UNIDADES} value="metric" />
+            </div>
           </Secao>
 
           <Secao titulo="Dispositivos conectados">

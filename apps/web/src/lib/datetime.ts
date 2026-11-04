@@ -1,38 +1,33 @@
-// Formatters de data/hora pt-BR reutilizados nas telas de Coletas.
+// Formatters de data/hora pt-BR reutilizados nas telas de Coletas. Todos
+// seguem o fuso escolhido nas Configurações (lib/regiao), não o do aparelho.
+import { diaNoFuso, formatador } from './regiao'
 
 /** Ex.: "07:00" */
-export const timeFmt = new Intl.DateTimeFormat('pt-BR', {
-  hour: '2-digit',
-  minute: '2-digit',
-})
+export const timeFmt = { format: (d: Date) => formatador({ hour: '2-digit', minute: '2-digit' }).format(d) }
 
 // Formatter base por extenso: "terça-feira, 30 de junho".
-const diaFmt = new Intl.DateTimeFormat('pt-BR', {
-  weekday: 'long',
-  day: '2-digit',
-  month: 'long',
-})
+const diaFmt = () => formatador({ weekday: 'long', day: '2-digit', month: 'long' })
 
 /** Ex.: "terça, 30 de junho" — remove o sufixo "-feira" dos dias úteis. */
 export function formatDia(date: Date): string {
-  return diaFmt.format(date).replace('-feira', '')
+  return diaFmt().format(date).replace('-feira', '')
 }
 
-const diaSemanaCurtoFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'short' })
+const diaSemanaCurtoFmt = () => formatador({ weekday: 'short' })
 
 /** Ex.: "TER" — dia da semana abreviado, em maiúsculas (p/ pílulas de dia). */
 export function formatDiaSemanaCurto(date: Date): string {
-  return diaSemanaCurtoFmt.format(date).replace('.', '').toUpperCase()
+  return diaSemanaCurtoFmt().format(date).replace('.', '').toUpperCase()
 }
 
 /** Ex.: "30" — número do dia com dois dígitos. */
-export const dayNumFmt = new Intl.DateTimeFormat('pt-BR', { day: '2-digit' })
+export const dayNumFmt = { format: (d: Date) => formatador({ day: '2-digit' }).format(d) }
 
-const mesCurtoFmt = new Intl.DateTimeFormat('pt-BR', { month: 'short' })
+const mesCurtoFmt = () => formatador({ month: 'short' })
 
 /** Ex.: "jun" — mês abreviado, sem ponto. */
 export function formatMesCurto(date: Date): string {
-  return mesCurtoFmt.format(date).replace('.', '')
+  return mesCurtoFmt().format(date).replace('.', '')
 }
 
 /** Ex.: "terça, 30 de junho às 07:00" — usado na lista de agendamentos. */
@@ -44,9 +39,8 @@ export function formatDataHora(iso: string): string {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 // "Hoje"/"Ontem"/"Amanhã" quando a data cai perto de hoje; senão null.
-export function relDia(d: Date): string | null {
-  const dia = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-  const delta = Math.round((dia(d) - dia(new Date())) / 86_400_000)
+export function relDia(d: Date, agora = new Date()): string | null {
+  const delta = diaNoFuso(d) - diaNoFuso(agora)
   return delta === 0 ? 'Hoje' : delta === -1 ? 'Ontem' : delta === 1 ? 'Amanhã' : null
 }
 

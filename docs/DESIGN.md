@@ -14,6 +14,7 @@ Referência visual aprovada: [`docs/prototipo-v2.html`](prototipo-v2.html) (dado
 | Fontes: Ranade (títulos, `font-display`, pesos 300/400/500/700, sem itálico) e DM Sans variável (texto, `font-sans`, peso 300–700, itálico e tamanho óptico automático), ambas em `public/fonts`. Gerado por `aplicar-fontes.mjs` (pacote do Claude Design): não edite à mão | `styles/fonts.css` |
 | Telas de sistema (404, erro, sem conexão, manutenção) o limite de erro, a splash de abertura e a tela de transição (`Transicoes.tsx`) | `apps/web/src/components/sistema/` |
 | Tela de transição em curso (`comTransicao(texto, operação)` em volta do login, cadastro e saída) | `apps/web/src/lib/transicao.ts` |
+| Fuso horário escolhido nas Configurações; datas e horas formatadas nele (`formatador`, `partesNoFuso`) — não use `new Intl.DateTimeFormat`/`getHours()` direto | `apps/web/src/lib/regiao.ts` |
 | Tipos do exame consumidos pelas telas | `apps/web/src/lib/exame.ts` |
 | Componentes do LAB DS (Button, IconButton, Input, Select, Checkbox, Radio, Switch, Tabs, Tag, Badge, Card, Dialog, Toast, Tooltip, Grafismo) | `apps/web/src/ds/` |
 | Ícones (Lucide, substituto da família própria da marca) | `ds/Icon.tsx` → registro único `components/icones/registro.ts` |
