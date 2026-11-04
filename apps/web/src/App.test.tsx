@@ -313,7 +313,6 @@ describe('navegação e histórico do navegador', () => {
   it('o menu esconde as telas ocultas por flag', () => {
     abre('/')
     const menu = screen.getByRole('navigation', { name: 'Navegação principal' })
-    expect(within(menu).queryByRole('link', { name: 'Tendências' })).toBeNull() // MOSTRAR_TENDENCIAS = false
     expect(within(menu).queryByRole('link', { name: 'Faturamento' })).toBeNull() // MOSTRAR_FATURAMENTO = false
   })
 
@@ -331,7 +330,7 @@ describe('navegação e histórico do navegador', () => {
   })
 
   it('rota oculta por flag cai na Visão geral', () => {
-    abre('/tendencias') // MOSTRAR_TENDENCIAS = false
+    abre('/faturamento') // MOSTRAR_FATURAMENTO = false
     expect(caminho()).toBe('/')
     expect(screen.getByRole('heading', { level: 1, name: 'Que bom te ver de volta' })).toBeTruthy()
   })
@@ -633,7 +632,7 @@ describe('pageview', () => {
   })
 
   it('redirecionamento registra só o destino', () => {
-    abre('/tendencias')
+    abre('/faturamento')
     expect(trackPageview.mock.calls).toEqual([['home']])
   })
 

@@ -1,67 +1,18 @@
 import { useId } from 'react'
 import type { IconName } from '../ds'
-import { PageHeader, Panel, Pill, TrendLine } from '../components/portal'
-import type { PillTone } from '../components/portal'
+import { Btn, EmptyState, FalhaAoCarregar, PageHeader, Panel, Pill, Skel, TrendLine } from '../components/portal'
+import type { Exam } from '../lib/exame'
+import { resumoDasTendencias, tendenciasDosExames } from '../lib/tendencias'
+import type { Direcao, Tendencia } from '../lib/tendencias'
+import { atualizaResultados, useResultados } from '../lib/useResultados'
 
-// Conteúdo estático, o mesmo de hoje: a tela continua atrás de
-// MOSTRAR_TENDENCIAS até existir uma fonte de dados real para os marcadores.
+// Tendências montadas dos resultados reais do paciente (lib/tendencias): um
+// marcador aparece a partir de duas coletas com valor numérico.
 
-type Direcao = 'up' | 'down' | 'flat'
-
-interface TendenciaDoMarcador {
-  marcador: string
-  valor: string
-  unidade: string
-  variacao: string
-  /** accent = precisa de atenção; brand = dentro da referência, com melhora; neutral = estável */
-  tom: PillTone
-  direcao: Direcao
-  nota: string
-  serie: number[]
+interface TrendsPageProps {
+  onOpenExam: (exam: Exam) => void
+  onVerResultados: () => void
 }
-
-const TENDENCIAS: TendenciaDoMarcador[] = [
-  {
-    marcador: 'Colesterol LDL',
-    valor: '138',
-    unidade: 'mg/dL',
-    variacao: '+12 nos últimos 6 meses',
-    tom: 'accent',
-    direcao: 'up',
-    nota: 'Está acima do valor recomendado (até 130 mg/dL). Vale conversar com seu médico sobre alimentação e atividade física.',
-    serie: [108, 115, 120, 124, 130, 138],
-  },
-  {
-    marcador: 'Vitamina D',
-    valor: '42',
-    unidade: 'ng/mL',
-    variacao: '+18 desde a suplementação',
-    tom: 'brand',
-    direcao: 'up',
-    nota: 'Excelente resposta à suplementação iniciada em fevereiro. Você está dentro da faixa ideal (30–60).',
-    serie: [22, 24, 28, 33, 38, 42],
-  },
-  {
-    marcador: 'Glicemia em jejum',
-    valor: '92',
-    unidade: 'mg/dL',
-    variacao: 'Estável há 3 coletas',
-    tom: 'neutral',
-    direcao: 'flat',
-    nota: 'Tudo certo por aqui. Continue mantendo a rotina de exames anuais.',
-    serie: [91, 93, 92, 91, 92, 92],
-  },
-  {
-    marcador: 'Hemoglobina',
-    valor: '14,2',
-    unidade: 'g/dL',
-    variacao: '+0,3 desde a última coleta',
-    tom: 'neutral',
-    direcao: 'up',
-    nota: 'Dentro da referência (13,0–17,5). Nenhuma preocupação no momento.',
-    serie: [13.4, 13.8, 14.0, 13.9, 14.0, 14.2],
-  },
-]
 
 const ICONE_DA_DIRECAO: Record<Direcao, IconName> = {
   up: 'trending-up',
@@ -69,63 +20,123 @@ const ICONE_DA_DIRECAO: Record<Direcao, IconName> = {
   flat: 'minus',
 }
 
-function CartaoDoMarcador({ tendencia: h }: { tendencia: TendenciaDoMarcador }) {
+function CartaoDoMarcador({ tendencia: t, onVerExame }: { tendencia: Tendencia; onVerExame: () => void }) {
   const id = useId()
   return (
     <Panel>
       <section aria-labelledby={id}>
         <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
-          <div>
+          <div className="min-w-0">
             <h2 id={id} className="text-[13px] text-muted">
-              {h.marcador}
+              {t.marcador}
             </h2>
             <div className="font-display font-medium text-[36px] leading-none tracking-[-0.02em] mt-2 tabular-nums">
-              {h.valor}
-              <span className="lh-sup">{h.unidade}</span>
+              {t.valor}
+              {t.unidade && <span className="lh-sup">{t.unidade}</span>}
             </div>
           </div>
-          <Pill tone={h.tom} icon={ICONE_DA_DIRECAO[h.direcao]}>
-            {h.variacao}
+          <Pill tone={t.tom} icon={ICONE_DA_DIRECAO[t.direcao]}>
+            {t.variacao}
           </Pill>
         </div>
-        <TrendLine data={h.serie} out={h.tom === 'accent'} />
+        <TrendLine data={t.serie} out={t.foraDaReferencia} />
+        <div className="flex justify-between text-[11px] text-muted mt-1.5 tabular-nums">
+          <span>Primeira coleta</span>
+          <span>Última</span>
+        </div>
         <div className="rounded-[12px] bg-subtle p-3 mt-4">
-          <p className="text-[13px] leading-relaxed">{h.nota}</p>
+          <p className="text-[13px] leading-relaxed">{t.nota}</p>
+        </div>
+        <div className="mt-3 -mb-1">
+          <Btn variant="ghost" size="sm" iconRight="arrow-right" onClick={onVerExame} style={{ paddingLeft: 0 }}>
+            Ver exame
+          </Btn>
         </div>
       </section>
     </Panel>
   )
 }
 
-export function TrendsPage() {
+function Carregando() {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-5" role="status" aria-busy="true" aria-label="Carregando">
+      {[0, 1].map((i) => (
+        <Panel key={i}>
+          <Skel className="h-3.5 w-1/3" />
+          <Skel className="h-9 w-1/4 mt-3" />
+          <Skel className="h-12 w-full mt-4" />
+        </Panel>
+      ))}
+    </div>
+  )
+}
+
+export function TrendsPage({ onOpenExam, onVerResultados }: TrendsPageProps) {
   const idResumo = useId()
+  const { exams, loading, error } = useResultados()
+  const tendencias = tendenciasDosExames(exams)
+
+  let corpo: React.ReactNode
+  if (loading && exams.length === 0) {
+    corpo = <Carregando />
+  } else if (error !== null && exams.length === 0) {
+    corpo = (
+      <Panel pad={0}>
+        <FalhaAoCarregar
+          titulo="Não foi possível carregar seus resultados"
+          erro={error}
+          onTentar={() => void atualizaResultados()}
+        />
+      </Panel>
+    )
+  } else if (tendencias.length === 0) {
+    corpo = (
+      <Panel pad={0}>
+        <EmptyState
+          icon="activity"
+          title="Ainda não há histórico suficiente"
+          text="As tendências aparecem a partir de duas coletas do mesmo marcador."
+          action={
+            <Btn variant="secondary" onClick={onVerResultados}>
+              Ver resultados
+            </Btn>
+          }
+        />
+      </Panel>
+    )
+  } else {
+    const verExame = (id: string) => {
+      const exame = exams.find((e) => e.id === id)
+      if (exame) onOpenExam(exame)
+    }
+    corpo = (
+      <>
+        <div className="mb-5">
+          <Panel>
+            <section aria-labelledby={idResumo}>
+              <h2 id={idResumo} className="lh-ov mb-2">
+                Em resumo
+              </h2>
+              <p className="text-[15px] leading-relaxed max-w-3xl">{resumoDasTendencias(tendencias)}</p>
+            </section>
+          </Panel>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {tendencias.map((t) => (
+            <CartaoDoMarcador key={t.marcador + t.unidade} tendencia={t} onVerExame={() => verExame(t.exameId)} />
+          ))}
+        </div>
+      </>
+    )
+  }
+
   return (
     <div>
       <PageHeader
         title="Como você está evoluindo"
         sub="Comparação dos seus principais marcadores ao longo do tempo, em linguagem simples."
       />
-
-      <div className="mb-5">
-        <Panel>
-          <section aria-labelledby={idResumo}>
-            <h2 id={idResumo} className="lh-ov mb-2">
-              Em resumo
-            </h2>
-            <p className="text-[15px] leading-relaxed max-w-3xl">
-              De 4 marcadores acompanhados, <b className="font-semibold">3 estão na faixa ideal</b> e{' '}
-              <b className="font-semibold">1 precisa de atenção</b> (LDL). Sua vitamina D respondeu muito bem à
-              suplementação. Considere agendar retorno com a Dra. Renata.
-            </p>
-          </section>
-        </Panel>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {TENDENCIAS.map((t) => (
-          <CartaoDoMarcador key={t.marcador} tendencia={t} />
-        ))}
-      </div>
+      {corpo}
     </div>
   )
 }

@@ -32,7 +32,7 @@ export const EM_MANUTENCAO = false
 
 // Páginas inteiras ocultas do menu E inacessíveis por acesso direto.
 export const MOSTRAR_RESULTADOS = true               // Menu/rota: Resultados (backend real: GET /resultados + GET /laudos)
-export const MOSTRAR_TENDENCIAS = false              // Menu/rota: Tendências
+export const MOSTRAR_TENDENCIAS = true               // Menu/rota: Tendências (montada dos resultados reais: lib/tendencias)
 export const MOSTRAR_DOCUMENTOS = true               // Menu/rota: Documentos (backend real: GET/POST /documentos)
 export const MOSTRAR_FATURAMENTO = false             // Menu/rota: Faturamento
 

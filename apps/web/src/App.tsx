@@ -267,7 +267,7 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
       />
     )
   } else if (rota.tela === 'trends') {
-    content = <TrendsPage />
+    content = <TrendsPage onOpenExam={handleOpenExam} onVerResultados={() => navegar(CAMINHO_DA_TELA.results)} />
   } else if (rota.tela === 'documents') {
     content = <DocumentsPage />
   } else if (rota.tela === 'billing') {

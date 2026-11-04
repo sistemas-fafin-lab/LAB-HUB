@@ -192,7 +192,7 @@ describe('busca', () => {
     fireEvent.focus(busca())
     const paginas = within(screen.getByRole('group', { name: 'Ir para' }))
     expect(paginas.getByRole('option', { name: 'Documentos' })).toBeTruthy()
-    expect(paginas.queryByRole('option', { name: 'Tendências' })).toBeNull()
+    expect(paginas.queryByRole('option', { name: 'Faturamento' })).toBeNull()
   })
 
   it('escolher uma página navega para ela', () => {
