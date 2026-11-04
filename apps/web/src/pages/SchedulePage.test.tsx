@@ -73,7 +73,6 @@ afterEach(() => {
 })
 
 const props = {
-  dark: false,
   onAba: vi.fn(),
   onAbrirColeta: vi.fn(),
   onFecharColeta: vi.fn(),
@@ -608,6 +607,43 @@ describe('detalhe da coleta', () => {
     noDetalhe()
     expect(await screen.findByRole('heading', { name: 'Documentos desta coleta' })).toBeTruthy()
     expect(screen.queryByText(/JPG, PNG, WEBP ou PDF/)).toBeNull()
+    expect(screen.getByText('pedido.pdf')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Excluir' })).toBeNull()
+  })
+
+  it('anexar à coleta: confirma antes de enviar, com o tipo escolhido', async () => {
+    documentos.enviar.mockResolvedValue(undefined)
+    lista = [ag()]
+    noDetalhe()
+    await screen.findByRole('heading', { name: 'Documentos desta coleta' })
+    fireEvent.click(screen.getByRole('button', { name: 'Outro' }))
+    const file = new File(['x'], 'guia.pdf', { type: 'application/pdf' })
+    fireEvent.change(screen.getByLabelText('Arquivos'), { target: { files: [file] } })
+    expect(documentos.enviar).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Adicionar este arquivo?' })).getByRole('button', { name: 'Adicionar arquivo' }))
+    expect(documentos.enviar).toHaveBeenCalledWith(file, 'outro')
+  })
+
+  it('anexar à coleta: recusa arquivo grande demais sem pedir confirmação', async () => {
+    lista = [ag()]
+    noDetalhe()
+    await screen.findByRole('heading', { name: 'Documentos desta coleta' })
+    const file = new File(['x'], 'g.pdf', { type: 'application/pdf' })
+    Object.defineProperty(file, 'size', { value: 11 * 1024 * 1024 })
+    fireEvent.change(screen.getByLabelText('Arquivos'), { target: { files: [file] } })
+    expect(screen.getByRole('alert').textContent).toContain('Arquivo muito grande (11 MB). O limite é 10 MB.')
+    expect(screen.queryByRole('dialog', { name: 'Adicionar este arquivo?' })).toBeNull()
+  })
+
+  it('anexo da coleta pode ser excluído enquanto faz sentido, com confirmação', async () => {
+    documentos.documentos = [
+      { id: 'd-1', tipo: 'pedido_medico', nomeArquivo: 'pedido.pdf', mimeType: 'application/pdf', tamanhoBytes: 10, criadoEm: emDias(-1) },
+    ]
+    lista = [ag()]
+    noDetalhe()
+    fireEvent.click(await screen.findByRole('button', { name: 'Excluir' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Excluir documento?' })).getByRole('button', { name: 'Excluir' }))
+    expect(documentos.remover).toHaveBeenCalledWith('d-1')
   })
 
   it('cancelada sem anexos: a seção de documentos some', async () => {

@@ -12,8 +12,6 @@ import type { AbaColetas } from '../lib/rotas'
 import { useAgendamentos } from '../lib/useAgendamentos'
 
 interface SchedulePageProps {
-  /** Só para as peças de documento, que ainda são do visual antigo (issue 10). */
-  dark: boolean
   // Aba e coleta aberta vêm da URL (/agendar, /coletas, /coleta/:id): recarregar
   // a página ou usar voltar/avançar mantém o paciente onde estava. A página só
   // pede a troca; quem muda a URL é o App.
@@ -26,7 +24,7 @@ interface SchedulePageProps {
 
 const mensagemDe = (e: unknown, padrao: string) => (e instanceof Error ? e.message : padrao)
 
-export function SchedulePage({ dark, aba, selectedId, onAba, onAbrirColeta, onFecharColeta }: SchedulePageProps) {
+export function SchedulePage({ aba, selectedId, onAba, onAbrirColeta, onFecharColeta }: SchedulePageProps) {
   const [resyncingId, setResyncingId] = useState<string | null>(null)
   const [aCancelar, setACancelar] = useState<Agendamento | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -108,7 +106,7 @@ export function SchedulePage({ dark, aba, selectedId, onAba, onAbrirColeta, onFe
     if (selected) {
       return (
         <>
-          <ColetaTimeline agendamento={selected} dark={dark} onBack={onFecharColeta} {...acoes} />
+          <ColetaTimeline key={selected.id} agendamento={selected} onBack={onFecharColeta} {...acoes} />
           {confirmaCancelamento}
         </>
       )

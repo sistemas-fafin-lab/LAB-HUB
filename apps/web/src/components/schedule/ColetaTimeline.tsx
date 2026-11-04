@@ -1,5 +1,5 @@
 import type { Agendamento } from '@lab-hub/shared'
-import { BackLink, ETAPAS, Ico, IconTile, InfoGrid, Node, Panel, PanelHead, Pill, Timeline } from '../portal'
+import { BackLink, EmptyState, ETAPAS, Ico, IconTile, InfoGrid, Node, Panel, PanelHead, Pill, Timeline } from '../portal'
 import { DocumentUploader } from '../documents/DocumentUploader'
 import { DocumentList } from '../documents/DocumentList'
 import { situacaoDaColeta } from '../../lib/coletas'
@@ -13,7 +13,6 @@ import { ConteudoPreparo } from './PreparoColeta'
 
 interface ColetaTimelineProps extends AcoesColeta {
   agendamento: Agendamento
-  dark: boolean
   onBack: () => void
 }
 
@@ -39,7 +38,7 @@ function previsaoDeLiberacao(dataHora: string): string {
 
 // Detalhe da coleta em /coleta/:id. O agendamento vem de useAgendamentos, então
 // sobrevive a recarregar a página.
-export function ColetaTimeline({ agendamento, dark, onBack, ...acoes }: ColetaTimelineProps) {
+export function ColetaTimeline({ agendamento, onBack, ...acoes }: ColetaTimelineProps) {
   const { id, postoNome, dataHora, status, criadoEm, exames } = agendamento
   const { rotulo, tom, passo, alerta } = situacaoDaColeta(status)
   const cancelada = status === 'cancelado'
@@ -117,7 +116,7 @@ export function ColetaTimeline({ agendamento, dark, onBack, ...acoes }: ColetaTi
           </Panel>
 
           {/* Adiantam a conferência da recepção. Some numa coleta cancelada que
-              nunca teve anexo. As peças de documento migram na issue 10. */}
+              nunca teve anexo. */}
           {(podeEnviarDocs || documentos.length > 0) && (
             <Panel pad={24}>
               <PanelHead title="Documentos desta coleta" className="mb-1" />
@@ -130,21 +129,18 @@ export function ColetaTimeline({ agendamento, dark, onBack, ...acoes }: ColetaTi
                   {docsError}
                 </div>
               )}
-              <div className="lh-legado font-sans subpixel-antialiased text-slate-900 dark:text-gray-100">
-                {podeEnviarDocs && (
-                  <div className="mb-4">
-                    <DocumentUploader tipos={TIPOS_DA_COLETA} onEnviar={enviar} enviando={enviando} dark={dark} />
-                  </div>
-                )}
-                <DocumentList
-                  documentos={documentos}
-                  loading={docsLoading}
-                  dark={dark}
-                  colunas={2}
-                  {...(podeEnviarDocs ? { onRemover: (docId: string) => void remover(docId) } : {})}
-                  vazio="Nenhum documento anexado a esta coleta."
-                />
-              </div>
+              {podeEnviarDocs && (
+                <div className="mb-4">
+                  <DocumentUploader tipos={TIPOS_DA_COLETA} onEnviar={enviar} enviando={enviando} />
+                </div>
+              )}
+              <DocumentList
+                documentos={documentos}
+                loading={docsLoading}
+                colunas={2}
+                {...(podeEnviarDocs ? { onRemover: (docId: string) => void remover(docId) } : {})}
+                vazio={<EmptyState icon="folder" title="Nenhum documento anexado a esta coleta." />}
+              />
             </Panel>
           )}
         </div>

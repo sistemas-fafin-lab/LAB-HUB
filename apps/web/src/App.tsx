@@ -57,7 +57,7 @@ function entradaPara(rota: string): string {
 // Telas já no visual novo: montadas direto na raiz `.lh-v2` do shell. As
 // demais ganham o invólucro `.lh-legado`, que devolve a fonte, a cor e os links
 // do visual antigo (ver styles/lh/tema.css). Cada PR de tela entra aqui.
-const TELAS_V2: ReadonlySet<Rota['tela']> = new Set(['home', 'results', 'exam', 'laudo', 'schedule'])
+const TELAS_V2: ReadonlySet<Rota['tela']> = new Set(['home', 'results', 'exam', 'laudo', 'schedule', 'documents'])
 
 // ---------------------------------------------------------------------------
 // App — porta de autenticação sobre a URL. Sem sessão, qualquer rota vai para
@@ -233,7 +233,6 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   } else if (rota.tela === 'schedule') {
     content = (
       <SchedulePage
-        dark={dark}
         aba={rota.aba}
         selectedId={rota.coletaId}
         onAba={(aba) => navegar(caminhoDaAba(aba))}
@@ -244,7 +243,7 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   } else if (rota.tela === 'trends') {
     content = <TrendsPage    dark={dark} />
   } else if (rota.tela === 'documents') {
-    content = <DocumentsPage dark={dark} />
+    content = <DocumentsPage />
   } else if (rota.tela === 'billing') {
     content = <BillingPage   dark={dark} />
   } else if (rota.tela === 'settings') {

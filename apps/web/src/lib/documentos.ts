@@ -1,20 +1,12 @@
 import type { TipoDocumento } from '@lab-hub/shared'
+import type { IconName } from '../ds'
 
-export type DocTone = 'blue' | 'violet' | 'amber' | 'slate'
-
-export const TONE_CLASSES: Record<DocTone, string> = {
-  blue: 'bg-blue-100 text-blue-700',
-  violet: 'bg-violet-100 text-violet-700',
-  amber: 'bg-amber-100 text-amber-700',
-  slate: 'bg-slate-100 text-slate-600',
-}
-
-// Apresentação de cada tipo de documento (rótulo, ícone Lucide e tom do card).
-export const DOC_META: Record<TipoDocumento, { label: string; icon: string; tone: DocTone }> = {
-  identidade: { label: 'Identidade', icon: 'contact', tone: 'blue' },
-  carteirinha: { label: 'Carteirinha', icon: 'credit-card', tone: 'violet' },
-  pedido_medico: { label: 'Pedido médico', icon: 'clipboard-list', tone: 'amber' },
-  outro: { label: 'Outro', icon: 'file-text', tone: 'slate' },
+// Apresentação de cada tipo de documento (rótulo e ícone do registro).
+export const DOC_META: Record<TipoDocumento, { label: string; icon: IconName }> = {
+  identidade: { label: 'Identidade', icon: 'contact' },
+  carteirinha: { label: 'Carteirinha', icon: 'credit-card' },
+  pedido_medico: { label: 'Pedido médico', icon: 'clipboard-list' },
+  outro: { label: 'Outro', icon: 'file-text' },
 }
 
 // Ordem de exibição nos seletores — a mesma do check-in: identidade, convênio,
@@ -49,7 +41,7 @@ export function formatarTamanho(bytes: number): string {
 // explodiria em runtime no `node dist/server.js`. Ao mudar um lado, mude o outro.
 export const TAMANHO_MAX_BYTES = 10 * 1024 * 1024
 
-const MIMES_ACEITOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+export const MIMES_ACEITOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
 
 // Barra o arquivo ANTES de subir. Sem isto o paciente espera o upload inteiro
 // para receber um 413 — e um arquivo grande o bastante faz a API cortar a

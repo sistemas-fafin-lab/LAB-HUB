@@ -17,6 +17,12 @@ export interface DialogProps {
   style?: CSSProperties
 }
 
+// Caixas abertas, da mais antiga à do topo. Só a do topo responde ao teclado:
+// com uma confirmação por cima de outra caixa, Esc fecha uma de cada vez e o Tab
+// não disputa o foco entre as duas.
+const pilha: string[] = []
+let overflowDoBody = ''
+
 export function Dialog({ open = true, title, description, children, footer, onClose, width = 480, inline = false, style }: DialogProps) {
   const id = useId()
   const painelRef = useRef<HTMLDivElement>(null)
@@ -28,11 +34,22 @@ export function Dialog({ open = true, title, description, children, footer, onCl
     // para quem a abriu ao fechar.
     const anterior = document.activeElement instanceof HTMLElement ? document.activeElement : null
     painelRef.current?.focus()
-    return () => anterior?.focus()
-  }, [modal])
+    // O fundo não rola enquanto houver caixa aberta.
+    if (pilha.length === 0) {
+      overflowDoBody = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+    }
+    pilha.push(id)
+    return () => {
+      pilha.splice(pilha.indexOf(id), 1)
+      if (pilha.length === 0) document.body.style.overflow = overflowDoBody
+      anterior?.focus()
+    }
+  }, [modal, id])
   useEffect(() => {
     if (!modal) return
     const tecla = (e: KeyboardEvent) => {
+      if (pilha[pilha.length - 1] !== id) return
       if (e.key === 'Escape') {
         onClose?.()
         return
@@ -63,7 +80,7 @@ export function Dialog({ open = true, title, description, children, footer, onCl
     }
     window.addEventListener('keydown', tecla)
     return () => window.removeEventListener('keydown', tecla)
-  }, [modal, onClose])
+  }, [modal, onClose, id])
   if (!open) return null
   const idTitulo = title ? `${id}-titulo` : undefined
   const idDescricao = description ? `${id}-descricao` : undefined
@@ -107,7 +124,7 @@ export function Dialog({ open = true, title, description, children, footer, onCl
         {onClose && <IconButton icon="x" label="Fechar" size="sm" onClick={onClose} />}
       </div>
       {children}
-      {footer && <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>{footer}</div>}
+      {footer && <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>{footer}</div>}
     </div>
   )
   if (inline) return painel
@@ -121,7 +138,9 @@ export function Dialog({ open = true, title, description, children, footer, onCl
       onClick={(e) => {
         if (cliqueComecouNoFundo.current && e.target === e.currentTarget) onClose?.()
       }}
-      style={{ position: 'fixed', inset: 0, background: 'var(--overlay-scrim)', display: 'grid', placeItems: 'center', padding: 24, zIndex: 50 }}
+      // O trilho fica na largura da tela: sem isto, ele cresce até `width` e a
+      // caixa sai pela direita em telas menores que ela.
+      style={{ position: 'fixed', inset: 0, background: 'var(--overlay-scrim)', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', placeItems: 'center', padding: 24, zIndex: 50 }}
     >
       {painel}
     </div>
