@@ -9,6 +9,7 @@ import {
   CalendarPlus,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CigaretteOff,
   CircleAlert,
@@ -110,6 +111,7 @@ export const ICONES = {
   // LAB DS (Toast success) usa o nome antigo do Lucide para o mesmo ícone.
   'check-circle-2': CircleCheck,
   'chevron-down': ChevronDown,
+  'chevron-left': ChevronLeft,
   'chevron-right': ChevronRight,
   'cigarette-off': CigaretteOff,
   'clipboard-check': ClipboardCheck,

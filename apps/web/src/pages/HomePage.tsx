@@ -1,11 +1,11 @@
 import { useId } from 'react'
 import type { ReactNode } from 'react'
-import type { Agendamento, AgendamentoStatus } from '@lab-hub/shared'
 import type { IconName } from '../ds'
 import { Btn, EmptyState, ETAPAS, FalhaAoCarregar, IconTile, Node, PageHeader, Pill, Panel, PanelHead, SkeletonRows } from '../components/portal'
 import type { Exam } from '../components/shared/WebHero'
 import { DestaqueCarregando, DestaqueExame, DestaquePrimeiraColeta } from '../components/visao-geral/Destaque'
 import { ExamRow } from '../components/shared/ExamRow'
+import { coletasEmAndamento, proximaColeta, situacaoDaColeta } from '../lib/coletas'
 import { formatDataHora } from '../lib/datetime'
 import {
   MOSTRAR_ACOMPANHAMENTO,
@@ -21,49 +21,6 @@ import { atualizaResultados, useResultados } from '../lib/useResultados'
 function saudacao(agora: Date): string {
   const hora = agora.getHours()
   return hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite'
-}
-
-const agendada = (a: Agendamento) => a.status === 'pendente' || a.status === 'confirmado'
-const noFuturo = (a: Agendamento) => new Date(a.dataHora).getTime() > Date.now()
-
-/** Coleta futura ainda de pé mais próxima de agora. */
-function proximaColeta(agendamentos: readonly Agendamento[]): Agendamento | undefined {
-  return agendamentos
-    .filter((a) => agendada(a) && noFuturo(a))
-    .sort((a, b) => new Date(a.dataHora).getTime() - new Date(b.dataHora).getTime())[0]
-}
-
-// Situação de uma coleta ativa, no modelo do nó (`passo` = etapas alcançadas;
-// `alerta` = índice da etapa em atenção). Mesmas etapas e rótulos da tela da
-// coleta (ColetaTimeline, AgendamentoStatusBadge).
-type StatusAtivo = 'pendente' | 'confirmado' | 'em_coleta' | 'bloqueado'
-
-const SITUACAO: Record<StatusAtivo, { rotulo: string; passo: number; alerta: number }> = {
-  pendente: { rotulo: 'Pendente', passo: 1, alerta: -1 },
-  confirmado: { rotulo: 'Confirmado', passo: 1, alerta: -1 },
-  em_coleta: { rotulo: 'Check-in feito', passo: 3, alerta: -1 },
-  bloqueado: { rotulo: 'Pendência', passo: 2, alerta: 1 },
-}
-
-function ehStatusAtivo(status: AgendamentoStatus): status is StatusAtivo {
-  return status in SITUACAO
-}
-
-/**
- * Coletas em andamento, as com pendência primeiro e depois por data. Fora:
- * cancelada; realizada (o portal não recebe o aviso de liberação, ela ficaria
- * aqui para sempre); e agendada cuja hora passou sem check-in, porque ninguém
- * avisa a falta e o relógio é o único juiz (ver preparoAplicavel).
- */
-function coletasEmAndamento(agendamentos: readonly Agendamento[]): (Agendamento & { status: StatusAtivo })[] {
-  return agendamentos
-    .filter((a): a is Agendamento & { status: StatusAtivo } => ehStatusAtivo(a.status))
-    .filter((a) => !agendada(a) || noFuturo(a))
-    .sort(
-      (a, b) =>
-        Number(b.status === 'bloqueado') - Number(a.status === 'bloqueado') ||
-        new Date(a.dataHora).getTime() - new Date(b.dataHora).getTime(),
-    )
 }
 
 interface Passo {
@@ -263,7 +220,7 @@ export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColet
           <>
             <div>
               {emAndamento.slice(0, 3).map((c) => {
-                const { rotulo, passo, alerta } = SITUACAO[c.status]
+                const { rotulo, passo, alerta } = situacaoDaColeta(c.status)
                 return (
                   <div key={c.id} className="flex items-center gap-4 py-3.5 border-t border-line first:border-t-0">
                     <button type="button" onClick={() => onOpenColeta(c.id)} className="flex items-center gap-4 flex-1 min-w-0 text-left">

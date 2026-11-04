@@ -1,53 +1,41 @@
 import type { PostoDisponivel } from '@lab-hub/shared'
-import { WIcon } from '../primitives/WIcon'
+import { Ico, Panel, PanelHead } from '../portal'
 
 interface UnitSelectorProps {
   postos: PostoDisponivel[]
   selectedId: string | null
   onSelect: (id: string) => void
-  dark: boolean
 }
 
-// Cartão de escolha da unidade de coleta.
-export function UnitSelector({ postos, selectedId, onSelect, dark }: UnitSelectorProps) {
+export function UnitSelector({ postos, selectedId, onSelect }: UnitSelectorProps) {
   return (
-    <div
-      className={`rounded-2xl border ${
-        dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-      } p-5 shadow-sm`}
-    >
-      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">Unidade</div>
-      <div className="flex flex-col gap-2">
+    <Panel>
+      <PanelHead title="Onde você prefere fazer a coleta?" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {postos.map((p) => {
-          const active = p.id === selectedId
+          const ativo = p.id === selectedId
           return (
             <button
               key={p.id}
+              type="button"
+              aria-pressed={ativo}
               onClick={() => onSelect(p.id)}
-              className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
-                active
-                  ? dark
-                    ? 'border-blue-500 bg-blue-500/10'
-                    : 'border-blue-500 bg-blue-50/60'
-                  : dark
-                    ? 'border-gray-800 hover:bg-gray-800/50'
-                    : 'border-gray-100 hover:bg-slate-50'
-              }`}
+              className="lh-row p-4 rounded-[16px] border text-left flex items-start gap-3"
+              style={{
+                borderColor: ativo ? 'var(--lh-action)' : 'var(--lh-line)',
+                boxShadow: ativo ? 'inset 0 0 0 1px var(--lh-action)' : 'none',
+              }}
             >
-              <div className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                <WIcon name="map-pin" className="w-5 h-5" strokeWidth={2.2} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>
-                  {p.nome}
-                </div>
-                <div className="text-xs text-gray-500 truncate">{p.endereco}</div>
-              </div>
-              {active && <WIcon name="check" className="w-4 h-4 text-blue-600" strokeWidth={2.6} />}
+              <Ico name="map-pin" size={18} className={ativo ? 'text-link' : 'text-muted'} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-semibold">{p.nome}</span>
+                <span className="block text-[12px] text-muted mt-0.5">{p.endereco}</span>
+              </span>
+              {ativo && <Ico name="check" size={16} className="text-link" />}
             </button>
           )
         })}
       </div>
-    </div>
+    </Panel>
   )
 }

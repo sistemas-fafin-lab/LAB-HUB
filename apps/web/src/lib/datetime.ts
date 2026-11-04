@@ -44,7 +44,7 @@ export function formatDataHora(iso: string): string {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 // "Hoje"/"Ontem"/"Amanhã" quando a data cai perto de hoje; senão null.
-function relDia(d: Date): string | null {
+export function relDia(d: Date): string | null {
   const dia = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
   const delta = Math.round((dia(d) - dia(new Date())) / 86_400_000)
   return delta === 0 ? 'Hoje' : delta === -1 ? 'Ontem' : delta === 1 ? 'Amanhã' : null

@@ -155,8 +155,8 @@ describe('cada tela abre pela própria URL', () => {
   it.each([
     ['/', 'Que bom te ver de volta'],
     ['/resultados', 'Seus resultados'],
-    ['/agendar', 'Agendas/Coletas'],
-    ['/coletas', 'Agendas/Coletas'],
+    ['/agendar', 'Agendar coleta'],
+    ['/coletas', 'Minhas coletas'],
     ['/documentos', 'Documentos'],
     ['/configuracoes', 'Configurações'],
     ['/perfil', 'Maria Souza'],
@@ -235,9 +235,17 @@ describe('navegação e histórico do navegador', () => {
     expect(caminho()).toBe('/resultados')
   })
 
-  it('as abas de Agendas/Coletas são URLs', () => {
+  it('Minhas coletas e Agendar coleta são URLs', () => {
     abre('/agendar')
-    fireEvent.click(screen.getByRole('button', { name: /Minhas coletas/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Minhas coletas' }))
+    expect(caminho()).toBe('/coletas')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Agendar coleta' })[0] as HTMLElement)
+    expect(caminho()).toBe('/agendar')
+  })
+
+  it('o voltar da coleta leva a Minhas coletas', () => {
+    abre('/coleta/ag-1')
+    fireEvent.click(screen.getByRole('button', { name: 'Minhas coletas' }))
     expect(caminho()).toBe('/coletas')
   })
 

@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import * as DS from '../../ds'
+import type { IconName } from '../../ds'
 import { Pill } from './status'
 import { ETAPAS, estadoDaEtapa } from './etapas'
 import type { EstadoEtapa, EtapaId } from './etapas'
@@ -13,8 +14,13 @@ export interface TimelineProps {
   alerta?: number
   /** Horário de cada etapa já alcançada, já formatado */
   quando?: Partial<Record<EtapaId, string>>
-  /** Motivo da recoleta, mostrado na etapa em alerta */
-  motivoRecoleta?: string
+  /** Motivo, mostrado na etapa em alerta */
+  motivoAlerta?: string
+  /** Nome da etapa em alerta. A etapa nem sempre está em atenção por recoleta. */
+  rotuloAlerta?: string
+  iconeAlerta?: IconName
+  /** Troca a descrição padrão de uma etapa, quando o status pede outra */
+  descricoes?: Partial<Record<EtapaId, string>>
 }
 
 const MARCADOR: Record<EstadoEtapa, CSSProperties> = {
@@ -24,7 +30,7 @@ const MARCADOR: Record<EstadoEtapa, CSSProperties> = {
   todo: { background: 'var(--lh-track)' },
 }
 
-export function Timeline({ passo, alerta = -1, quando, motivoRecoleta }: TimelineProps) {
+export function Timeline({ passo, alerta = -1, quando, motivoAlerta, rotuloAlerta = 'Recoleta necessária', iconeAlerta = 'rotate-ccw', descricoes }: TimelineProps) {
   const estados = ETAPAS.map((_, i) => estadoDaEtapa(i, passo, alerta))
   const ultima = ETAPAS.length - 1
   return (
@@ -43,18 +49,18 @@ export function Timeline({ passo, alerta = -1, quando, motivoRecoleta }: Timelin
             )}
             <span className="relative z-10 w-6 h-6 rounded-[6px] inline-flex items-center justify-center shrink-0" style={MARCADOR[estado]}>
               {estado === 'done' && <DS.Icon name="check" size={14} strokeWidth={2.2} />}
-              {estado === 'alert' && <DS.Icon name="rotate-ccw" size={13} strokeWidth={2} />}
+              {estado === 'alert' && <DS.Icon name={iconeAlerta} size={13} strokeWidth={2} />}
               {estado === 'current' && <span className="w-2 h-2 rounded-[2px] bg-brand" />}
             </span>
             <div className="flex-1 min-w-0 -mt-0.5">
               <div className="flex items-center justify-between gap-3">
                 <span className={'text-[14px] font-semibold ' + (estado === 'todo' ? 'text-muted' : '')}>
-                  {estado === 'alert' ? 'Recoleta necessária' : etapa.nome}
+                  {estado === 'alert' ? rotuloAlerta : etapa.nome}
                 </span>
                 {estado !== 'todo' && horario && <span className="text-[12px] text-muted tabular-nums">{horario}</span>}
               </div>
               <div className="text-[13px] text-muted mt-0.5">
-                {estado === 'alert' && motivoRecoleta ? motivoRecoleta + '.' : etapa.descricao}
+                {estado === 'alert' && motivoAlerta ? motivoAlerta + '.' : (descricoes?.[etapa.id] ?? etapa.descricao)}
               </div>
               {estado === 'current' && (
                 <div className="mt-2">

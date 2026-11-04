@@ -1,98 +1,114 @@
+import { useState } from 'react'
 import type { Agendamento } from '@lab-hub/shared'
-import { WIcon } from '../primitives/WIcon'
-import { ColetaCard } from './ColetaCard'
-import { ColetasSkeleton } from './ColetasSkeleton'
+import { Btn, Chip, EmptyState, FalhaAoCarregar, Node, Panel, SkeletonRows } from '../portal'
+import { coletasEmAndamento, historicoDeColetas, proximaColeta, situacaoDaColeta } from '../../lib/coletas'
+import { LinhaColeta, ProximaColeta } from './LinhaColeta'
+import type { AcoesColeta } from './LinhaColeta'
 
-interface ColetasListProps {
+interface ColetasListProps extends AcoesColeta {
   agendamentos: Agendamento[]
   loading: boolean
   error: string | null
-  dark: boolean
-  /** ID em reenvio (controla o estado de loading do botão "Reenviar"). */
-  resyncingId: string | null
-  onResync: (id: string) => void
-  /** ID em cancelamento (controla o estado de loading do botão "Cancelar"). */
-  cancellingId: string | null
-  onCancel: (id: string) => void
-  /** Acionado pelo CTA do estado vazio p/ ir à aba "Agendar". */
+  onRetry: () => void
+  /** CTA do estado vazio. */
   onAgendar: () => void
-  /** Abre a linha do tempo (detalhe) de um agendamento. */
   onOpen: (id: string) => void
 }
 
-// Aba "Minhas coletas": lista os agendamentos do paciente.
-export function ColetasList({
-  agendamentos,
-  loading,
-  error,
-  dark,
-  resyncingId,
-  onResync,
-  cancellingId,
-  onCancel,
-  onAgendar,
-  onOpen,
-}: ColetasListProps) {
+/**
+ * Coleta com pendência na recepção. Ocupa o lugar do alerta coral de recoleta do
+ * design: é o único estado de atenção que o sistema conhece. A API não tem
+ * recoleta, então este alerta não fala nela nem oferece agendá-la.
+ */
+function AlertaPendencia({ agendamento, onOpen }: { agendamento: Agendamento; onOpen: (id: string) => void }) {
+  const { passo, alerta } = situacaoDaColeta(agendamento.status)
+  return (
+    <section aria-label="Coleta com pendência" className="mb-4">
+      <Panel style={{ background: 'var(--lh-coral-soft)', borderColor: 'transparent' }}>
+        <div className="flex items-center gap-4 flex-wrap">
+          <span className="lh-tile" style={{ background: 'var(--lh-card)' }}>
+            <Node step={passo} alert={alerta} size={28} />
+          </span>
+          <div className="flex-1 min-w-[200px]">
+            <div className="text-[14px] font-semibold">Uma coleta tem pendência na recepção</div>
+            <div className="text-[13px]">
+              {agendamento.postoNome} · verifique seus documentos (identidade, guia e pedido médico)
+            </div>
+          </div>
+          <Btn size="sm" onClick={() => onOpen(agendamento.id)}>
+            Ver detalhes
+          </Btn>
+        </div>
+      </Panel>
+    </section>
+  )
+}
+
+export function ColetasList({ agendamentos, loading, error, onRetry, onAgendar, onOpen, ...acoes }: ColetasListProps) {
+  const [aba, setAba] = useState<'ativas' | 'historico'>('ativas')
+
   if (loading) {
-    return <ColetasSkeleton dark={dark} />
+    return (
+      <Panel pad={0}>
+        <SkeletonRows n={3} />
+      </Panel>
+    )
   }
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 text-red-700 p-4 text-sm">
-        {error}
-      </div>
+      <Panel>
+        <FalhaAoCarregar titulo="Não foi possível carregar suas coletas" erro={error} onTentar={onRetry} />
+      </Panel>
     )
   }
 
-  if (agendamentos.length === 0) {
-    return (
-      <div
-        className={`rounded-2xl border border-dashed ${
-          dark ? 'border-gray-800' : 'border-gray-200'
-        } p-10 text-center`}
-      >
-        <div className="h-12 w-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3">
-          <WIcon name="calendar" className="w-6 h-6" strokeWidth={2} />
-        </div>
-        <div className={`text-sm font-semibold ${dark ? 'text-gray-200' : 'text-slate-700'}`}>
-          Você ainda não tem coletas agendadas
-        </div>
-        <p className="text-xs text-gray-500 mt-1 mb-4">
-          Escolha uma unidade e um horário para agendar a sua primeira coleta.
-        </p>
-        <button
-          onClick={onAgendar}
-          className="bg-blue-600 text-white text-xs font-semibold h-9 px-4 rounded-lg inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25"
-        >
-          <WIcon name="calendar-plus" className="w-4 h-4" strokeWidth={2.2} />
-          Agendar coleta
-        </button>
-      </div>
-    )
-  }
-
-  const ativos = ['pendente', 'confirmado']
-  const sorted = [...agendamentos].sort((a, b) => {
-    const aAtivo = ativos.includes(a.status) ? 1 : 0
-    const bAtivo = ativos.includes(b.status) ? 1 : 0
-    return bAtivo - aAtivo
-  })
+  const ativas = coletasEmAndamento(agendamentos)
+  const historico = historicoDeColetas(agendamentos)
+  const proxima = proximaColeta(agendamentos)
+  const lista = aba === 'ativas' ? ativas : historico
 
   return (
-    <div className="flex flex-col gap-3">
-      {sorted.map((ag) => (
-        <ColetaCard
-          key={ag.id}
-          agendamento={ag}
-          dark={dark}
-          onResync={onResync}
-          resyncing={resyncingId === ag.id}
-          onCancel={onCancel}
-          cancelling={cancellingId === ag.id}
-          onOpen={onOpen}
-        />
-      ))}
-    </div>
+    <>
+      {ativas
+        .filter((a) => a.status === 'bloqueado')
+        .map((a) => (
+          <AlertaPendencia key={a.id} agendamento={a} onOpen={onOpen} />
+        ))}
+      {proxima && <ProximaColeta agendamento={proxima} onOpen={onOpen} {...acoes} />}
+      <div className="flex items-center gap-2 mb-4">
+        <Chip selected={aba === 'ativas'} onClick={() => setAba('ativas')}>
+          Em andamento <span className="tabular-nums opacity-80">{ativas.length}</span>
+        </Chip>
+        <Chip selected={aba === 'historico'} onClick={() => setAba('historico')}>
+          Histórico <span className="tabular-nums opacity-80">{historico.length}</span>
+        </Chip>
+      </div>
+      {/* overflow visível: o balão de preparo sai do cartão. */}
+      <Panel pad={0} style={{ overflow: 'visible' }}>
+        {lista.length === 0 ? (
+          <EmptyState
+            icon="calendar"
+            title={aba === 'ativas' ? 'Nenhuma coleta em andamento' : 'Nenhuma coleta no histórico'}
+            text={aba === 'ativas' ? 'As coletas agendadas aparecem aqui.' : 'As coletas realizadas e canceladas aparecem aqui.'}
+            {...(aba === 'ativas'
+              ? {
+                  action: (
+                    <Btn icon="calendar-plus" onClick={onAgendar}>
+                      Agendar coleta
+                    </Btn>
+                  ),
+                }
+              : {})}
+          />
+        ) : (
+          <div className="divide-y divide-line">
+            {lista.map((a) => (
+              <LinhaColeta key={a.id} agendamento={a} onOpen={onOpen} {...acoes} />
+            ))}
+          </div>
+        )}
+      </Panel>
+    </>
   )
 }
