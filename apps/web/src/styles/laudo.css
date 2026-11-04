@@ -235,9 +235,15 @@
   gap: 5px;
 }
 .laudo-folhas .legend .mk {
+  display: inline-flex;
   font-size: 9px;
   line-height: 1;
   color: var(--lh-ink);
+}
+.laudo-folhas .legend .mk svg {
+  display: block;
+  /* O centro da linha fica abaixo do centro óptico do texto pequeno. */
+  margin-top: -1px;
 }
 
 /* ---------- título do exame ---------- */
@@ -297,6 +303,11 @@
   text-align: right;
   vertical-align: baseline;
 }
+/* Versão compacta: só entra quando poupa uma folha inteira (ver
+   LaudoDocumento — quase sempre é a última folha só com as observações). */
+.laudo-folhas.compacto table.rt tbody td {
+  padding-block: 4.5px;
+}
 .laudo-folhas table.rt tbody td.an {
   text-align: left;
   font-weight: 500;
@@ -323,9 +334,9 @@
   margin-left: 3px;
 }
 .laudo-folhas .car {
-  font-size: 9px;
+  display: inline-block;
   margin-left: 3px;
-  vertical-align: 1px;
+  vertical-align: 0.5px;
 }
 /* Linha alterada: fundo cinza, filete de tinta e negrito. Sobrevive ao P&B. */
 .laudo-folhas tr.alt {

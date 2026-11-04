@@ -16,6 +16,7 @@
 // então um bloco maior que a folha perderia o final do texto no papel.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Logo } from '../shell/Logo'
 import type { DocumentoLaudo, EstadoAnalito, GrupoLaudo, LinhaLaudo, SecaoLaudo } from './modelo'
 
@@ -159,7 +160,29 @@ function paginar(doc: DocumentoLaudo, m: Medidas): Fatia[][] {
 // Peças do documento
 // ---------------------------------------------------------------------------
 
-const SETAS: Record<EstadoAnalito, string> = { ok: '', lo: '▼', hi: '▲', alt: '•' }
+// As setas são desenhadas, não caracteres: a DM Sans não tem ▼/▲ e cada
+// aparelho cairia numa fonte diferente (no Windows, a Segoe UI), com outra
+// largura e outro desenho no papel. O "•" a DM Sans tem.
+function Seta({ direcao, rotulo }: { direcao: 'lo' | 'hi'; rotulo?: string }) {
+  return (
+    <svg
+      width="7"
+      height="6"
+      viewBox="0 0 7 6"
+      fill="currentColor"
+      {...(rotulo ? { role: 'img', 'aria-label': rotulo } : { 'aria-hidden': true })}
+    >
+      <path d={direcao === 'lo' ? 'M0 0h7L3.5 6z' : 'M0 6h7L3.5 0z'} />
+    </svg>
+  )
+}
+
+const MARCA: Record<EstadoAnalito, ReactNode> = {
+  ok: null,
+  lo: <Seta direcao="lo" rotulo="abaixo da referência" />,
+  hi: <Seta direcao="hi" rotulo="acima da referência" />,
+  alt: '•',
+}
 
 function Celulas({ linha }: { linha: LinhaLaudo }) {
   return (
@@ -168,7 +191,7 @@ function Celulas({ linha }: { linha: LinhaLaudo }) {
       <td>
         <span className="res">
           {linha.resultado}
-          {SETAS[linha.estado] && <span className="car">{SETAS[linha.estado]}</span>}
+          {MARCA[linha.estado] && <span className="car">{MARCA[linha.estado]}</span>}
         </span>
         {linha.unidade && <span className="unit">{linha.unidade}</span>}
       </td>
@@ -368,10 +391,16 @@ function Cabecalho({ doc, primeira }: { doc: DocumentoLaudo; primeira: boolean }
             </div>
             <div className="legend">
               <span className="it">
-                <span className="mk">▼</span>Abaixo
+                <span className="mk">
+                  <Seta direcao="lo" />
+                </span>
+                Abaixo
               </span>
               <span className="it">
-                <span className="mk">▲</span>Acima
+                <span className="mk">
+                  <Seta direcao="hi" />
+                </span>
+                Acima
               </span>
               {doc.grupos.some((g) => g.linhas.some((l) => l.estado === 'alt')) && (
                 <span className="it">
@@ -406,49 +435,63 @@ function Rodape({ pagina, total }: { pagina: number; total: number }) {
 // Documento
 // ---------------------------------------------------------------------------
 
+/** Alturas da camada de medição; null quando ela está fora do layout. */
+function medir(raiz: HTMLElement | null): Medidas | null {
+  // Com a camada fora do layout (`display: none` na impressão) tudo mediria
+  // zero e o laudo inteiro cairia numa folha só: fica a paginação anterior.
+  if (!raiz || getComputedStyle(raiz).display === 'none') return null
+
+  const altura = (seletor: string): number => {
+    const el = raiz.querySelector<HTMLElement>(seletor)
+    return el ? el.getBoundingClientRect().height : 0
+  }
+  const porAtributo = (atributo: 'bloco' | 'moldura' | 'parte') => {
+    const alturas: Record<string, number> = {}
+    for (const el of raiz.querySelectorAll<HTMLElement>(`[data-${atributo}]`)) {
+      alturas[el.dataset[atributo]!] = el.getBoundingClientRect().height
+    }
+    return alturas
+  }
+
+  return {
+    blocos: porAtributo('bloco'),
+    molduras: porAtributo('moldura'),
+    partes: porAtributo('parte'),
+    cabecalhoPrimeira: altura('[data-medida="head-first"]'),
+    cabecalhoSeguinte: altura('[data-medida="head-run"]'),
+    rodape: altura('[data-medida="foot"]'),
+  }
+}
+
+interface Paginacao {
+  folhas: Fatia[][]
+  /** Linhas da tabela mais baixas: só quando isso poupa uma folha inteira. */
+  compacto: boolean
+}
+
 export function LaudoDocumento({ doc }: { doc: DocumentoLaudo }) {
   const medicaoRef = useRef<HTMLDivElement>(null)
+  const medicaoCompactaRef = useRef<HTMLDivElement>(null)
   const caixaRef = useRef<HTMLDivElement>(null)
-  const [paginas, setPaginas] = useState<Fatia[][] | null>(null)
+  const [paginacao, setPaginacao] = useState<Paginacao | null>(null)
   const [escala, setEscala] = useState(1)
 
   const medirEPaginar = useCallback(() => {
-    const raiz = medicaoRef.current
-    if (!raiz) return
-    // Com a camada fora do layout (`display: none` na impressão) tudo mediria
-    // zero e o laudo inteiro cairia numa folha só: fica a paginação anterior.
-    if (getComputedStyle(raiz).display === 'none') return
-
-    const altura = (seletor: string): number => {
-      const el = raiz.querySelector<HTMLElement>(seletor)
-      return el ? el.getBoundingClientRect().height : 0
+    const normal = medir(medicaoRef.current)
+    if (!normal) return
+    let proxima: Paginacao = { folhas: paginar(doc, normal), compacto: false }
+    // Sobrou pouco para a última folha (o caso típico: só as observações)?
+    // A versão compacta fica se ela couber em menos folhas.
+    if (proxima.folhas.length > 1) {
+      const compacta = medir(medicaoCompactaRef.current)
+      const folhasCompactas = compacta ? paginar(doc, compacta) : null
+      if (folhasCompactas && folhasCompactas.length < proxima.folhas.length) {
+        proxima = { folhas: folhasCompactas, compacto: true }
+      }
     }
 
-    const blocos: Record<string, number> = {}
-    const molduras: Record<string, number> = {}
-    const partes: Record<string, number> = {}
-
-    for (const el of raiz.querySelectorAll<HTMLElement>('[data-bloco]')) {
-      blocos[el.dataset.bloco!] = el.getBoundingClientRect().height
-    }
-    for (const el of raiz.querySelectorAll<HTMLElement>('[data-moldura]')) {
-      molduras[el.dataset.moldura!] = el.getBoundingClientRect().height
-    }
-    for (const el of raiz.querySelectorAll<HTMLElement>('[data-parte]')) {
-      partes[el.dataset.parte!] = el.getBoundingClientRect().height
-    }
-
-    const proximas = paginar(doc, {
-      blocos,
-      molduras,
-      partes,
-      cabecalhoPrimeira: altura('[data-medida="head-first"]'),
-      cabecalhoSeguinte: altura('[data-medida="head-run"]'),
-      rodape: altura('[data-medida="foot"]'),
-    })
-
-    setPaginas((anteriores) =>
-      anteriores && JSON.stringify(anteriores) === JSON.stringify(proximas) ? anteriores : proximas,
+    setPaginacao((anterior) =>
+      anterior && JSON.stringify(anterior) === JSON.stringify(proxima) ? anterior : proxima,
     )
   }, [doc])
 
@@ -494,53 +537,22 @@ export function LaudoDocumento({ doc }: { doc: DocumentoLaudo }) {
     return () => observador.disconnect()
   }, [])
 
-  const folhas = paginas ?? paginar(doc, {
+  const folhas = paginacao?.folhas ?? paginar(doc, {
     blocos: {}, molduras: {}, partes: {},
     cabecalhoPrimeira: 0, cabecalhoSeguinte: 0, rodape: 0,
   })
 
   return (
     <div ref={caixaRef} className="laudo-caixa">
-      {/* Camada de medição: mesma largura útil da folha, fora da tela e fora
-          da árvore de acessibilidade. Nunca é impressa. */}
-      <div
-        ref={medicaoRef}
-        className="laudo-folhas laudo-medicao"
-        aria-hidden="true"
-        style={{ width: LARGURA_FOLHA }}
-      >
-        <div className="sheet lh-paper" style={{ height: 'auto' }}>
-          <div data-medida="head-first">
-            <Cabecalho doc={doc} primeira />
-          </div>
-          <div data-medida="head-run">
-            <Cabecalho doc={doc} primeira={false} />
-          </div>
-          <div className="pg-main">
-            <div className="flow" style={{ gap: 0 }}>
-              {itensDo(doc).map((item) =>
-                item.tipo === 'grupo' ? (
-                  <MedeGrupo key={chaveItem(item)} grupo={doc.grupos[item.indice]!} indice={item.indice} />
-                ) : item.tipo === 'secao' ? (
-                  <MedeSecao key={chaveItem(item)} secao={doc.secoes[item.indice]!} indice={item.indice} />
-                ) : (
-                  <div key={chaveItem(item)} data-bloco={chaveItem(item)}>
-                    <Bloco item={item} doc={doc} />
-                  </div>
-                ),
-              )}
-            </div>
-          </div>
-          <div data-medida="foot">
-            <Rodape pagina={1} total={1} />
-          </div>
-        </div>
-      </div>
+      {/* Camadas de medição (normal e compacta): mesma largura útil da folha,
+          fora da tela e fora da árvore de acessibilidade. Nunca são impressas. */}
+      <CamadaDeMedicao doc={doc} refCamada={medicaoRef} compacto={false} />
+      <CamadaDeMedicao doc={doc} refCamada={medicaoCompactaRef} compacto />
 
       {/* `zoom` e não `transform: scale()`: o zoom entra no cálculo de layout,
           então a altura da pilha de folhas encolhe junto e não sobra um vão
           embaixo. A impressão zera o zoom (ver o @media print). */}
-      <div className="laudo-folhas" style={{ zoom: escala }}>
+      <div className={`laudo-folhas${paginacao?.compacto ? ' compacto' : ''}`} style={{ zoom: escala }}>
         {folhas.map((fatias, i) => (
           <div className="sheet lh-paper" key={i}>
             <Cabecalho doc={doc} primeira={i === 0} />
@@ -572,6 +584,52 @@ export function LaudoDocumento({ doc }: { doc: DocumentoLaudo }) {
             <Rodape pagina={i + 1} total={folhas.length} />
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function CamadaDeMedicao({
+  doc,
+  refCamada,
+  compacto,
+}: {
+  doc: DocumentoLaudo
+  refCamada: RefObject<HTMLDivElement | null>
+  compacto: boolean
+}) {
+  return (
+    <div
+      ref={refCamada}
+      className={`laudo-folhas laudo-medicao${compacto ? ' compacto' : ''}`}
+      aria-hidden="true"
+      style={{ width: LARGURA_FOLHA }}
+    >
+      <div className="sheet lh-paper" style={{ height: 'auto' }}>
+        <div data-medida="head-first">
+          <Cabecalho doc={doc} primeira />
+        </div>
+        <div data-medida="head-run">
+          <Cabecalho doc={doc} primeira={false} />
+        </div>
+        <div className="pg-main">
+          <div className="flow" style={{ gap: 0 }}>
+            {itensDo(doc).map((item) =>
+              item.tipo === 'grupo' ? (
+                <MedeGrupo key={chaveItem(item)} grupo={doc.grupos[item.indice]!} indice={item.indice} />
+              ) : item.tipo === 'secao' ? (
+                <MedeSecao key={chaveItem(item)} secao={doc.secoes[item.indice]!} indice={item.indice} />
+              ) : (
+                <div key={chaveItem(item)} data-bloco={chaveItem(item)}>
+                  <Bloco item={item} doc={doc} />
+                </div>
+              ),
+            )}
+          </div>
+        </div>
+        <div data-medida="foot">
+          <Rodape pagina={1} total={1} />
+        </div>
       </div>
     </div>
   )

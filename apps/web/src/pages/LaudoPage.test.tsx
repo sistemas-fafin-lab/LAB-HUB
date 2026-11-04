@@ -271,6 +271,56 @@ describe('identificação do documento', () => {
     expect(papel(laudo())).toContain('Pág. 1 de 1')
   })
 
+  describe('quando sobra pouco para a última folha', () => {
+    // jsdom não tem layout: as alturas da camada de medição são simuladas.
+    // Folha A4 = 1122,5 px; cabeçalho da 1ª 200, das seguintes 60, rodapé 60.
+    // Blocos (título, material/método, observações) 50; cabeçalho da tabela 30;
+    // linha 40 — ou 34 na versão compacta.
+    function simulaAlturas() {
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+        const el = this as HTMLElement
+        const compacta = el.closest('.compacto') !== null
+        const medida = el.dataset.medida
+        const height =
+          medida === 'head-first' ? 200
+          : medida === 'head-run' || medida === 'foot' ? 60
+          : el.dataset.parte ? (compacta ? 34 : 40)
+          : el.dataset.moldura ? 30
+          : el.dataset.bloco ? 50
+          : 0
+        return { height, width: 0, top: 0, left: 0, right: 0, bottom: height, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+      })
+    }
+    const comLinhas = (n: number) =>
+      laudoComMarcadores({
+        summary: 'Observação do laboratório.',
+        panels: Array.from({ length: n }, (_, i) => painel({ name: `Marcador ${i + 1}` })),
+      })
+
+    it('aperta as linhas da tabela se assim o laudo cabe numa folha a menos', () => {
+      simulaAlturas()
+      // 16 linhas: na versão normal só as observações iriam para a 2ª folha.
+      const folha = folhas(comLinhas(16))
+      expect(folha.textContent).toContain('Pág. 1 de 1')
+      expect(folha.textContent).toContain('Observação do laboratório.')
+      expect(folha.classList.contains('compacto')).toBe(true)
+    })
+
+    it('mantém o espaçamento normal quando apertar não economiza folha', () => {
+      simulaAlturas()
+      const folha = folhas(comLinhas(30))
+      expect(folha.textContent).toContain('Pág. 1 de 2')
+      expect(folha.classList.contains('compacto')).toBe(false)
+    })
+
+    it('mantém o espaçamento normal quando já cabe', () => {
+      simulaAlturas()
+      const folha = folhas(comLinhas(10))
+      expect(folha.textContent).toContain('Pág. 1 de 1')
+      expect(folha.classList.contains('compacto')).toBe(false)
+    })
+  })
+
   it('não imprime CNPJ, endereço, telefone nem assinatura de mockup', () => {
     // Campos que dizem QUEM RESPONDE pelo exame. O documento novo não tem
     // nenhum deles em texto fixo: só voltam como campo do modelo, vindo do LIS.
