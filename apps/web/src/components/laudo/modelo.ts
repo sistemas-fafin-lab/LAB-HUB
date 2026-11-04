@@ -7,7 +7,7 @@
 // afirmação sobre o exame dele.
 
 import type { Paciente } from '@lab-hub/shared'
-import type { Exam } from '../shared/WebHero'
+import type { Exam } from '../../lib/exame'
 import { isLaudoEmSecoes } from '../shared/LaudoSecoes'
 import { formatarCpf, formatarData } from '../../lib/validators'
 

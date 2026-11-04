@@ -2,7 +2,7 @@ import { useId } from 'react'
 import type { ReactNode } from 'react'
 import * as DS from '../../ds'
 import { Btn, Node, Skel } from '../portal'
-import type { Exam } from '../shared/WebHero'
+import type { Exam } from '../../lib/exame'
 import { baixarDeclaracao } from '../../lib/declaracao'
 import { unidadeDoExame } from '../../lib/exibicaoExame'
 

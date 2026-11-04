@@ -14,10 +14,12 @@ import { SettingsPage }    from './pages/SettingsPage'
 import { ProfilePage }     from './pages/ProfilePage'
 import { AuthGate }        from './pages/AuthGate'
 import { NotFoundPage }    from './pages/NotFoundPage'
+import { LimiteDeErro }    from './components/sistema/LimiteDeErro'
+import { ConteudoDeSistema, PaginaDeSistema } from './components/sistema/TelaDeSistema'
 import { useAuth }         from './lib/AuthContext'
 import { usePaciente }     from './lib/usePaciente'
 import { useResultados }   from './lib/useResultados'
-import { rotaOculta } from './lib/flags'
+import { EM_MANUTENCAO, rotaOculta } from './lib/flags'
 import { track, trackPageview } from './lib/analytics'
 import type { TelaPageview } from './lib/analytics'
 import { Redireciona, navegar, useInterceptaLinks, useLocal } from './lib/router'
@@ -34,9 +36,8 @@ import {
   caminhoDoLaudo,
   resolveRota,
 } from './lib/rotas'
-import type { Rota } from './lib/rotas'
 import { lerTema, salvarTema } from './lib/tema'
-import type { Exam } from './components/shared/WebHero'
+import type { Exam } from './lib/exame'
 
 // Logout feito nesta aba. Enquanto vale, a entrada não guarda `next`: o
 // voltar do navegador leva às telas de quem saiu, e quem entrar em seguida
@@ -54,17 +55,32 @@ function entradaPara(rota: string): string {
   return semNext ? CAMINHO_ENTRAR : `${CAMINHO_ENTRAR}?next=${encodeURIComponent(rota)}`
 }
 
-// Telas já no visual novo: montadas direto na raiz `.lh-v2` do shell. As
-// demais ganham o invólucro `.lh-legado`, que devolve a fonte, a cor e os links
-// do visual antigo (ver styles/lh/tema.css). Cada PR de tela entra aqui.
-const TELAS_V2: ReadonlySet<Rota['tela']> = new Set(['home', 'results', 'exam', 'laudo', 'schedule', 'documents', 'trends', 'billing', 'settings', 'profile'])
+// ---------------------------------------------------------------------------
+// App — manutenção (flag EM_MANUTENCAO: a API não tem um sinal próprio) ou o
+// portal, dentro de um limite de erro de página inteira: se o próprio shell
+// falhar ao montar, aparece a tela de erro em vez de uma página branca.
+// ---------------------------------------------------------------------------
+export function App() {
+  if (EM_MANUTENCAO) {
+    return (
+      <PaginaDeSistema>
+        <ConteudoDeSistema tipo="manutencao" acao={{ rotulo: 'Tentar novamente', onClick: () => window.location.reload() }} />
+      </PaginaDeSistema>
+    )
+  }
+  return (
+    <LimiteDeErro alcance="pagina">
+      <Portal />
+    </LimiteDeErro>
+  )
+}
 
 // ---------------------------------------------------------------------------
-// App — porta de autenticação sobre a URL. Sem sessão, qualquer rota vai para
+// Portal — porta de autenticação sobre a URL. Sem sessão, qualquer rota vai para
 // /entrar?next=<rota>; com sessão, /entrar devolve ao `next` (só caminhos
 // internos) e o resto monta o shell autenticado.
 // ---------------------------------------------------------------------------
-export function App() {
+function Portal() {
   const { session, loading, signOut } = useAuth()
   const local = useLocal()
   useInterceptaLinks()
@@ -73,7 +89,8 @@ export function App() {
   // usa o modo escuro não tomar um flash branco enquanto a sessão carrega.
   if (loading) {
     return (
-      <div className="min-h-screen w-full bg-slate-50 dark:bg-gray-950 flex items-center justify-center text-sm text-slate-400 dark:text-gray-500">
+      <div role="status" className="min-h-screen w-full bg-page flex flex-col items-center justify-center gap-3 text-[14px] text-muted">
+        <Node loading size={40} />
         Carregando…
       </div>
     )
@@ -208,7 +225,6 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
         </div>
       ) : (
         <NotFoundPage
-          dark={dark}
           titulo="Exame não encontrado"
           descricao="Este exame não está mais disponível neste endereço. Abra-o de novo pela lista de resultados."
           voltarPara={CAMINHO_DA_TELA.results}
@@ -260,7 +276,7 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
       />
     )
   } else if (rota.tela === 'nao-encontrada') {
-    content = <NotFoundPage dark={dark} />
+    content = <NotFoundPage />
   } else {
     content = (
       <HomePage
@@ -292,12 +308,11 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
       onLogout={onLogout}
       onSessaoExpirada={onSessaoExpirada}
     >
-      {/* O "exame não encontrado" é a 404 antiga até a issue 13. */}
-      {TELAS_V2.has(rota.tela) && !exameInexistente ? (
-        content
-      ) : (
-        <div className="lh-legado font-sans subpixel-antialiased text-slate-900 dark:text-gray-100">{content}</div>
-      )}
+      {/* Falha ao montar a tela troca só o conteúdo; o menu segue disponível.
+          A `key` recria o limite a cada tela, então navegar também sai do erro. */}
+      <LimiteDeErro key={chaveDaPagina} alcance="tela">
+        {content}
+      </LimiteDeErro>
     </Shell>
   )
 }

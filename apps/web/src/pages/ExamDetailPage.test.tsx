@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ExamDetailPage } from './ExamDetailPage'
-import type { Exam, ExamPanel } from '../components/shared/WebHero'
+import type { Exam, ExamPanel } from '../lib/exame'
 import { api } from '../lib/api'
 import { track } from '../lib/analytics'
 import { aoAvisar } from '../lib/avisos'
@@ -67,7 +67,7 @@ describe('laudo substituído', () => {
 // mas "Ver laudo"/declaração montam o documento a partir da sessão LOGADA
 // (usePaciente() em LaudoPage) — em consulta admin isso imprimiria o exame de
 // outro paciente com a identidade de quem está logado. Ver o campo em
-// WebHero.tsx.
+// lib/exame.ts.
 describe('consulta administrativa por CPF', () => {
   it('mostra os valores e o aviso de somente leitura', () => {
     monta([painel()], { somenteLeituraAdmin: true })
@@ -94,7 +94,7 @@ describe('consulta administrativa por CPF', () => {
 describe('coluna Tendência', () => {
   it('não aparece quando nenhum marcador tem série histórica', () => {
     // O laudo dos LIS traz UM valor por marcador (toTrend devolve no máximo um
-    // ponto) e o Sparkline precisa de dois — a coluna ficava sempre vazia,
+    // ponto) e o mini-gráfico precisa de dois — a coluna ficava sempre vazia,
     // com o cabeçalho sobre nada.
     monta([painel(), painel({ name: 'Ureia', trend: [30] })])
 

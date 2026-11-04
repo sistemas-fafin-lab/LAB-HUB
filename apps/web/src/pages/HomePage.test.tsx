@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { Agendamento } from '@lab-hub/shared'
-import type { Exam } from '../components/shared/WebHero'
+import type { Exam } from '../lib/exame'
 import { HomePage } from './HomePage'
 import { aoAvisar } from '../lib/avisos'
 

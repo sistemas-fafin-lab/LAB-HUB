@@ -1,8 +1,7 @@
 // Tema claro/escuro — fonte única da preferência do usuário.
 //
-// O portal v2 (tema `--lh-*`) e as variantes `dark:` do Tailwind seguem a
-// classe `dark` do <html>. As telas antigas ainda recebem `dark` por prop e
-// aplicam ternários de classe; as duas formas convivem porque leem daqui.
+// O tema `--lh-*` (styles/lh/tema.css) e as variantes `dark:` do Tailwind
+// seguem a classe `dark` do <html>, aplicada daqui.
 
 const CHAVE = 'labhub:tema'
 

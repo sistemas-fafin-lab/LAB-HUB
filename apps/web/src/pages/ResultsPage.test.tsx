@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Laudo, Paciente, Resultado } from '@lab-hub/shared'
-import type { Exam } from '../components/shared/WebHero'
+import type { Exam } from '../lib/exame'
 
 const estado = { exams: [] as Exam[], loading: false, error: null as string | null }
 
@@ -530,7 +530,7 @@ describe('consulta administrativa por CPF — validação e busca', () => {
 
     // Os valores do resultado de outro paciente podem ser vistos — mas a flag
     // é quem faz o detalhe esconder "Ver laudo"/declaração (ver ExamDetailPage
-    // e o campo em WebHero.tsx), que montariam o documento com a identidade
+    // e o campo em lib/exame.ts), que montariam o documento com a identidade
     // da sessão logada, não a do paciente consultado.
     expect(onOpenExam).toHaveBeenCalledTimes(1)
     expect(onOpenExam.mock.calls[0]?.[0]).toMatchObject({

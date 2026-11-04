@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import type { Agendamento, Paciente } from '@lab-hub/shared'
-import type { Exam } from './components/shared/WebHero'
+import type { Exam } from './lib/exame'
 
 // ---------------------------------------------------------------------------
 // O App inteiro montado numa URL inicial. Só a sessão (AuthContext), os hooks
@@ -59,8 +59,12 @@ vi.mock('./lib/useAgendamentos', () => ({
   }),
 }))
 
+// `quebra` faz a tela de Documentos falhar ao montar (erro de render).
+const documentos = { quebra: false }
 vi.mock('./lib/useDocumentos', () => ({
-  useDocumentos: () => ({
+  useDocumentos: () => {
+    if (documentos.quebra) throw new Error('falha de render simulada')
+    return {
     documentos: [],
     loading: false,
     error: null,
@@ -69,7 +73,8 @@ vi.mock('./lib/useDocumentos', () => ({
     remover: vi.fn(),
     enviando: false,
     limparErro: vi.fn(),
-  }),
+    }
+  },
 }))
 
 const PACIENTE: Paciente = {
@@ -81,8 +86,13 @@ const PACIENTE: Paciente = {
   sexo: 'F',
   dataNascimento: '1990-03-14',
 }
+// `quebra` faz o shell inteiro falhar ao montar (usePaciente roda nele).
+const paciente = { quebra: false }
 vi.mock('./lib/usePaciente', () => ({
-  usePaciente: () => ({ paciente: PACIENTE, loading: false, error: null, setPaciente: vi.fn(), recarregar: vi.fn() }),
+  usePaciente: () => {
+    if (paciente.quebra) throw new Error('falha de render simulada')
+    return { paciente: PACIENTE, loading: false, error: null, setPaciente: vi.fn(), recarregar: vi.fn() }
+  },
 }))
 
 // Nenhuma tela precisa de resposta da rede para o que se afirma aqui.
@@ -450,10 +460,89 @@ describe('rota desconhecida', () => {
   it('mostra 404 com um link de volta que navega sem recarregar', () => {
     abre('/isso-nao-existe')
     expect(screen.getByRole('heading', { level: 1, name: 'Página não encontrada' })).toBeTruthy()
+    expect(screen.getByText('O endereço pode estar incorreto ou a página mudou de lugar.')).toBeTruthy()
+    expect(screen.getByText('404')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('link', { name: /Voltar para a visão geral/ }))
+    fireEvent.click(screen.getByRole('link', { name: 'Voltar ao início' }))
     expect(caminho()).toBe('/')
     expect(screen.getByRole('heading', { level: 1, name: 'Que bom te ver de volta' })).toBeTruthy()
+  })
+
+  it('continua dentro do shell: o menu segue disponível', () => {
+    abre('/isso-nao-existe')
+    expect(screen.getByRole('navigation', { name: 'Navegação principal' })).toBeTruthy()
+  })
+})
+
+describe('erro ao montar a tela', () => {
+  // Erro de render é anunciado pelo React no console; aqui ele é esperado.
+  function silenciaConsole() {
+    return vi.spyOn(console, 'error').mockImplementation(() => {})
+  }
+
+  it('mostra a tela de erro no shell e "Tentar novamente" monta a tela de novo', () => {
+    const console = silenciaConsole()
+    documentos.quebra = true
+    try {
+      abre('/documentos')
+      expect(screen.getByRole('heading', { level: 1, name: 'Algo deu errado do nosso lado' })).toBeTruthy()
+      expect(screen.getByRole('navigation', { name: 'Navegação principal' })).toBeTruthy()
+
+      documentos.quebra = false
+      fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+      expect(screen.getByRole('heading', { level: 1, name: 'Documentos' })).toBeTruthy()
+    } finally {
+      documentos.quebra = false
+      console.mockRestore()
+    }
+  })
+
+  it('trocar de tela pelo menu sai do erro', () => {
+    const console = silenciaConsole()
+    documentos.quebra = true
+    try {
+      abre('/documentos')
+      const menu = screen.getByRole('navigation', { name: 'Navegação principal' })
+      fireEvent.click(within(menu).getByRole('link', { name: 'Perfil' }))
+      expect(caminho()).toBe('/perfil')
+      expect(screen.queryByText('Algo deu errado do nosso lado')).toBeNull()
+      expect(screen.getByRole('heading', { level: 1, name: 'Maria Souza' })).toBeTruthy()
+    } finally {
+      documentos.quebra = false
+      console.mockRestore()
+    }
+  })
+
+  it('sem internet, a falha vira a tela "sem conexão"', () => {
+    const console = silenciaConsole()
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
+    documentos.quebra = true
+    try {
+      abre('/documentos')
+      expect(screen.getByRole('heading', { level: 1, name: 'Você está sem conexão' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeTruthy()
+    } finally {
+      documentos.quebra = false
+      onLine.mockRestore()
+      console.mockRestore()
+    }
+  })
+
+  it('erro fora das telas (no próprio shell) mostra a página de erro inteira', () => {
+    const console = silenciaConsole()
+    paciente.quebra = true
+    try {
+      abre('/')
+      expect(screen.getByRole('heading', { level: 1, name: 'Algo deu errado do nosso lado' })).toBeTruthy()
+      expect(screen.queryByRole('navigation', { name: 'Navegação principal' })).toBeNull()
+
+      paciente.quebra = false
+      fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+      expect(screen.getByRole('heading', { level: 1, name: 'Que bom te ver de volta' })).toBeTruthy()
+    } finally {
+      paciente.quebra = false
+      console.mockRestore()
+    }
   })
 })
 

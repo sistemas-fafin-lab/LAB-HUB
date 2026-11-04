@@ -6,7 +6,7 @@
 // são os achados principais do laudo e saem em negrito — a mesma regra que o
 // LaudoTexto aplica ao formato legado em texto plano.
 
-import type { Exam, ExamGroup } from './WebHero'
+import type { Exam, ExamGroup } from '../../lib/exame'
 
 // Mesma regra do LaudoTexto: linha toda em CAIXA ALTA (sozinha ou seguida de
 // dois-pontos) é achado principal. Pontuação final de frase ("HEMORRÁGICO.")

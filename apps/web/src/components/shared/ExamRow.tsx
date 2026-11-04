@@ -1,5 +1,5 @@
 import { Ico, Node, Pill } from '../portal'
-import type { Exam } from './WebHero'
+import type { Exam } from '../../lib/exame'
 import { contextoDoExame, responsavelDoExame, situacaoDoExame } from '../../lib/exibicaoExame'
 
 /** Linha de um exame numa lista. Nó e pílula dizem a etapa; a pílula, em texto. */

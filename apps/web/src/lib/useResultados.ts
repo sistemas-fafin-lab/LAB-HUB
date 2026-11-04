@@ -3,7 +3,7 @@ import type { Laudo, RespostaLaudos, Resultado } from '@lab-hub/shared'
 import { api } from './api'
 import { supabase } from './supabase'
 import { laudoToExam, resultadoToExam } from './mappers'
-import type { Exam } from '../components/shared/WebHero'
+import type { Exam } from './exame'
 
 interface UseResultados {
   exams: Exam[]

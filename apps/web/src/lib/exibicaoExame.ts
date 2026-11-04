@@ -1,4 +1,4 @@
-import type { Exam } from '../components/shared/WebHero'
+import type { Exam } from './exame'
 import type { PillTone } from '../components/portal'
 
 // O que a linha de um exame mostra além do nome. Compartilhado entre as listas

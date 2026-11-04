@@ -10,4 +10,4 @@ Single-context — one shared LAB-HUB domain across web, API, mobile, and shared
 
 ### Visual identity (web)
 
-In this repo, `docs/DESIGN.md` (LAB Design System, portal v2) replaces the `flowlab-identity` skill. Do not apply `flowlab-identity` here; build new web screens per `docs/DESIGN.md`, inside a `.lh-v2` root, with `src/ds` and `src/components/portal`.
+In this repo, `docs/DESIGN.md` (LAB Design System, portal v2) replaces the `flowlab-identity` skill. Do not apply `flowlab-identity` here; build new web screens per `docs/DESIGN.md`, with `src/ds` and `src/components/portal`.

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import type { AdminConsultaResultadosResposta, Paciente } from '@lab-hub/shared'
 import { Btn, Chip, EmptyState, FalhaAoCarregar, PageHeader, Panel, SearchField, SelectField, SkeletonRows } from '../components/portal'
 import { ExamRow } from '../components/shared/ExamRow'
-import type { Exam } from '../components/shared/WebHero'
+import type { Exam } from '../lib/exame'
 import { atualizaResultados, combinaExams, useResultados } from '../lib/useResultados'
 import { ehSessaoAdmin } from '../lib/admin'
 import { api, ApiError } from '../lib/api'
@@ -323,7 +323,7 @@ export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProp
               // Em consulta admin o detalhe abre normalmente (só os valores já
               // vêm na resposta, sem chamada nova) — a marca somenteLeituraAdmin
               // é quem faz o detalhe esconder "Ver laudo"/declaração, que exigem
-              // a sessão do PRÓPRIO paciente (ver o campo em WebHero.tsx).
+              // a sessão do PRÓPRIO paciente (ver o campo em lib/exame.ts).
               <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(emConsultaAdmin ? { ...e, somenteLeituraAdmin: true } : e)} />
             ))}
           </div>

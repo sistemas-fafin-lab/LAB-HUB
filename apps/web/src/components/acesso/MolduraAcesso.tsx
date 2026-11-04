@@ -66,13 +66,13 @@ interface MolduraAcessoProps {
 }
 
 // ---------------------------------------------------------------------------
-// MolduraAcesso — cromo das telas sem sessão (portal v2, raiz `.lh-v2`):
+// MolduraAcesso — cromo das telas sem sessão (portal v2):
 // painel da marca à esquerda (≥ 1024 px) e a coluna do formulário. Login,
 // cadastro, recuperação e confirmação de e-mail compartilham a moldura.
 // ---------------------------------------------------------------------------
 export function MolduraAcesso({ dark, onToggleDark, children }: MolduraAcessoProps) {
   return (
-    <div className="lh-v2 min-h-screen w-full flex bg-page text-ink" data-screen-label="00 Acesso">
+    <div className="min-h-screen w-full flex bg-page text-ink" data-screen-label="00 Acesso">
       <PainelMarca />
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:p-6 md:p-10 relative">
         <div className="absolute top-4 right-4 sm:top-5 sm:right-5">

@@ -1,6 +1,6 @@
 # Lab Hub — identidade e sistema visual no código (portal v2)
 
-Base: LAB Design System (manual de marca LAB). Este documento orienta toda tela nova da web e, neste repositório, **substitui a skill `flowlab-identity`** (gradientes azul/índigo, Inter e Plus Jakarta Sans são o visual antigo, em saída).
+Base: LAB Design System (manual de marca LAB). Este documento orienta toda tela nova da web e, neste repositório, **substitui a skill `flowlab-identity`** (gradientes azul/índigo, Inter e Plus Jakarta Sans eram o visual antigo e saíram por completo).
 
 Referência visual aprovada: [`docs/prototipo-v2.html`](prototipo-v2.html) (dados de exemplo; precisa de internet para carregar o Tailwind do protótipo). Telas e estados: [`docs/TELAS.md`](TELAS.md). Plano de migração: `.scratch/portal-v2-ui/spec.md`.
 
@@ -11,18 +11,17 @@ Referência visual aprovada: [`docs/prototipo-v2.html`](prototipo-v2.html) (dado
 | Tokens da marca (cores, tipografia, espaçamento, efeitos) | `apps/web/src/styles/lh/tokens/*.css` |
 | Tema do portal, claro (`:root`) e escuro (`.dark`), com variáveis `--lh-*` | `apps/web/src/styles/lh/tema.css` |
 | Classes Tailwind ligadas ao tema (`bg-page`, `bg-card`, `bg-subtle`, `text-ink`, `text-muted`, `border-line`, `bg-brand`, `text-link`, `bg-coral-soft`, `shadow-float`…) | `apps/web/tailwind.config.js` |
-| Fontes: Ranade (títulos, local em `public/fonts`) e DM Sans (`@fontsource/dm-sans`) | `styles/lh/fontes.css`, `styles/fontes.ts` |
+| Fontes: Ranade (títulos, `font-display`, local em `public/fonts`) e DM Sans (`@fontsource/dm-sans`, texto do `body`) | `styles/lh/fontes.css`, `styles/fontes.ts` |
+| Telas de sistema (404, erro, sem conexão, manutenção) e o limite de erro | `apps/web/src/components/sistema/` |
+| Tipos do exame consumidos pelas telas | `apps/web/src/lib/exame.ts` |
 | Componentes do LAB DS (Button, IconButton, Input, Select, Checkbox, Radio, Switch, Tabs, Tag, Badge, Card, Dialog, Toast, Tooltip, Grafismo) | `apps/web/src/ds/` |
 | Ícones (Lucide, substituto da família própria da marca) | `ds/Icon.tsx` → registro único `components/icones/registro.ts` |
 | Peças do portal (nó, pílulas de status, chips, painéis, cabeçalho de página, linha do tempo, bloco de data, esqueletos, estados vazios, mini-gráficos) | `apps/web/src/components/portal/` |
 | Logos e favicon | `apps/web/public/assets/labhub/` |
 
-## Convivência com o visual antigo (enquanto as telas migram)
+## Base global
 
-- Toda tela nova fica dentro de um elemento com a classe **`lh-v2`**. É ela que aplica fundo `--lh-page`, texto `--lh-ink`, DM Sans, links, `::selection`, foco visível e os ajustes de escuro dos controles do DS. Fora dela, nada muda.
-- `font-display` resolve por variável: Plus Jakarta Sans fora de `.lh-v2`, Ranade dentro.
-- As cores Tailwind novas (`page`, `card`, `ink`, `muted`, `line`, `brand`…) não colidem com classe nenhuma das telas antigas.
-- Na limpeza final (issue 13), as regras de `.lh-v2` passam a ser globais e `font-display` aponta direto para a Ranade.
+`styles/lh/tema.css` aplica a base a toda a página: fundo `--lh-page`, texto `--lh-ink` e DM Sans no `body`, links, `::selection`, foco visível, ajustes de escuro dos controles do DS (`[role=…]`) e a impressão. Não há raiz especial: uma tela nova é só um componente montado no shell (ou na `MolduraAcesso`, sem sessão). Use as cores do tema (`bg-card`, `text-ink`, `border-line`…), nunca a paleta padrão do Tailwind (`slate-*`, `gray-*`, `blue-*`).
 
 ## Regras
 
@@ -42,4 +41,4 @@ O nó e a linha do tempo usam o mesmo modelo: `step`/`passo` = etapas alcançada
 
 ## Ícones
 
-Só os ícones do registro `components/icones/registro.ts` entram no bundle; o `Icon` do DS e o `Icone` das telas antigas leem o mesmo registro. Para usar um novo: importar de `lucide-react` e acrescentar ao objeto `ICONES` com o nome em kebab-case (`'calendar-plus': CalendarPlus`). `IconName` é tipado pelo registro, então um nome inexistente não passa no `type-check`; um nome vindo de dado que não esteja no registro não desenha nada e avisa no console em desenvolvimento. Quando a família de ícones própria da marca existir em SVG, trocar a implementação mantendo os nomes.
+Só os ícones do registro `components/icones/registro.ts` entram no bundle; o `Icon` do DS lê o registro pelo `Icone` (`components/icones/Icone.tsx`). Para usar um novo: importar de `lucide-react` e acrescentar ao objeto `ICONES` com o nome em kebab-case (`'calendar-plus': CalendarPlus`). `IconName` é tipado pelo registro, então um nome inexistente não passa no `type-check`; um nome vindo de dado que não esteja no registro não desenha nada e avisa no console em desenvolvimento. Quando a família de ícones própria da marca existir em SVG, trocar a implementação mantendo os nomes.

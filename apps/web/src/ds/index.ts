@@ -1,7 +1,6 @@
 // LAB Design System — componentes do portal v2 em TypeScript estrito.
 // Visual fiel ao pacote "lab-hub-v2"; os .d.ts originais viraram as props.
-// Nenhuma tela antiga importa daqui: as telas migram uma a uma (ver
-// .scratch/portal-v2-ui/spec.md e docs/DESIGN.md).
+// Guia de uso: docs/DESIGN.md.
 export { Badge } from './Badge'
 export type { BadgeProps, BadgeTone } from './Badge'
 export { Button } from './Button'

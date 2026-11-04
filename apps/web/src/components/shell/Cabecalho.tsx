@@ -7,7 +7,7 @@ import { primeiroNome } from '../../lib/paciente'
 import type { IconName } from '../../ds'
 import { Avatar, Ico, IconBtn, useDismiss } from '../portal'
 import type { AvatarTone } from '../portal'
-import type { Exam } from '../shared/WebHero'
+import type { Exam } from '../../lib/exame'
 import { Busca } from './Busca'
 import { Logo } from './Logo'
 

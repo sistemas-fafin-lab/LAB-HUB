@@ -2,7 +2,7 @@
 
 Referência visual: [`docs/prototipo-v2.html`](prototipo-v2.html) (dados de exemplo, sem API; precisa de internet para carregar o Tailwind do protótipo). Identidade e componentes: [`docs/DESIGN.md`](DESIGN.md). Código: `apps/web/src`.
 
-Ajustado ao escopo do portal v2 (`.scratch/portal-v2-ui/spec.md`): **o comportamento do sistema atual sempre vence.** Só entram telas e estados que já existem ou têm dados reais; o que está atrás de flag continua atrás da mesma flag. Ficaram fora desta lista, com issue própria: verificação em duas etapas, dependentes e troca de perfil, cartões e troca de plano, declaração de comparecimento nova, compartilhar com médico, sair de outros aparelhos, webhook de status para a linha do tempo, "Avançar etapa (dev)" e a página `/estados`.
+Estado final do portal v2: todas as telas no LAB DS, sem código nem identidade do visual antigo. Ajustado ao escopo (`.scratch/portal-v2-ui/spec.md`): **o comportamento do sistema atual sempre vence.** Só entram telas e estados que já existem ou têm dados reais; o que está atrás de flag continua atrás da mesma flag. Ficaram fora desta lista, com issue própria: verificação em duas etapas, dependentes e troca de perfil, cartões e troca de plano, declaração de comparecimento nova, compartilhar com médico, sair de outros aparelhos, webhook de status para a linha do tempo, "Avançar etapa (dev)" e a página `/estados`.
 
 ## Rotas e estados cobertos
 
@@ -21,7 +21,12 @@ Ajustado ao escopo do portal v2 (`.scratch/portal-v2-ui/spec.md`): **o comportam
 | `/configuracoes` | Configurações | ações de hoje, incluindo o tema |
 | `/perfil` | Perfil | ver e editar dados com as validações atuais |
 | `/entrar` | Acesso | login (Supabase Auth), cadastro com as validações atuais, recuperar senha |
-| 404 / sem conexão / erro / manutenção | Sistema | cada uma com uma ação para voltar |
+| qualquer rota desconhecida | 404 (dentro do shell) | "404", título e "Voltar ao início"; exame/laudo inexistente usa a mesma tela com "Exame não encontrado" e volta para Resultados |
+| — | Erro | falha ao montar uma tela: troca só o conteúdo (menu disponível), "Tentar novamente" monta de novo, trocar de tela sai do erro; falha no próprio shell: página inteira |
+| — | Sem conexão | a mesma falha com o navegador offline; "Tentar novamente" |
+| todas | Manutenção | flag `EM_MANUTENCAO` (desligada; a API não tem sinal de manutenção): página inteira em qualquer URL, "Tentar novamente" recarrega |
+
+Telas de sistema: `components/sistema/` (`TelaDeSistema`, `LimiteDeErro`). Textos do protótipo, menos o que prometeria comportamento inexistente: horário de volta e 0800 da manutenção, "resultados já abertos neste aparelho" (não há cache offline), "Falar com o suporte" (o suporte está atrás de `MOSTRAR_CHATBOT`) e "Ver status" (não há página de status). Erros de dados não passam por elas: cada tela mostra o próprio estado de erro (`FalhaAoCarregar`).
 
 Globais: barra de 2 px na troca de página; faixa "sem conexão"; caixa "sessão expirada" em qualquer 401; avisos (toasts) para sucesso, informação e erro; busca com atalho Ctrl/⌘ K; suporte e chatbot conforme as flags atuais; gaveta de navegação abaixo de 1024 px.
 

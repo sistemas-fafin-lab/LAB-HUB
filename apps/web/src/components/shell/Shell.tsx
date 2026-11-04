@@ -5,7 +5,7 @@ import { iniciais, primeiroNome } from '../../lib/paciente'
 import { aoExpirarSessao } from '../../lib/sessao'
 import { useOnline } from '../../lib/useConexao'
 import { Btn, Ico, Modal } from '../portal'
-import type { Exam } from '../shared/WebHero'
+import type { Exam } from '../../lib/exame'
 import { Avisos } from './Avisos'
 import { Cabecalho } from './Cabecalho'
 import { Gaveta, NavLista } from './Navegacao'
@@ -15,9 +15,7 @@ import type { ItemMenu } from './menu'
 // ---------------------------------------------------------------------------
 // Shell do portal v2: cabeçalho, navegação (barra lateral a partir de 1024 px,
 // gaveta abaixo), busca, suporte, avisos, barra de troca de página, faixa sem
-// conexão e caixa de sessão expirada. É a raiz `.lh-v2` das telas novas (ver
-// docs/DESIGN.md, "Convivência"); quem monta uma tela antiga dentro dele a
-// envolve em `.lh-legado` (ver App).
+// conexão e caixa de sessão expirada.
 // ---------------------------------------------------------------------------
 
 export interface ShellProps {
@@ -69,7 +67,7 @@ export function Shell({
   }, [href])
 
   return (
-    <div className="lh-v2 min-h-screen w-full" data-screen-label="01 Lab Hub Web">
+    <div className="min-h-screen w-full" data-screen-label="01 Lab Hub Web">
       <a
         href="#conteudo"
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[70] focus:bg-card focus:px-3 focus:py-2 focus:rounded-lg"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { direcaoDoDesvio, documentoDoExame, idadePorExtenso, secoesDoTexto } from './modelo'
-import type { Exam, ExamPanel } from '../shared/WebHero'
+import type { Exam, ExamPanel } from '../../lib/exame'
 import type { Paciente } from '@lab-hub/shared'
 
 const painel = (over: Partial<ExamPanel> = {}): ExamPanel => ({

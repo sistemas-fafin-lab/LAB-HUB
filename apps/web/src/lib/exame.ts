@@ -1,6 +1,8 @@
-// O cartão antigo saiu com a Visão geral v2 (components/visao-geral/Destaque).
-// Restam os tipos de exame; a limpeza final (issue 13) os muda de arquivo.
-import type { ExamStatus } from '../primitives/WStatus'
+// Exame como as telas o consomem (mapeado de GET /resultados e GET /laudos em
+// lib/mappers.ts).
+
+/** Situação do exame: liberado ou ainda em análise. */
+export type ExamStatus = 'ready' | 'analyzing'
 
 export interface ExamPanel {
   name: string

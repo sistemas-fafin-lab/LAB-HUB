@@ -1,5 +1,5 @@
 import type { Laudo, Resultado } from '@lab-hub/shared'
-import type { Exam } from '../components/shared/WebHero'
+import type { Exam } from './exame'
 
 // As duas fontes de resultado do LAB-HUB convergem aqui para o mesmo `Exam`:
 //   Resultado → o que o FlowLab EMPURRA pelo webhook (tabela `resultados`)
@@ -110,7 +110,7 @@ export function laudoToExam(l: Laudo): Exam {
     crm: l.crm || PLACEHOLDER,
     // 'pending' (resultado não liberado) e 'partial' (faltou uma das fontes)
     // são ambos "ainda não está pronto" para o paciente — a UI só tem dois
-    // estados (WStatus).
+    // estados (ExamStatus em lib/exame.ts).
     status: l.status === 'ready' ? 'ready' : 'analyzing',
     summary: l.summary,
     panels: l.panels.map((p) => ({

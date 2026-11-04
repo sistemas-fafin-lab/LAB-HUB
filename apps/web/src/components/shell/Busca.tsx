@@ -5,7 +5,7 @@ import { useResultados } from '../../lib/useResultados'
 import { track } from '../../lib/analytics'
 import { navegar } from '../../lib/router'
 import { Ico, Pill, useDismiss } from '../portal'
-import type { Exam } from '../shared/WebHero'
+import type { Exam } from '../../lib/exame'
 import { itensVisiveis } from './menu'
 import type { Item as Pagina } from './menu'
 

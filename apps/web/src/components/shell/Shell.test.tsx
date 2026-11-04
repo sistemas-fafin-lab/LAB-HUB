@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import type { Exam } from '../shared/WebHero'
+import type { Exam } from '../../lib/exame'
 
 // ---------------------------------------------------------------------------
 // O shell sozinho (substitui o antigo Topbar.test). Dublês: resultados (a

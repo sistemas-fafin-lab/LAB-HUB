@@ -26,6 +26,10 @@ export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compar
 // da configuração do laboratório — como CAMPOS DO MODELO (modelo.ts), que a
 // folha omite enquanto estiverem ausentes, e não como texto fixo no componente.
 
+// Portal inteiro fora do ar: toda URL (inclusive a entrada) mostra a tela de
+// manutenção. A API não tem um sinal de manutenção; ligar exige um deploy.
+export const EM_MANUTENCAO = false
+
 // Páginas inteiras ocultas do menu E inacessíveis por acesso direto.
 export const MOSTRAR_RESULTADOS = true               // Menu/rota: Resultados (backend real: GET /resultados + GET /laudos)
 export const MOSTRAR_TENDENCIAS = false              // Menu/rota: Tendências

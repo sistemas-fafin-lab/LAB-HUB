@@ -4,7 +4,7 @@ import { BackLink, Btn, EmptyState, ETAPAS, Ico, Node, Panel, PanelHead, Pill, S
 import { Referencia } from '../components/shared/Referencia'
 import { LaudoTexto } from '../components/shared/LaudoTexto'
 import { LaudoSecoes, isLaudoEmSecoes } from '../components/shared/LaudoSecoes'
-import type { Exam, ExamPanel } from '../components/shared/WebHero'
+import type { Exam, ExamPanel } from '../lib/exame'
 import { track } from '../lib/analytics'
 import { baixarDeclaracao } from '../lib/declaracao'
 import { situacaoDoExame } from '../lib/exibicaoExame'
@@ -247,7 +247,7 @@ export function ExamDetailPage({ exam, onBack, onViewLaudo }: ExamDetailPageProp
               (usePaciente() em LaudoPage) — em consulta admin isso imprimiria o
               exame de outro paciente com o CPF/nascimento do admin. Sem correção
               de identidade nesta fatia, os dois ficam fora quando
-              somenteLeituraAdmin (ver WebHero.tsx). */}
+              somenteLeituraAdmin (ver lib/exame.ts). */}
           {!exam.somenteLeituraAdmin && (
             <div className="flex items-center gap-2 flex-wrap">
               <Btn variant="secondary" icon="file-text" onClick={onViewLaudo}>

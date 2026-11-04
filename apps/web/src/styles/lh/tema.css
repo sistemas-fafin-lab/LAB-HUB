@@ -1,15 +1,6 @@
 /* Portal v2 — tema do LAB Design System (variáveis --lh-*), claro em :root e
    escuro em .dark. A classe `dark` no <html> continua vindo de lib/tema.ts
-   (aplicada antes do primeiro render), então o escuro não pisca.
-
-   CONVIVÊNCIA COM O VISUAL ANTIGO: enquanto as telas migram uma a uma, nada
-   aqui pode alterar uma tela antiga. Por isso:
-   - variáveis só declaram valores (ninguém antigo lê --lh-*, --lab-*…);
-   - classes .lh-* são novas e só as telas v2 usam;
-   - tudo o que no pacote era global (body, a, ::selection, :focus-visible,
-     ajustes de [role=…] no escuro, `main` na impressão) fica sob `.lh-v2`, a
-     raiz das telas novas. A limpeza final (issue 13) promove essas regras a
-     globais quando a última tela antiga sair. */
+   (aplicada antes do primeiro render), então o escuro não pisca. */
 
 :root,
 .dark .lh-paper {
@@ -92,45 +83,37 @@
   --border-strong: #3d619b;
 }
 
-/* Fonte da utility `font-display`: Plus Jakarta Sans nas telas antigas,
-   Ranade dentro de .lh-v2 (ver tailwind.config.js). */
-:root {
-  --lh-font-display: 'Plus Jakarta Sans', Inter, sans-serif;
-}
-
-/* ---- Raiz das telas v2 (no pacote: html/body/#root) ---------------------- */
-.lh-v2 {
-  --lh-font-display: Ranade, 'DM Sans', system-ui, sans-serif;
+/* ---- Base global (no pacote: html/body/#root) --------------------------- */
+html,
+body,
+#root {
   min-height: 100%;
+}
+body {
   background: var(--lh-page);
   color: var(--lh-ink);
   font-family: 'DM Sans', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-/* `:where(:not(.lh-legado a))`: os links das telas antigas, montadas dentro
-   do shell v2 num invólucro .lh-legado, ficam com o estilo de antes. O :where
-   não soma especificidade. */
-.lh-v2 a:where(:not(.lh-legado a)) {
+/* `body a` e não `a`: este arquivo vem antes do preflight do Tailwind, cujo
+   `a { color: inherit; text-decoration: inherit }` ganharia o empate. Uma
+   utility (`text-white`) ganha do estado normal, mas não do `:hover` (0,1,2):
+   link com cor própria precisa repetir no hover (`hover:text-white
+   hover:no-underline`). */
+body a {
   color: var(--lh-link);
   text-decoration: none;
 }
-.lh-v2 a:where(:not(.lh-legado a)):hover {
+body a:hover {
   color: var(--lh-action-hover);
   text-decoration: underline;
 }
-.lh-v2 ::selection {
+::selection {
   background: var(--lh-brand-soft);
 }
-.lh-v2 :focus-visible {
+:focus-visible {
   outline: 2px solid var(--lh-brand);
   outline-offset: 2px;
-}
-
-/* Tela antiga montada dentro do shell v2 (ver App.tsx, TELAS_V2): volta a
-   fonte de título antiga. Fonte do texto, cor e suavização vêm das utilities
-   no próprio invólucro (font-sans, text-slate-900/dark:text-gray-100). */
-.lh-legado {
-  --lh-font-display: 'Plus Jakarta Sans', Inter, sans-serif;
 }
 
 /* ---- Peças e assinaturas visuais ---------------------------------------- */
@@ -192,17 +175,17 @@
     background 120ms,
     color 120ms;
 }
-.lh-v2 a.lh-nav {
+body a.lh-nav {
   color: var(--lh-muted);
   text-decoration: none;
 }
 .lh-nav:hover,
-.lh-v2 a.lh-nav:hover {
+body a.lh-nav:hover {
   background: var(--lh-tint);
   color: var(--lh-ink);
 }
 .lh-nav.is-active,
-.lh-v2 a.lh-nav.is-active {
+body a.lh-nav.is-active {
   background: var(--lh-subtle);
   color: var(--lh-ink);
   font-weight: 600;
@@ -491,17 +474,17 @@
   background: #1c3c6b;
   color: #fff;
 }
-.dark .lh-v2 [role='checkbox'][aria-checked='false']:where(:not(.lh-legado *)),
-.dark .lh-v2 [role='radio']:where(:not(.lh-legado *)) {
+.dark [role='checkbox'][aria-checked='false'],
+.dark [role='radio'] {
   background: transparent !important;
 }
-.dark .lh-v2 [role='tab'][aria-selected='true']:where(:not(.lh-legado *)) {
+.dark [role='tab'][aria-selected='true'] {
   background: var(--lh-card) !important;
 }
 
 /* ---- Impressão ----------------------------------------------------------- */
 @media print {
-  .lh-v2 {
+  body {
     background: #fff !important;
   }
   .lh-noprint,
@@ -513,7 +496,7 @@
   .lh-topnav {
     display: none !important;
   }
-  .lh-v2 main {
+  main {
     padding: 0 !important;
   }
   .lh-print-doc {
