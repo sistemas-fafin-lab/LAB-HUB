@@ -31,6 +31,7 @@ vi.mock('../lib/api', () => ({
 }))
 
 const { ResultsPage } = await import('./ResultsPage')
+const { atualizaResultados } = await import('../lib/useResultados')
 
 const ADMIN_EMAIL = 'teste@gmail.com'
 const CPF_VALIDO = '52998224725' // dígitos verificadores reais
@@ -100,6 +101,7 @@ function laudo(over: Partial<Laudo> = {}): Laudo {
 afterEach(() => {
   vi.unstubAllEnvs()
   adminResultadosPorCpf.mockReset()
+  vi.mocked(atualizaResultados).mockClear()
 })
 
 function exame(over: Partial<Exam> = {}): Exam {
@@ -121,15 +123,15 @@ function exame(over: Partial<Exam> = {}): Exam {
 
 function monta(
   exams: Exam[],
-  opts: { paciente?: Paciente | null; onOpenExam?: (exam: Exam) => void } = {},
+  opts: { paciente?: Paciente | null; onOpenExam?: (exam: Exam) => void; onAgendar?: () => void } = {},
 ) {
   estado.exams = exams
   estado.loading = false
   estado.error = null
   return render(
     <ResultsPage
-      dark={false}
       onOpenExam={opts.onOpenExam ?? (() => {})}
+      onAgendar={opts.onAgendar ?? (() => {})}
       {...(opts.paciente !== undefined ? { paciente: opts.paciente } : {})}
     />,
   )
@@ -139,7 +141,16 @@ describe('estado vazio', () => {
   it('diz que ainda não há resultados quando a conta não tem exame nenhum', () => {
     monta([])
 
-    expect(screen.getByText(/Nenhum resultado disponível ainda/)).toBeTruthy()
+    expect(screen.getByText('Nenhum resultado ainda')).toBeTruthy()
+  })
+
+  it('leva a agendar quem não tem exame nenhum', () => {
+    const onAgendar = vi.fn()
+    monta([], { onAgendar })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agendar coleta' }))
+
+    expect(onAgendar).toHaveBeenCalledTimes(1)
   })
 
   it('diz que o FILTRO não casou quando existem exames escondidos por ele', () => {
@@ -147,9 +158,198 @@ describe('estado vazio', () => {
 
     fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), { target: { value: 'zzz' } })
 
-    // A mensagem única antiga ("Nenhum exame encontrado") fazia o paciente com
-    // filtro ativo concluir que não tinha exames.
-    expect(screen.getByText(/Nenhum exame corresponde à busca/)).toBeTruthy()
+    // Sem o caminho de volta ao filtro, o paciente com filtro ativo concluía que
+    // não tinha exames. E o convite a agendar seria falso aqui.
+    expect(screen.getByText('Nenhum exame encontrado')).toBeTruthy()
+    expect(screen.getByText(/limpe os filtros/)).toBeTruthy()
+    expect(screen.queryByText('Nenhum resultado ainda')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Agendar coleta' })).toBeNull()
+  })
+
+  it('"Limpar filtros" desfaz busca, status e período', () => {
+    monta([exame({ name: 'Glicemia' })])
+
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), { target: { value: 'zzz' } })
+    fireEvent.click(screen.getByText('Em andamento'))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Período' }), { target: { value: '30d' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Limpar filtros' }))
+
+    expect(screen.getByText('Glicemia')).toBeTruthy()
+    expect(screen.getByPlaceholderText(/Buscar por nome/)).toHaveProperty('value', '')
+    expect(screen.getByRole('combobox', { name: 'Período' })).toHaveProperty('value', 'all')
+  })
+})
+
+describe('carregando e erro', () => {
+  it('mostra o esqueleto no carregamento, sem dizer que a lista está vazia', () => {
+    estado.exams = []
+    estado.loading = true
+    estado.error = null
+    render(<ResultsPage onOpenExam={() => {}} onAgendar={() => {}} />)
+
+    expect(screen.getByRole('status', { name: 'Carregando' })).toBeTruthy()
+    expect(screen.queryByText('Nenhum resultado ainda')).toBeNull()
+  })
+
+  it('mostra a mensagem da API e deixa tentar de novo', () => {
+    estado.exams = []
+    estado.loading = false
+    estado.error = 'O servidor falhou. Tente de novo em instantes.'
+    render(<ResultsPage onOpenExam={() => {}} onAgendar={() => {}} />)
+
+    expect(screen.getByText('O servidor falhou. Tente de novo em instantes.')).toBeTruthy()
+    expect(screen.queryByText('Nenhum resultado ainda')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+
+    expect(atualizaResultados).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('busca', () => {
+  const exames = () => [
+    exame({ id: 'a', name: 'Glicemia', category: 'Bioquímica' }),
+    exame({ id: 'b', name: 'Hemograma Completo', category: 'Hematologia' }),
+  ]
+  const buscar = (texto: string) =>
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), { target: { value: texto } })
+
+  it('encontra pelo nome, sem diferenciar maiúsculas', () => {
+    monta(exames())
+
+    buscar('GLICEMIA')
+
+    expect(screen.getByText('Glicemia')).toBeTruthy()
+    expect(screen.queryByText('Hemograma Completo')).toBeNull()
+  })
+
+  it('encontra pela categoria', () => {
+    monta(exames())
+
+    buscar('hematologia')
+
+    expect(screen.getByText('Hemograma Completo')).toBeTruthy()
+    expect(screen.queryByText('Glicemia')).toBeNull()
+  })
+})
+
+describe('filtro de status', () => {
+  const exames = () => [
+    exame({ id: 'a', name: 'Exame pronto', status: 'ready' }),
+    exame({ id: 'b', name: 'Exame na bancada', status: 'analyzing' }),
+  ]
+
+  it('"Liberados" deixa só os liberados', () => {
+    monta(exames())
+
+    fireEvent.click(screen.getByText('Liberados'))
+
+    expect(screen.getByText('Exame pronto')).toBeTruthy()
+    expect(screen.queryByText('Exame na bancada')).toBeNull()
+  })
+
+  it('"Em andamento" deixa só os ainda não liberados', () => {
+    monta(exames())
+
+    fireEvent.click(screen.getByText('Em andamento'))
+
+    expect(screen.getByText('Exame na bancada')).toBeTruthy()
+    expect(screen.queryByText('Exame pronto')).toBeNull()
+  })
+
+  it('"Todos" volta a mostrar tudo e o filtro ativo fica marcado', () => {
+    monta(exames())
+
+    fireEvent.click(screen.getByText('Liberados'))
+    expect(screen.getByRole('button', { name: /^Liberados/ }).getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(screen.getByText('Todos'))
+
+    expect(screen.getByRole('button', { name: /^Todos/ }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('Exame pronto')).toBeTruthy()
+    expect(screen.getByText('Exame na bancada')).toBeTruthy()
+  })
+
+  it('cada filtro mostra quantos exames tem', () => {
+    monta(exames())
+
+    expect(screen.getByRole('button', { name: 'Todos 2' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Liberados 1' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Em andamento 1' })).toBeTruthy()
+  })
+})
+
+describe('filtro de período', () => {
+  const diasAtras = (dias: number) => new Date(Date.now() - dias * 86_400_000).toISOString().slice(0, 10)
+  const escolher = (valor: string) =>
+    fireEvent.change(screen.getByRole('combobox', { name: 'Período' }), { target: { value: valor } })
+
+  it.each([
+    ['30d', 'Últimos 30 dias', 10, 60],
+    ['90d', 'Últimos 90 dias', 60, 120],
+    ['12m', 'Últimos 12 meses', 300, 400],
+  ])('%s (%s) corta pela data da coleta', (valor, _rotulo, dentro, fora) => {
+    monta([
+      exame({ id: 'a', name: 'Dentro do período', coletadoEm: diasAtras(dentro) }),
+      exame({ id: 'b', name: 'Fora do período', coletadoEm: diasAtras(fora) }),
+    ])
+
+    escolher(valor)
+
+    expect(screen.getByText('Dentro do período')).toBeTruthy()
+    expect(screen.queryByText('Fora do período')).toBeNull()
+  })
+
+  it('exame sem data de coleta sai quando há período escolhido, e só então', () => {
+    monta([exame({ name: 'Sem data' })])
+    expect(screen.getByText('Sem data')).toBeTruthy()
+
+    escolher('30d')
+
+    expect(screen.queryByText('Sem data')).toBeNull()
+  })
+})
+
+describe('lista', () => {
+  it('mantém a ordem que vem do hook', () => {
+    monta([exame({ id: 'a', name: 'Exame 2' }), exame({ id: 'b', name: 'Exame 1' })])
+
+    expect(screen.getAllByText(/^Exame \d$/).map((el) => el.textContent)).toEqual(['Exame 2', 'Exame 1'])
+  })
+
+  it('abre o exame da linha, sem marca de consulta administrativa', () => {
+    const onOpenExam = vi.fn()
+    monta([exame({ name: 'Glicemia' })], { onOpenExam })
+
+    fireEvent.click(screen.getByText('Glicemia'))
+
+    expect(onOpenExam.mock.calls[0]?.[0]).toMatchObject({ name: 'Glicemia' })
+    expect(onOpenExam.mock.calls[0]?.[0].somenteLeituraAdmin).toBeUndefined()
+  })
+
+  it('mostra a situação de cada exame em texto', () => {
+    monta([exame({ id: 'a', status: 'ready' }), exame({ id: 'b', status: 'analyzing' })])
+
+    expect(screen.getByText('Liberado')).toBeTruthy()
+    expect(screen.getByText('Em análise')).toBeTruthy()
+  })
+
+  it('conta quantos exames a busca deixou', () => {
+    monta([exame({ id: 'a', name: 'Glicemia' }), exame({ id: 'b', name: 'Ureia' })])
+
+    expect(screen.getByText('2 de 2 exames')).toBeTruthy()
+
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), { target: { value: 'ureia' } })
+
+    expect(screen.getByText('1 de 2 exames')).toBeTruthy()
+  })
+
+  it('"Atualizar" busca a lista de novo', async () => {
+    monta([exame()])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Atualizar' }))
+
+    await waitFor(() => expect(atualizaResultados).toHaveBeenCalledTimes(1))
   })
 })
 
@@ -202,7 +402,7 @@ describe('consulta administrativa por CPF — visibilidade do campo', () => {
     monta([])
 
     expect(screen.queryByPlaceholderText(/Consultar por CPF/)).toBeNull()
-    expect(screen.getByText(/Nenhum resultado disponível ainda/)).toBeTruthy()
+    expect(screen.getByText('Nenhum resultado ainda')).toBeTruthy()
   })
 
   // Fora de dev (build de produção), a visibilidade do campo passa a exigir
@@ -507,14 +707,14 @@ describe('consulta administrativa por CPF — filtros da visão normal ficam ocu
     // Fora do modo admin os filtros da visão normal estão todos lá.
     expect(screen.getByPlaceholderText(/Buscar por nome/)).toBeTruthy()
     expect(screen.getByText('Liberados')).toBeTruthy()
-    expect(screen.getByText('Período')).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: 'Período' })).toBeTruthy()
 
     buscar(CPF_VALIDO)
     await waitFor(() => expect(screen.getByText('Maria Alvo')).toBeTruthy())
 
     expect(screen.queryByPlaceholderText(/Buscar por nome/)).toBeNull()
     expect(screen.queryByText('Liberados')).toBeNull()
-    expect(screen.queryByText('Período')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Período' })).toBeNull()
   })
 
   it('um filtro de status ou texto deixado de uma sessão normal anterior não esconde itens da lista admin', async () => {

@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react'
+import type { ComponentProps, HTMLAttributes, ReactNode } from 'react'
 import * as DS from '../../ds'
 import type { IconName } from '../../ds'
 import { Node } from './Node'
@@ -83,21 +83,39 @@ export interface SearchFieldProps {
   onChange: (value: string) => void
   placeholder?: string
   className?: string
+  icon?: IconName
+  inputMode?: HTMLAttributes<HTMLInputElement>['inputMode']
+  /** Enter no campo, para quem busca só ao confirmar */
+  onEnter?: () => void
+  rotuloLimpar?: string
 }
 
-export function SearchField({ value, onChange, placeholder, className = '' }: SearchFieldProps) {
+export function SearchField({
+  value,
+  onChange,
+  placeholder,
+  className = '',
+  icon = 'search',
+  inputMode,
+  onEnter,
+  rotuloLimpar = 'Limpar busca',
+}: SearchFieldProps) {
   return (
     <label className={'lh-field flex items-center gap-2 h-10 px-3 rounded-xl bg-subtle text-muted flex-1 min-w-[200px] ' + className}>
-      <Ico name="search" size={16} />
+      <Ico name={icon} size={16} />
       <input
         value={value}
+        inputMode={inputMode}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onEnter?.()
+        }}
         placeholder={placeholder}
         aria-label={placeholder}
         className="bg-transparent outline-none text-[14px] text-ink flex-1 min-w-0 placeholder:text-muted"
       />
       {value && (
-        <button type="button" onClick={() => onChange('')} aria-label="Limpar busca" className="text-muted hover:text-ink">
+        <button type="button" onClick={() => onChange('')} aria-label={rotuloLimpar} className="text-muted hover:text-ink">
           <Ico name="x" size={14} />
         </button>
       )}

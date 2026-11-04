@@ -2,10 +2,10 @@ import { useId } from 'react'
 import type { ReactNode } from 'react'
 import type { Agendamento, AgendamentoStatus } from '@lab-hub/shared'
 import type { IconName } from '../ds'
-import { Btn, EmptyState, ETAPAS, IconTile, Node, PageHeader, Pill, Panel, PanelHead, SkeletonRows } from '../components/portal'
+import { Btn, EmptyState, ETAPAS, FalhaAoCarregar, IconTile, Node, PageHeader, Pill, Panel, PanelHead, SkeletonRows } from '../components/portal'
 import type { Exam } from '../components/shared/WebHero'
 import { DestaqueCarregando, DestaqueExame, DestaquePrimeiraColeta } from '../components/visao-geral/Destaque'
-import { LinhaExame } from '../components/visao-geral/LinhaExame'
+import { ExamRow } from '../components/shared/ExamRow'
 import { formatDataHora } from '../lib/datetime'
 import {
   MOSTRAR_ACOMPANHAMENTO,
@@ -105,22 +105,6 @@ function BlocoCarregando({ linhas = 1 }: { linhas?: number }) {
     <div className="-mx-5 -mb-5">
       <SkeletonRows n={linhas} />
     </div>
-  )
-}
-
-/** Erro de uma lista: a mensagem da API, sem fingir que a lista está vazia. */
-function FalhaAoCarregar({ titulo, erro, onTentar }: { titulo: string; erro: string; onTentar: () => void }) {
-  return (
-    <EmptyState
-      icon="alert-triangle"
-      title={titulo}
-      text={erro}
-      action={
-        <Btn variant="secondary" size="sm" onClick={onTentar}>
-          Tentar novamente
-        </Btn>
-      }
-    />
   )
 }
 
@@ -331,7 +315,7 @@ function ExamesRecentes({ exams, carregando, erro, onOpenExam, onVerResultados }
     corpo = (
       <div className="divide-y divide-line">
         {exams.slice(0, 5).map((e) => (
-          <LinhaExame key={e.id} exam={e} onClick={() => onOpenExam(e)} />
+          <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(e)} />
         ))}
       </div>
     )

@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react'
 import type { AdminConsultaResultadosResposta, Paciente } from '@lab-hub/shared'
-import { WIcon } from '../components/primitives/WIcon'
+import { Btn, Chip, EmptyState, FalhaAoCarregar, PageHeader, Panel, SearchField, SelectField, SkeletonRows } from '../components/portal'
 import { ExamRow } from '../components/shared/ExamRow'
-import { ExamRowSkeleton } from '../components/shared/ExamRowSkeleton'
 import type { Exam } from '../components/shared/WebHero'
 import { atualizaResultados, combinaExams, useResultados } from '../lib/useResultados'
 import { ehSessaoAdmin } from '../lib/admin'
@@ -19,7 +18,7 @@ interface FilterOption {
 const FILTER_OPTIONS: FilterOption[] = [
   { id: 'all',       label: 'Todos'      },
   { id: 'ready',     label: 'Liberados'  },
-  { id: 'analyzing', label: 'Em análise' },
+  { id: 'analyzing', label: 'Em andamento' },
 ]
 
 type PeriodoId = 'all' | '30d' | '90d' | '12m'
@@ -37,19 +36,36 @@ const PERIODO_OPTIONS: PeriodoOption[] = [
   { id: '12m', label: 'Últimos 12 meses', dias: 365  },
 ]
 
+const OPCOES_PERIODO = PERIODO_OPTIONS.map((p) => ({ value: p.id, label: p.label }))
+
+const ehPeriodo = (valor: string): valor is PeriodoId => PERIODO_OPTIONS.some((p) => p.id === valor)
+
+function contaDoFiltro(exams: readonly Exam[], id: FilterId): number {
+  return id === 'all' ? exams.length : exams.filter((e) => e.status === id).length
+}
+
+/** Mensagem de um campo: tinta com marcador coral (contraste do texto pequeno). */
+function ErroDoCampo({ children }: { children: string }) {
+  return (
+    <p role="alert" className="w-full text-[13px]">
+      <span className="lh-bl mr-2" style={{ background: 'var(--lh-coral)' }} />
+      {children}
+    </p>
+  )
+}
+
 interface ResultsPageProps {
-  dark: boolean
   onOpenExam: (exam: Exam) => void
+  onAgendar: () => void
   /** Paciente da sessão — só usado para decidir se a consulta admin aparece. */
   paciente?: Paciente | null
 }
 
-export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
+export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProps) {
   const { exams, loading, error } = useResultados()
   const [filter, setFilter] = useState<FilterId>('all')
   const [query, setQuery]   = useState('')
   const [periodo, setPeriodo]         = useState<PeriodoId>('all')
-  const [periodoAberto, setPeriodoAberto] = useState(false)
   const [atualizando, setAtualizando] = useState(false)
 
   // Consulta administrativa (ver .scratch/consulta-admin-cpf-producao): campo só
@@ -158,15 +174,41 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
         )
       )
 
+  const limparFiltros = () => {
+    setQuery('')
+    setFilter('all')
+    setPeriodo('all')
+  }
+
   // Estado vazio tem TRÊS mensagens distintas: sem exame nenhum (paciente da
   // sessão), sem exame nenhum (paciente consultado pelo admin) e "filtro não
   // casou" — misturar a primeira com a segunda faria o admin ler "ainda não
   // há resultados" como se fosse sobre a PRÓPRIA conta dele.
-  const mensagemVazia = examsAtivos.length > 0
-    ? 'Nenhum exame corresponde à busca ou aos filtros selecionados.'
-    : emConsultaAdmin
-      ? `Nenhum resultado encontrado para ${consultaAdmin.paciente.nome}.`
-      : 'Nenhum resultado disponível ainda. Assim que o laboratório liberar, ele aparece aqui.'
+  const vazio = examsAtivos.length > 0 ? (
+    <EmptyState
+      icon="search"
+      title="Nenhum exame encontrado"
+      text="Tente outro termo ou limpe os filtros."
+      action={
+        <Btn variant="secondary" onClick={limparFiltros}>
+          Limpar filtros
+        </Btn>
+      }
+    />
+  ) : emConsultaAdmin ? (
+    <EmptyState icon="file-text" title={`Nenhum resultado encontrado para ${consultaAdmin.paciente.nome}.`} />
+  ) : (
+    <EmptyState
+      icon="file-text"
+      title="Nenhum resultado ainda"
+      text="Os resultados aparecem aqui assim que forem liberados."
+      action={
+        <Btn icon="calendar-plus" onClick={onAgendar}>
+          Agendar coleta
+        </Btn>
+      }
+    />
+  )
 
   const handleAtualizar = async () => {
     setAtualizando(true)
@@ -177,25 +219,18 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
     }
   }
 
+  const prontoParaListar = !carregando && !erroAtivo
+
   return (
-    <div>
-      {/* Header */}
-      <div className="mb-5">
-        <h1
-          className={`text-3xl font-bold ${dark ? 'text-white' : 'text-slate-900'}`}
-          style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
-        >
-          Seus resultados
-        </h1>
-        {/* Não prometer "histórico completo": a busca nos LIS cobre uma janela
-            de dias (APLIS_PERIODO_DIAS), então exames antigos podem não estar
-            aqui. Dizer o contrário faz o paciente concluir que não fez exame
-            num período em que fez. */}
-        <p className={`text-sm mt-1 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-          Exames realizados nas nossas unidades. Resultados mais antigos podem não aparecer aqui —
-          nesse caso, procure a unidade onde fez a coleta.
-        </p>
-      </div>
+    <div className="lh-alvos">
+      {/* Não prometer "histórico completo": a busca nos LIS cobre uma janela de
+          dias (APLIS_PERIODO_DIAS), então exames antigos podem não estar aqui.
+          Dizer o contrário faz o paciente concluir que não fez exame num
+          período em que fez. */}
+      <PageHeader
+        title="Seus resultados"
+        sub="Exames realizados nas nossas unidades. Resultados mais antigos podem não aparecer aqui — nesse caso, procure a unidade onde fez a coleta."
+      />
 
       {/* Consulta administrativa de dev — só aparece para a sessão autorizada
           (ver lib/admin.ts). Read-only: nunca edita nada, e nunca mistura a
@@ -204,80 +239,44 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
           paciente sem sair da aba; o banner com nome/CPF/Atualizar/Voltar só
           aparece quando há uma consulta ativa. */}
       {isAdmin && (
-        <div
-          className={`rounded-2xl border ${
-            dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-          } p-4 shadow-sm mb-4 flex flex-col gap-3`}
-        >
+        <Panel pad={14} className="flex flex-col gap-3" style={{ marginBottom: 16 }}>
           {emConsultaAdmin && (
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className={`text-sm ${dark ? 'text-gray-200' : 'text-slate-700'}`}>
+              <div className="text-[14px] min-w-0">
                 Consultando resultados de{' '}
                 <span className="font-semibold">{consultaAdmin.paciente.nome}</span>
                 {' — CPF '}
-                <span className="font-semibold">{formatarCpf(consultaAdmin.paciente.cpf)}</span>
+                <span className="font-semibold tabular-nums">{formatarCpf(consultaAdmin.paciente.cpf)}</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {/* Em consulta admin, Atualizar repete o CPF exibido — só leitura do
                     cache já persistido (resultado + laudo), nunca a lista PRÓPRIA. */}
-                <button
-                  onClick={() => void handleAtualizarAdmin()}
-                  disabled={buscandoCpf}
-                  className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 disabled:opacity-60 ${
-                    dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
-                  }`}
-                >
-                  <WIcon
-                    name="refresh-cw"
-                    className={`w-3.5 h-3.5 ${buscandoCpf ? 'animate-spin' : ''}`}
-                    strokeWidth={2.2}
-                  />
+                <Btn variant="secondary" size="sm" icon="refresh-cw" loading={buscandoCpf} onClick={() => void handleAtualizarAdmin()}>
                   {buscandoCpf ? 'Atualizando…' : 'Atualizar'}
-                </button>
-                <button
-                  onClick={handleLimparConsultaAdmin}
-                  className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 ${
-                    dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
-                  }`}
-                >
-                  <WIcon name="x" className="w-3.5 h-3.5" strokeWidth={2.2} />
+                </Btn>
+                <Btn variant="ghost" size="sm" icon="x" onClick={handleLimparConsultaAdmin}>
                   Voltar aos meus resultados
-                </button>
+                </Btn>
               </div>
             </div>
           )}
           <div className="flex items-center gap-3 flex-wrap">
-            <div
-              className={`flex items-center gap-2 min-w-[220px] ${
-                dark ? 'bg-gray-800 border-gray-700' : 'bg-slate-50 border-gray-100'
-              } border rounded-xl px-3 h-10`}
-            >
-              <WIcon name="id-card" className="w-4 h-4 text-gray-400" strokeWidth={2.2} />
-              <input
-                inputMode="numeric"
-                value={cpfBusca}
-                onChange={(e) => setCpfBusca(formatarCpf(e.target.value))}
-                onKeyDown={(e) => { if (e.key === 'Enter') void handleBuscarCpf() }}
-                placeholder="Consultar por CPF"
-                className={`bg-transparent outline-none text-sm flex-1 ${
-                  dark ? 'text-white placeholder:text-gray-400' : 'text-slate-800 placeholder:text-gray-500'
-                }`}
-              />
-            </div>
-            <button
-              onClick={() => void handleBuscarCpf()}
-              disabled={buscandoCpf}
-              className="h-9 px-3 rounded-lg text-xs font-medium bg-blue-600 text-white inline-flex items-center gap-1.5 disabled:opacity-60"
-            >
-              <WIcon name="search" className="w-3.5 h-3.5" strokeWidth={2.2} />
+            <SearchField
+              icon="id-card"
+              inputMode="numeric"
+              value={cpfBusca}
+              onChange={(valor) => setCpfBusca(formatarCpf(valor))}
+              onEnter={() => void handleBuscarCpf()}
+              placeholder="Consultar por CPF"
+              rotuloLimpar="Limpar CPF"
+            />
+            <Btn icon="search" loading={buscandoCpf} onClick={() => void handleBuscarCpf()}>
               {buscandoCpf ? 'Buscando…' : 'Buscar'}
-            </button>
-            {cpfErro && <span className="text-xs text-red-500">{cpfErro}</span>}
-            {naoEncontrado && (
-              <span className="text-xs text-red-500">Nenhum paciente encontrado com este CPF.</span>
-            )}
+            </Btn>
+            {cpfErro && <ErroDoCampo>{cpfErro}</ErroDoCampo>}
+            {naoEncontrado && <ErroDoCampo>Nenhum paciente encontrado com este CPF.</ErroDoCampo>}
           </div>
-        </div>
+        </Panel>
       )}
 
       {/* Toolbar — busca por nome/categoria, filtros de status/período e
@@ -286,132 +285,55 @@ export function ResultsPage({ dark, onOpenExam, paciente }: ResultsPageProps) {
           a UI visível esconderia resultados do admin sem explicação (ver
           ticket 03). */}
       {!emConsultaAdmin && (
-        <div
-          className={`rounded-2xl border ${
-            dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-          } p-4 shadow-sm mb-4 flex items-center gap-3 flex-wrap`}
-        >
-          {/* Search */}
-          <div
-            className={`flex items-center gap-2 flex-1 min-w-[260px] ${
-              dark ? 'bg-gray-800 border-gray-700' : 'bg-slate-50 border-gray-100'
-            } border rounded-xl px-3 h-10`}
-          >
-            <WIcon name="search" className="w-4 h-4 text-gray-400" strokeWidth={2.2} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar por nome ou categoria…"
-              className={`bg-transparent outline-none text-sm flex-1 ${
-                dark ? 'text-white placeholder:text-gray-400' : 'text-slate-800 placeholder:text-gray-500'
-              }`}
-            />
-          </div>
-
-          {/* Status filters */}
-          <div className="flex items-center gap-1.5">
+        <Panel pad={14} className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 16 }}>
+          <SearchField value={query} onChange={setQuery} placeholder="Buscar por nome ou categoria…" />
+          <div className="flex items-center gap-2 flex-wrap">
             {FILTER_OPTIONS.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setFilter(f.id)}
-                className={`px-3 h-9 rounded-lg text-xs font-semibold transition ${
-                  filter === f.id
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
-                    : dark
-                    ? 'bg-gray-800 text-gray-300'
-                    : 'bg-slate-50 text-gray-600'
-                }`}
-              >
-                {f.label}
-              </button>
+              <Chip key={f.id} selected={filter === f.id} onClick={() => setFilter(f.id)}>
+                {f.label} <span className="tabular-nums opacity-80">{contaDoFiltro(exams, f.id)}</span>
+              </Chip>
             ))}
           </div>
-
-          {/* Período / Atualizar — antes `hidden md:flex`, o que deixava quem está
-              no celular sem filtro de período E sem como recarregar a lista. */}
-          <div className="flex items-center gap-1.5 md:ml-auto">
-            <div className="relative">
-              <button
-                onClick={() => setPeriodoAberto((v) => !v)}
-                className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 ${
-                  periodo !== 'all'
-                    ? 'border-blue-200 text-blue-700 bg-blue-50'
-                    : dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
-                }`}
-              >
-                <WIcon name="calendar" className="w-3.5 h-3.5" strokeWidth={2.2} />
-                {periodo === 'all' ? 'Período' : periodoSel.label}
-              </button>
-              {periodoAberto && (
-                <>
-                  {/* Backdrop invisível: clicar fora fecha o menu. */}
-                  <div className="fixed inset-0 z-10" onClick={() => setPeriodoAberto(false)} />
-                  <div
-                    className={`absolute right-0 top-full mt-1 z-20 w-44 rounded-xl border shadow-lg p-1 ${
-                      dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'
-                    }`}
-                  >
-                    {PERIODO_OPTIONS.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => { setPeriodo(p.id); setPeriodoAberto(false) }}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition ${
-                          periodo === p.id
-                            ? 'bg-blue-600 text-white'
-                            : dark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            <button
-              onClick={handleAtualizar}
-              disabled={atualizando}
-              className={`h-9 px-3 rounded-lg text-xs font-medium border inline-flex items-center gap-1.5 disabled:opacity-60 ${
-                dark ? 'border-gray-700 text-gray-300 bg-gray-800' : 'border-gray-200 text-gray-600 bg-white'
-              }`}
-            >
-              <WIcon
-                name="refresh-cw"
-                className={`w-3.5 h-3.5 ${atualizando ? 'animate-spin' : ''}`}
-                strokeWidth={2.2}
-              />
+          <div className="flex items-center gap-2 flex-wrap md:ml-auto">
+            <SelectField
+              className="w-[190px]"
+              ariaLabel="Período"
+              value={periodo}
+              onChange={(valor) => {
+                if (ehPeriodo(valor)) setPeriodo(valor)
+              }}
+              options={OPCOES_PERIODO}
+            />
+            <Btn variant="secondary" icon="refresh-cw" loading={atualizando} onClick={() => void handleAtualizar()}>
               {atualizando ? 'Atualizando…' : 'Atualizar'}
-            </button>
+            </Btn>
           </div>
-        </div>
+        </Panel>
       )}
 
-      {/* List */}
-      <div
-        className={`rounded-2xl border ${
-          dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-        } p-2 shadow-sm flex flex-col gap-1`}
-      >
-        {carregando && <ExamRowSkeleton dark={dark} />}
+      <Panel pad={0}>
+        {carregando && <SkeletonRows n={5} />}
         {erroAtivo && !carregando && (
-          <div className="text-center text-sm text-red-500 py-10">{erroAtivo}</div>
+          <FalhaAoCarregar titulo="Não foi possível carregar seus exames" erro={erroAtivo} onTentar={() => void handleAtualizar()} />
         )}
-        {!carregando && !erroAtivo && filtered.map((e) => (
-          // Em consulta admin o detalhe abre normalmente (só os valores já
-          // vêm na resposta, sem chamada nova) — a marca somenteLeituraAdmin
-          // é quem faz o detalhe esconder "Ver laudo"/declaração, que exigem
-          // a sessão do PRÓPRIO paciente (ver o campo em WebHero.tsx).
-          <ExamRow
-            key={e.id}
-            exam={e}
-            onClick={() => onOpenExam(emConsultaAdmin ? { ...e, somenteLeituraAdmin: true } : e)}
-            dark={dark}
-          />
-        ))}
-        {!carregando && !erroAtivo && filtered.length === 0 && (
-          <div className="text-center text-sm text-gray-500 py-10">{mensagemVazia}</div>
+        {prontoParaListar && filtered.length === 0 && vazio}
+        {prontoParaListar && filtered.length > 0 && (
+          <div className="divide-y divide-line">
+            {filtered.map((e) => (
+              // Em consulta admin o detalhe abre normalmente (só os valores já
+              // vêm na resposta, sem chamada nova) — a marca somenteLeituraAdmin
+              // é quem faz o detalhe esconder "Ver laudo"/declaração, que exigem
+              // a sessão do PRÓPRIO paciente (ver o campo em WebHero.tsx).
+              <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(emConsultaAdmin ? { ...e, somenteLeituraAdmin: true } : e)} />
+            ))}
+          </div>
         )}
-      </div>
+      </Panel>
+      {prontoParaListar && filtered.length > 0 && (
+        <p className="text-[12px] text-muted mt-3 tabular-nums">
+          {filtered.length} de {examsAtivos.length} {examsAtivos.length === 1 ? 'exame' : 'exames'}
+        </p>
+      )}
     </div>
   )
 }

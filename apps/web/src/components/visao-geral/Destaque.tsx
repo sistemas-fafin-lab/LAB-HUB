@@ -3,8 +3,7 @@ import type { ReactNode } from 'react'
 import * as DS from '../../ds'
 import { Btn, Node, Skel } from '../portal'
 import type { Exam } from '../shared/WebHero'
-import { api } from '../../lib/api'
-import { avisar } from '../../lib/avisos'
+import { baixarDeclaracao } from '../../lib/declaracao'
 import { unidadeDoExame } from '../../lib/exibicaoExame'
 
 // O destaque da Visão geral: o recorte em L da marca (Grafismo). A altura vem
@@ -59,16 +58,6 @@ function Moldura({ rotulo, titulo, texto, acoes, rodape, situacao, detalhe, pass
 
 /** Exame liberado mais recente, com o caminho para o resultado e a declaração. */
 export function DestaqueExame({ exam, onOpen }: { exam: Exam; onOpen: () => void }) {
-  // Busca a URL assinada só na hora: ela expira.
-  const baixar = async () => {
-    try {
-      const { url } = await api.declaracao(exam.id)
-      window.open(url, '_blank', 'noopener')
-    } catch {
-      avisar({ tone: 'alert', title: 'Não foi possível baixar o PDF', message: 'Tente novamente em instantes.' })
-    }
-  }
-
   const liberadoEm = exam.dataEmissao ?? exam.fullDate
   // "coletado em" só com a data de coleta de verdade; com a emissão a frase
   // afirmaria a data errada (ver dataColeta em Exam).
@@ -91,7 +80,7 @@ export function DestaqueExame({ exam, onOpen }: { exam: Exam; onOpen: () => void
             Ver resultado
           </Btn>
           {exam.declaracaoUrl && (
-            <button type="button" className="lh-hero-link" onClick={() => void baixar()}>
+            <button type="button" className="lh-hero-link" onClick={() => void baixarDeclaracao(exam.id)}>
               Baixar PDF
             </button>
           )}

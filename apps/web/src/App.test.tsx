@@ -222,6 +222,19 @@ describe('navegação e histórico do navegador', () => {
     )
   })
 
+  it('Resultados vazio leva a agendar a coleta', () => {
+    resultados.exams = []
+    abre('/resultados')
+    fireEvent.click(screen.getByRole('button', { name: 'Agendar coleta' }))
+    expect(caminho()).toBe('/agendar')
+  })
+
+  it('o voltar do exame leva a Resultados', () => {
+    abre('/exame/exame-1')
+    fireEvent.click(screen.getByRole('button', { name: 'Resultados' }))
+    expect(caminho()).toBe('/resultados')
+  })
+
   it('as abas de Agendas/Coletas são URLs', () => {
     abre('/agendar')
     fireEvent.click(screen.getByRole('button', { name: /Minhas coletas/ }))

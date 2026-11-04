@@ -1,63 +1,62 @@
-import { useState } from 'react'
-
-interface ReferenciaProps {
-  texto: string
-  dark?: boolean
-}
+import { useCallback, useRef, useState } from 'react'
+import { useDismiss } from '../portal'
 
 /**
  * Célula de "Referência" de um marcador.
  *
  * Referência de uma linha ("0,70 a 1,30 mg/dL") aparece inteira. As tabelas
  * multilinha da AOL (faixas por idade/sexo) ocupariam a altura de várias
- * linhas da lista, então viram UMA linha truncada (quebras trocadas por " · ",
- * overflow escondido) e a tabela completa abre por cima.
+ * linhas da lista, então viram UMA linha truncada (quebras trocadas por " · ")
+ * e a tabela completa abre por cima.
  *
  * Abre no hover E no clique. Só no hover, a tabela completa era inalcançável
- * em telefone e tablet — que é justamente onde a linha truncada corta mais —
- * e também por teclado. Como é um <button>, o foco abre junto.
- *
- * Na impressão não existe nem hover nem clique: as regras @media print do
- * index.html (.ref-resumo / .ref-completa) escondem o resumo e imprimem a
- * tabela completa no fluxo normal do documento.
+ * em telefone e tablet, justamente onde a linha truncada corta mais, e também
+ * por teclado. O clique fixa a tabela; Esc e clique fora fecham.
  */
-export function Referencia({ texto, dark = false }: ReferenciaProps) {
-  const [aberto, setAberto] = useState(false)
+export function Referencia({ texto }: { texto: string }) {
+  const [sobMouse, setSobMouse] = useState(false)
+  const [fixa, setFixa] = useState(false)
+  const aberta = sobMouse || fixa
+  const raiz = useRef<HTMLDivElement>(null)
+  const fechar = useCallback(() => {
+    setSobMouse(false)
+    setFixa(false)
+  }, [])
+  useDismiss(aberta, fechar, raiz)
 
   if (!texto.includes('\n')) {
-    return <div className="text-xs text-gray-500 whitespace-pre-line">{texto}</div>
+    return <div className="text-[13px] text-muted tabular-nums whitespace-pre-line">{texto}</div>
   }
 
   return (
-    <div className="relative group min-w-0">
+    <div
+      ref={raiz}
+      className="relative min-w-0"
+      onMouseEnter={() => setSobMouse(true)}
+      onMouseLeave={() => setSobMouse(false)}
+    >
       <button
         type="button"
-        aria-expanded={aberto}
+        aria-expanded={aberta}
         onClick={(e) => {
           // A linha inteira é clicável em algumas telas; abrir a referência não
           // deve navegar junto.
           e.stopPropagation()
-          setAberto((v) => !v)
+          setFixa((v) => !v)
         }}
-        className="ref-resumo w-full text-left text-xs text-gray-500 truncate cursor-help underline decoration-dotted decoration-gray-300 underline-offset-2"
+        className="block w-full text-left text-[13px] text-muted tabular-nums truncate cursor-help underline decoration-dotted decoration-line-strong underline-offset-2"
       >
         {texto.replace(/\n+/g, ' · ')}
       </button>
-      {/* pt-1 no wrapper (e não margin no cartão) mantém a área de hover
-          contínua: dá para levar o mouse até o balão sem ele sumir. */}
-      <div
-        className={`ref-completa ${
-          aberto ? 'block' : 'hidden group-hover:block'
-        } absolute top-full left-0 z-20 pt-1 w-max`}
-      >
-        <div
-          className={`max-w-[24rem] rounded-xl border p-3 text-xs tabular-nums whitespace-pre-line shadow-lg ${
-            dark ? 'bg-gray-800 border-gray-700 text-gray-200' : 'bg-white border-gray-200 text-gray-600'
-          }`}
-        >
-          {texto}
+      {aberta && (
+        // pt-1 no invólucro (e não margem no cartão) mantém a área de hover
+        // contínua: dá para levar o mouse até o balão sem ele sumir.
+        <div className="absolute top-full left-0 z-20 pt-1 w-max">
+          <div className="max-w-[min(24rem,calc(100vw-72px))] rounded-[12px] border border-line bg-card text-ink p-3 text-[12px] tabular-nums whitespace-pre-line shadow-float">
+            {texto}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

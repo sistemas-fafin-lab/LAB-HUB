@@ -1,79 +1,39 @@
-import { WIcon } from '../primitives/WIcon'
-import { WStatus } from '../primitives/WStatus'
+import { Ico, Node, Pill } from '../portal'
 import type { Exam } from './WebHero'
-import { contextoDoExame, responsavelDoExame } from '../../lib/exibicaoExame'
+import { contextoDoExame, responsavelDoExame, situacaoDoExame } from '../../lib/exibicaoExame'
 
-interface ExamRowProps {
-  exam: Exam
-  onClick: () => void
-  dark: boolean
-}
-
-/** Linha da lista de resultados. A data e o responsável: ver lib/exibicaoExame. */
-export function ExamRow({ exam, onClick, dark }: ExamRowProps) {
-  const contexto = contextoDoExame(exam)
+/** Linha de um exame numa lista. Nó e pílula dizem a etapa; a pílula, em texto. */
+export function ExamRow({ exam, onClick }: { exam: Exam; onClick: () => void }) {
+  const { rotulo, tom, passo } = situacaoDoExame(exam)
   const responsavel = responsavelDoExame(exam)
-
+  const contexto = contextoDoExame(exam)
   return (
     <button
+      type="button"
       onClick={onClick}
-      className={`w-full grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1.6fr_1fr_1fr_auto_auto] items-center gap-3 md:gap-4 px-3 md:px-4 py-3 rounded-xl text-left transition border ${
-        dark ? 'border-gray-800 hover:bg-gray-800/50' : 'border-gray-100 hover:bg-slate-50'
-      } active:scale-[0.995]`}
+      className="lh-row w-full grid grid-cols-[28px_minmax(0,1fr)_auto] md:grid-cols-[28px_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_110px_16px] items-center gap-x-4 px-5 py-3.5 text-left"
     >
-      <div
-        className={`h-10 w-10 rounded-xl ${
-          exam.status === 'ready' ? 'bg-blue-50 text-blue-600' : 'bg-yellow-50 text-yellow-600'
-        } flex items-center justify-center shrink-0`}
-      >
-        <WIcon
-          name={exam.status === 'ready' ? 'file-check-2' : 'file-clock'}
-          className="w-5 h-5"
-          strokeWidth={2}
-        />
-      </div>
-
-      <div className="min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className={`text-sm font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>{exam.name}</div>
-          {/* Fica ao lado do NOME, não na coluna de status: o paciente tem duas
-              linhas com o mesmo nome de exame, e é aí que ele precisa da
-              distinção — não depois de percorrer a linha até a direita. A
-              coluna de status continua dizendo "Liberado", porque este laudo
-              foi liberado de verdade; ele só não é mais o vigente. */}
-          {exam.retificado && (
-            <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${
-                dark ? 'bg-gray-700 text-gray-300' : 'bg-slate-200 text-slate-600'
-              }`}
-            >
-              Versão anterior
-            </span>
-          )}
-        </div>
-        <div className={`text-[11px] truncate ${dark ? 'text-gray-400' : 'text-gray-500'}`}>{exam.category}</div>
-        {/* Abaixo de md as colunas de responsável e contexto não cabem; descem
-            para dentro desta célula em vez de sumirem. */}
-        <div className={`md:hidden text-[11px] truncate mt-0.5 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
+      <Node step={passo} size={26} ring />
+      <span className="block min-w-0">
+        <span className="flex flex-wrap items-center gap-x-2 min-w-0">
+          <span className="text-[14px] font-semibold truncate max-w-full">{exam.name}</span>
+          {/* Ao lado do nome: duas linhas com o mesmo exame é onde o paciente
+              precisa da distinção. A pílula segue "Liberado": este laudo foi
+              liberado, só não é mais o vigente. */}
+          {exam.retificado && <span className="text-[11px] font-semibold text-muted shrink-0">Versão anterior</span>}
+        </span>
+        <span className="block text-[12px] text-muted truncate">{exam.category}</span>
+        {/* Abaixo de md as colunas não cabem; descem para cá em vez de sumirem. */}
+        <span className="md:hidden block text-[12px] text-muted truncate">
           {[responsavel, contexto].filter(Boolean).join(' · ')}
-        </div>
-      </div>
-
-      <div className={`hidden md:block text-xs truncate ${dark ? 'text-gray-300' : 'text-gray-600'}`}>
-        {responsavel ?? ''}
-      </div>
-
-      <div className={`hidden md:block text-xs truncate ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-        {contexto}
-      </div>
-
-      {/* Largura fixa: cada linha é um grid independente, então se esta célula
-          fosse `auto` a diferença entre "Liberado" e "Em análise" mudaria a
-          largura das colunas `fr` de linha para linha, desalinhando a lista. */}
-      <div className="md:w-24 flex justify-end">
-        <WStatus status={exam.status} />
-      </div>
-      <WIcon name="chevron-right" className="hidden md:block w-4 h-4 text-gray-400" strokeWidth={2} />
+        </span>
+      </span>
+      <span className="hidden md:block text-[13px] truncate">{responsavel ?? ''}</span>
+      <span className="hidden md:block text-[13px] text-muted truncate tabular-nums">{contexto}</span>
+      <span className="flex justify-end">
+        <Pill tone={tom}>{rotulo}</Pill>
+      </span>
+      <Ico name="chevron-right" size={16} className="hidden md:inline-flex text-faint" />
     </button>
   )
 }

@@ -1,7 +1,6 @@
 // Peças do portal v2 sobre o LAB DS: nó, pílulas, chips, painéis, linha do
 // tempo, bloco de data, esqueletos e estados vazios. Tipadas e sem dado de
 // exemplo: as telas entregam os dados reais (hooks atuais) por props.
-// Ainda sem uso nas telas — cada tela passa a usar quando migrar.
 export { Node } from './Node'
 export type { NodeProps } from './Node'
 export { Btn, Chip, Field, IconBtn, Ico, Modal, SearchField, SelectField } from './controles'
@@ -13,7 +12,7 @@ export { BackLink, InfoGrid, PageHeader, Panel, PanelHead } from './layout'
 export type { InfoItem, PageHeaderProps, PanelProps } from './layout'
 export { Avatar, DateBlock, IconTile } from './identidade'
 export type { AvatarTone, IconTileTone } from './identidade'
-export { EmptyState, Skel, SkeletonRows } from './carregamento'
+export { EmptyState, FalhaAoCarregar, Skel, SkeletonRows } from './carregamento'
 export type { EmptyStateProps } from './carregamento'
 export { Spark, TrendLine } from './graficos'
 export { Timeline } from './Timeline'

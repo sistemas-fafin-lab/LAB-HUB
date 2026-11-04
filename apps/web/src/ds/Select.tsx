@@ -5,6 +5,8 @@ import type { OpcaoDS } from './Radio'
 
 export interface SelectProps {
   label?: string
+  /** Nome acessível quando o controle não tem rótulo visível */
+  ariaLabel?: string
   options: readonly OpcaoDS[]
   value?: string
   defaultValue?: string
@@ -15,7 +17,7 @@ export interface SelectProps {
   style?: CSSProperties
 }
 
-export function Select({ label, options, value, defaultValue, onChange, placeholder, disabled = false, hint, style }: SelectProps) {
+export function Select({ label, ariaLabel, options, value, defaultValue, onChange, placeholder, disabled = false, hint, style }: SelectProps) {
   const [foco, setFoco] = useState(false)
   return (
     <label style={{ display: 'grid', gap: 6, fontFamily: 'var(--font-body)', opacity: disabled ? 'var(--opacity-disabled)' : 1, ...style }}>
@@ -33,6 +35,7 @@ export function Select({ label, options, value, defaultValue, onChange, placehol
         }}
       >
         <select
+          aria-label={ariaLabel}
           value={value}
           defaultValue={value === undefined ? (defaultValue ?? '') : undefined}
           disabled={disabled}

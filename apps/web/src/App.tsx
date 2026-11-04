@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Shell }       from './components/shell/Shell'
 import { itemDaRota }  from './components/shell/menu'
+import { Node }        from './components/portal'
 import { HomePage }        from './pages/HomePage'
 import { ResultsPage }     from './pages/ResultsPage'
 import { ExamDetailPage }  from './pages/ExamDetailPage'
@@ -56,7 +57,7 @@ function entradaPara(rota: string): string {
 // Telas já no visual novo: montadas direto na raiz `.lh-v2` do shell. As
 // demais ganham o invólucro `.lh-legado`, que devolve a fonte, a cor e os links
 // do visual antigo (ver styles/lh/tema.css). Cada PR de tela entra aqui.
-const TELAS_V2: ReadonlySet<Rota['tela']> = new Set(['home'])
+const TELAS_V2: ReadonlySet<Rota['tela']> = new Set(['home', 'results', 'exam'])
 
 // ---------------------------------------------------------------------------
 // App — porta de autenticação sobre a URL. Sem sessão, qualquer rota vai para
@@ -201,7 +202,10 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   } else if (idExame !== null) {
     if (exam === null) {
       content = !exameInexistente ? (
-        <div className="py-16 text-center text-sm text-gray-500">Carregando exame…</div>
+        <div role="status" className="py-16 flex flex-col items-center gap-3 text-[14px] text-muted">
+          <Node loading size={40} />
+          Carregando exame…
+        </div>
       ) : (
         <NotFoundPage
           dark={dark}
@@ -220,13 +224,12 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
           exam={exam}
           // Fechar um exame volta para a lista de Resultados (de onde ele foi aberto).
           onBack={() => navegar(CAMINHO_DA_TELA.results)}
-          dark={dark}
           onViewLaudo={() => navegar(caminhoDoLaudo(exam.id))}
         />
       )
     }
   } else if (rota.tela === 'results') {
-    content = <ResultsPage  dark={dark} onOpenExam={handleOpenExam} paciente={paciente} />
+    content = <ResultsPage onOpenExam={handleOpenExam} onAgendar={() => navegar(caminhoDaAba('agendar'))} paciente={paciente} />
   } else if (rota.tela === 'schedule') {
     content = (
       <SchedulePage
@@ -281,7 +284,8 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
       onLogout={onLogout}
       onSessaoExpirada={onSessaoExpirada}
     >
-      {TELAS_V2.has(rota.tela) ? (
+      {/* O "exame não encontrado" é a 404 antiga até a issue 13. */}
+      {TELAS_V2.has(rota.tela) && !exameInexistente ? (
         content
       ) : (
         <div className="lh-legado font-sans subpixel-antialiased text-slate-900 dark:text-gray-100">{content}</div>

@@ -224,6 +224,10 @@
 .lh-field:focus-within {
   box-shadow: 0 0 0 3px rgba(65, 110, 245, 0.35);
 }
+/* O anel é o do campo inteiro; sem isto o foco global desenha outro no input. */
+.lh-field input:focus-visible {
+  outline: none;
+}
 .lh-tile {
   width: 46px;
   height: 46px;

@@ -49,43 +49,37 @@ function parseSecoes(texto: string): Secao[] {
   return secoes
 }
 
-interface LaudoTextoProps {
-  texto: string
-  dark?: boolean
-}
+const COR_DO_TITULO = { color: 'var(--lh-link)' }
 
-export function LaudoTexto({ texto, dark = false }: LaudoTextoProps) {
+export function LaudoTexto({ texto }: { texto: string }) {
   const secoes = parseSecoes(texto)
-  const titulo = `text-[11px] font-bold uppercase tracking-wider ${
-    dark ? 'text-blue-400' : 'text-blue-600'
-  }`
-  const forte = `font-semibold ${dark ? 'text-white' : 'text-slate-900'}`
 
   return (
-    <div className={`text-sm leading-relaxed ${dark ? 'text-gray-200' : 'text-slate-700'}`}>
+    <div className="text-[14px] leading-relaxed">
       {secoes.map((s, i) => {
         const corpo = s.linhas.map((l, li) => (
-          <p key={li} className={l.forte ? forte : ''}>
+          <p key={li} className={l.forte ? 'font-semibold' : ''}>
             {l.texto}
           </p>
         ))
 
         if (s.destaque) {
           return (
-            <div
-              key={i}
-              className={`mt-5 rounded-xl border p-4 ${
-                dark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-100'
-              }`}
-            >
-              <div className={`${titulo} mb-1.5`}>{s.titulo}</div>
+            <div key={i} className="mt-5 rounded-[14px] p-4 bg-subtle">
+              <div className="lh-ov mb-1.5" style={COR_DO_TITULO}>
+                {s.titulo}
+              </div>
               {corpo}
             </div>
           )
         }
         return (
           <div key={i} className={i > 0 ? 'mt-4' : ''}>
-            {s.titulo && <div className={`${titulo} mb-1`}>{s.titulo}</div>}
+            {s.titulo && (
+              <div className="lh-ov mb-1" style={COR_DO_TITULO}>
+                {s.titulo}
+              </div>
+            )}
             {corpo}
           </div>
         )

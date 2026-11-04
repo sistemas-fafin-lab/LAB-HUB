@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { IconName } from '../../ds'
+import { Btn } from './controles'
 import { IconTile } from './identidade'
 import { Node } from './Node'
 
@@ -40,5 +41,21 @@ export function EmptyState({ icon = 'inbox', title, text, action }: EmptyStatePr
       {text && <p className="text-[13px] text-muted mt-1 max-w-sm">{text}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
+  )
+}
+
+/** Erro de uma lista: a mensagem da API, sem fingir que a lista está vazia. */
+export function FalhaAoCarregar({ titulo, erro, onTentar }: { titulo: string; erro: string; onTentar: () => void }) {
+  return (
+    <EmptyState
+      icon="alert-triangle"
+      title={titulo}
+      text={erro}
+      action={
+        <Btn variant="secondary" size="sm" onClick={onTentar}>
+          Tentar novamente
+        </Btn>
+      }
+    />
   )
 }
