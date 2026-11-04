@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import type { CadastroPacientePayload, Paciente, Sexo } from '@lab-hub/shared'
 import { Btn, Field, SelectField } from '../components/portal'
-import { AvisoErro, CampoSenha, RegrasSenha } from '../components/acesso/pecas'
+import { AvisoErro, CampoSenha, EtapasCadastro, RegrasSenha, TituloAcesso } from '../components/acesso/pecas'
 import { api } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import { track } from '../lib/analytics'
@@ -27,6 +27,8 @@ interface CadastroResponse {
 }
 
 interface CadastroPageProps {
+  /** Abas "Entrar · Criar conta": só aparecem na primeira etapa, como no design. */
+  abas: ReactNode
   /** Conta criada, mas falta confirmar o e-mail: o AuthGate assume a tela. */
   onEmailSent: (email: string) => void
 }
@@ -40,21 +42,25 @@ type FieldErrors = {
   nome?: string | undefined
   email?: string | undefined
   password?: string | undefined
+  confirmacao?: string | undefined
   cpf?: string | undefined
   dataNascimento?: string | undefined
   telefone?: string | undefined
 }
 
 // ---------------------------------------------------------------------------
-// CadastroPage — corpo do formulário de criação de conta. A moldura (painel da
-// marca, título, abas) vem do AuthGate. O design dividia o cadastro em três
-// etapas (dados, senha, código por SMS); aqui segue um formulário só, com os
-// campos e as validações de hoje — não há verificação por SMS.
+// CadastroPage — criação de conta nas etapas do design: 01 "Seus dados" e
+// 02 "Senha" ficam aqui; a 03 "Confirmação" é a tela de confirmar o e-mail do
+// AuthGate (o design pede um código por SMS, que não temos). A conta só é
+// criada no fim da etapa 2: não há como conferir CPF/e-mail antes, então um
+// erro da API aparece na etapa da senha.
 // ---------------------------------------------------------------------------
-export function CadastroPage({ onEmailSent }: CadastroPageProps) {
+export function CadastroPage({ abas, onEmailSent }: CadastroPageProps) {
+  const [etapa, setEtapa] = useState<0 | 1>(0)
   const [nome, setNome] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmacao, setConfirmacao] = useState('')
   const [cpf, setCpf] = useState('')
   const [sexo, setSexo] = useState<Sexo>('M')
   const [dataNascimento, setDataNascimento] = useState('')
@@ -73,20 +79,41 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
     if (valor) setFieldError(field, validar(valor))
   }
 
+  const validarConfirmacao = (v: string) => (v === password ? null : 'As senhas não conferem')
+
+  // Valida os campos da etapa; devolve true se pode seguir.
+  const confere = (proximos: FieldErrors) => {
+    setErrors(proximos)
+    return !Object.values(proximos).some(Boolean)
+  }
+
+  const handleDados = (e: FormEvent) => {
+    e.preventDefault()
+    const ok = confere({
+      nome: validarNome(nome) ?? undefined,
+      cpf: validarCpf(cpf) ?? undefined,
+      dataNascimento: validarDataNascimento(dataNascimento) ?? undefined,
+      telefone: validarTelefone(telefone) ?? undefined,
+      email: validarEmail(email) ?? undefined,
+    })
+    if (ok) setEtapa(1)
+  }
+
+  const voltarAosDados = () => {
+    setError(null)
+    setErrors({})
+    setEtapa(0)
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
 
-    const nextErrors: FieldErrors = {
-      nome: validarNome(nome) ?? undefined,
-      email: validarEmail(email) ?? undefined,
+    const ok = confere({
       password: validarSenha(password) ?? undefined,
-      cpf: validarCpf(cpf) ?? undefined,
-      dataNascimento: validarDataNascimento(dataNascimento) ?? undefined,
-      telefone: validarTelefone(telefone) ?? undefined,
-    }
-    setErrors(nextErrors)
-    if (Object.values(nextErrors).some(Boolean)) return
+      confirmacao: validarConfirmacao(confirmacao) ?? undefined,
+    })
+    if (!ok) return
 
     setLoading(true)
     track('cadastro_submit')
@@ -127,92 +154,123 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
     }
   }
 
+  if (etapa === 0) {
+    return (
+      <>
+        <EtapasCadastro atual={0} />
+        <TituloAcesso titulo="Crie sua conta" sub="Em menos de 1 minuto você está pronto" />
+        {abas}
+        <form onSubmit={handleDados} noValidate className="flex flex-col gap-4">
+          <Field
+            id="cad-nome"
+            label="Nome completo"
+            icon="user-round"
+            value={nome}
+            onChange={setNome}
+            onBlur={() => handleBlur('nome', nome, validarNome)}
+            error={errors.nome}
+            autoComplete="name"
+          />
+
+          <Field
+            id="cad-cpf"
+            label="CPF"
+            icon="id-card"
+            inputMode="numeric"
+            value={cpf}
+            onChange={(v) => setCpf(formatarCpf(v))}
+            onBlur={() => handleBlur('cpf', cpf, validarCpf)}
+            error={errors.cpf}
+            placeholder="000.000.000-00"
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              id="cad-nascimento"
+              label="Nascimento"
+              inputMode="numeric"
+              placeholder="DD/MM/AAAA"
+              value={dataNascimento}
+              onChange={(v) => setDataNascimento(formatarDataDigitada(v))}
+              onBlur={() => handleBlur('dataNascimento', dataNascimento, validarDataNascimento)}
+              error={errors.dataNascimento}
+              autoComplete="bday"
+            />
+            <SelectField
+              label="Sexo"
+              options={OPCOES_SEXO}
+              value={sexo}
+              onChange={(v) => setSexo(v === 'F' ? 'F' : 'M')}
+            />
+          </div>
+
+          <Field
+            id="cad-telefone"
+            label="Telefone (opcional)"
+            icon="smartphone"
+            inputMode="numeric"
+            value={telefone}
+            onChange={(v) => setTelefone(formatarTelefone(v))}
+            onBlur={() => handleBlur('telefone', telefone, validarTelefone)}
+            error={errors.telefone}
+            placeholder="(00) 0 0000-0000"
+            autoComplete="tel"
+          />
+
+          <Field
+            id="cad-email"
+            label="E-mail"
+            type="email"
+            icon="mail"
+            value={email}
+            onChange={setEmail}
+            onBlur={() => handleBlur('email', email, validarEmail)}
+            error={errors.email}
+            placeholder="voce@email.com"
+            autoComplete="email"
+          />
+
+          <Btn type="submit" size="lg" fullWidth iconRight="arrow-right">
+            Continuar
+          </Btn>
+        </form>
+      </>
+    )
+  }
+
   return (
-    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
-      {error !== null && <AvisoErro>{error}</AvisoErro>}
+    <>
+      <EtapasCadastro atual={1} />
+      <TituloAcesso titulo="Crie uma senha" sub="Ela protege seus resultados e os da sua família." />
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+        {error !== null && <AvisoErro>{error}</AvisoErro>}
 
-      <Field
-        id="cad-nome"
-        label="Nome completo"
-        icon="user-round"
-        value={nome}
-        onChange={setNome}
-        onBlur={() => handleBlur('nome', nome, validarNome)}
-        error={errors.nome}
-        autoComplete="name"
-      />
-
-      <Field
-        id="cad-cpf"
-        label="CPF"
-        icon="id-card"
-        inputMode="numeric"
-        value={cpf}
-        onChange={(v) => setCpf(formatarCpf(v))}
-        onBlur={() => handleBlur('cpf', cpf, validarCpf)}
-        error={errors.cpf}
-        placeholder="000.000.000-00"
-      />
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field
-          id="cad-nascimento"
-          label="Nascimento"
-          inputMode="numeric"
-          placeholder="DD/MM/AAAA"
-          value={dataNascimento}
-          onChange={(v) => setDataNascimento(formatarDataDigitada(v))}
-          onBlur={() => handleBlur('dataNascimento', dataNascimento, validarDataNascimento)}
-          error={errors.dataNascimento}
-          autoComplete="bday"
+        <CampoSenha
+          id="cad-senha"
+          value={password}
+          onChange={setPassword}
+          onBlur={() => handleBlur('password', password, validarSenha)}
+          error={errors.password}
+          autoComplete="new-password"
         />
-        <SelectField
-          label="Sexo"
-          options={OPCOES_SEXO}
-          value={sexo}
-          onChange={(v) => setSexo(v === 'F' ? 'F' : 'M')}
+        <RegrasSenha senha={password} />
+        <CampoSenha
+          id="cad-senha-confirmacao"
+          label="Confirmar senha"
+          value={confirmacao}
+          onChange={setConfirmacao}
+          onBlur={() => handleBlur('confirmacao', confirmacao, validarConfirmacao)}
+          error={errors.confirmacao}
+          autoComplete="new-password"
         />
-      </div>
 
-      <Field
-        id="cad-telefone"
-        label="Telefone (opcional)"
-        icon="smartphone"
-        inputMode="numeric"
-        value={telefone}
-        onChange={(v) => setTelefone(formatarTelefone(v))}
-        onBlur={() => handleBlur('telefone', telefone, validarTelefone)}
-        error={errors.telefone}
-        placeholder="(00) 0 0000-0000"
-        autoComplete="tel"
-      />
-
-      <Field
-        id="cad-email"
-        label="E-mail"
-        type="email"
-        icon="mail"
-        value={email}
-        onChange={setEmail}
-        onBlur={() => handleBlur('email', email, validarEmail)}
-        error={errors.email}
-        placeholder="voce@email.com"
-        autoComplete="email"
-      />
-
-      <CampoSenha
-        id="cad-senha"
-        value={password}
-        onChange={setPassword}
-        onBlur={() => handleBlur('password', password, validarSenha)}
-        error={errors.password}
-        autoComplete="new-password"
-      />
-      <RegrasSenha senha={password} />
-
-      <Btn type="submit" size="lg" fullWidth loading={loading} iconRight="arrow-right">
-        {loading ? 'Criando conta' : 'Criar conta'}
-      </Btn>
-    </form>
+        <Btn type="submit" size="lg" fullWidth loading={loading} iconRight="arrow-right">
+          {loading ? 'Criando conta' : 'Criar conta'}
+        </Btn>
+        <Btn variant="ghost" fullWidth onClick={voltarAosDados} disabled={loading}>
+          Voltar
+        </Btn>
+      </form>
+    </>
   )
 }

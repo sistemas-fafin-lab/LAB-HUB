@@ -161,19 +161,41 @@ describe('login', () => {
 
 describe('cadastro', () => {
   const vaiParaCadastro = () => fireEvent.click(screen.getByRole('tab', { name: 'Criar conta' }))
+  const continua = () => act(async () => fireEvent.click(screen.getByRole('button', { name: 'Continuar' })))
+  const criaConta = () => act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
+  const titulo = () => screen.getByRole('heading', { level: 1 }).textContent
+  /** Etapa marcada como atual no indicador "01 Seus dados · 02 Senha · 03 Confirmação". */
+  const etapaAtual = () =>
+    screen.getByRole('list', { name: 'Etapas do cadastro' }).querySelector('[aria-current="step"]')?.textContent
 
-  function preencheValido() {
+  function preencheDados() {
     digita('Nome completo', 'Maria Souza')
-    digita('E-mail', 'maria@example.com')
-    digita('Senha', 'SenhaForte123')
     digita('CPF', '52998224725')
     digita('Nascimento', '14031990')
     digita('Telefone (opcional)', '61912345678')
+    digita('E-mail', 'maria@example.com')
   }
 
-  it('aplica as máscaras de CPF, nascimento e telefone', () => {
+  async function chegaNaSenha() {
     abre('/entrar')
     vaiParaCadastro()
+    preencheDados()
+    await continua()
+  }
+
+  function preencheSenha(senha = 'SenhaForte123', confirmacao = senha) {
+    digita('Senha', senha)
+    digita('Confirmar senha', confirmacao)
+  }
+
+  it('começa na etapa "Seus dados", com as abas, e aplica as máscaras', () => {
+    abre('/entrar')
+    vaiParaCadastro()
+    expect(titulo()).toBe('Crie sua conta')
+    expect(etapaAtual()).toBe('01Seus dados')
+    expect(screen.getByRole('tab', { name: 'Criar conta' })).toBeTruthy()
+    expect(screen.queryByLabelText('Senha', { selector: 'input' })).toBeNull()
+
     digita('CPF', '52998224725')
     digita('Nascimento', '14031990')
     digita('Telefone (opcional)', '61912345678')
@@ -182,45 +204,68 @@ describe('cadastro', () => {
     expect(campo('Telefone (opcional)').value).toBe('(61) 9 1234-5678')
   })
 
-  it.each(['31/02/1990', '14/13/1990', '14/03/1890', '14/03/19'])(
-    'nascimento "%s" não é uma data válida e não chama a API',
-    async (data) => {
-      abre('/entrar')
-      vaiParaCadastro()
-      preencheValido()
-      digita('Nascimento', data)
-      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
-
-      expect(erroDo('Nascimento')).toBe('Data inválida')
-      expect(apiPost).not.toHaveBeenCalled()
-    },
-  )
-
-  it('enviar com dados inválidos mostra os erros junto aos campos e não chama a API', async () => {
+  it('dados inválidos mostram os erros junto aos campos e não avançam', async () => {
     abre('/entrar')
     vaiParaCadastro()
-    expect(screen.getByRole('heading', { level: 1, name: 'Crie sua conta' })).toBeTruthy()
-    digita('Senha', 'curta')
     digita('CPF', '11111111111')
     digita('Telefone (opcional)', '6199')
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
+    await continua()
 
     expect(erroDo('Nome completo')).toBe('Informe seu nome')
-    expect(erroDo('E-mail')).toBe('Email inválido')
-    expect(erroDo('Senha')).toBe('Senha deve ter ao menos 12 caracteres')
     expect(erroDo('CPF')).toBe('CPF inválido')
     expect(erroDo('Nascimento')).toBe('Informe a data de nascimento')
     expect(erroDo('Telefone (opcional)')).toBe('Telefone inválido')
+    expect(erroDo('E-mail')).toBe('Email inválido')
+    expect(titulo()).toBe('Crie sua conta')
     expect(apiPost).not.toHaveBeenCalled()
   })
 
-  it('cria a conta e, com confirmação de e-mail, pede para confirmar', async () => {
+  it.each(['31/02/1990', '14/13/1990', '14/03/1890', '14/03/19'])(
+    'nascimento "%s" não é uma data válida e não avança',
+    async (data) => {
+      abre('/entrar')
+      vaiParaCadastro()
+      preencheDados()
+      digita('Nascimento', data)
+      await continua()
+
+      expect(erroDo('Nascimento')).toBe('Data inválida')
+      expect(titulo()).toBe('Crie sua conta')
+    },
+  )
+
+  it('com os dados certos vai para "Senha", sem as abas; voltar mantém o que foi digitado', async () => {
+    await chegaNaSenha()
+    expect(titulo()).toBe('Crie uma senha')
+    expect(etapaAtual()).toBe('02Senha')
+    expect(screen.queryByRole('tab', { name: 'Criar conta' })).toBeNull()
+    expect(apiPost).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar' }))
+    expect(titulo()).toBe('Crie sua conta')
+    expect(campo('Nome completo').value).toBe('Maria Souza')
+    expect(campo('CPF').value).toBe('529.982.247-25')
+  })
+
+  it('senha fraca ou confirmação diferente aparecem junto ao campo e não chamam a API', async () => {
+    await chegaNaSenha()
+    preencheSenha('curta', 'outra')
+    await criaConta()
+
+    expect(erroDo('Senha')).toBe('Senha deve ter ao menos 12 caracteres')
+    expect(erroDo('Confirmar senha')).toBe('As senhas não conferem')
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('cria a conta e, com confirmação de e-mail, vai para a etapa "Confirmação"', async () => {
     apiPost.mockResolvedValue({ requiresEmailConfirmation: true, paciente: {} })
     abre('/entrar')
     vaiParaCadastro()
-    preencheValido()
+    preencheDados()
     fireEvent.change(campo('Sexo'), { target: { value: 'F' } })
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
+    await continua()
+    preencheSenha()
+    await criaConta()
 
     expect(apiPost).toHaveBeenCalledWith('/cadastro', {
       nome: 'Maria Souza',
@@ -233,45 +278,47 @@ describe('cadastro', () => {
     })
     expect(track).toHaveBeenCalledWith('cadastro_submit')
     expect(track).toHaveBeenCalledWith('cadastro_sucesso', { confirmacao_email: true })
-    expect(screen.getByRole('heading', { level: 1, name: 'Confirme seu e-mail' })).toBeTruthy()
+    expect(titulo()).toBe('Confirme seu e-mail')
+    expect(etapaAtual()).toBe('03Confirmação')
     expect(screen.getByText('maria@example.com')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Ir para o login' }))
-    expect(screen.getByRole('heading', { level: 1, name: 'Bem-vindo de volta' })).toBeTruthy()
+    expect(titulo()).toBe('Bem-vindo de volta')
   })
 
   it('sem confirmação de e-mail, entra direto', async () => {
     apiPost.mockResolvedValue({ requiresEmailConfirmation: false, paciente: {} })
-    abre('/entrar')
-    vaiParaCadastro()
-    preencheValido()
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
+    await chegaNaSenha()
+    preencheSenha()
+    await criaConta()
 
     expect(supa.signInWithPassword).toHaveBeenCalledWith({ email: 'maria@example.com', password: 'SenhaForte123' })
     expect(apiPost.mock.calls[0]![1]).toMatchObject({ sexo: 'M' })
   })
 
-  it('erro da API aparece como veio e vai para cadastro_erro', async () => {
+  it('erro da API aparece como veio, na etapa da senha, e vai para cadastro_erro', async () => {
     const msg = 'Não foi possível cadastrar com esses dados.'
     apiPost.mockRejectedValue(new Error(msg))
-    abre('/entrar')
-    vaiParaCadastro()
-    preencheValido()
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
+    await chegaNaSenha()
+    preencheSenha()
+    await criaConta()
 
     expect(screen.getByRole('alert').textContent).toContain(msg)
+    expect(titulo()).toBe('Crie uma senha')
     expect(track).toHaveBeenCalledWith('cadastro_erro', { motivo: msg })
   })
 })
 
 describe('cadastro com a tela de transição', () => {
-  function preencheEEnvia() {
+  async function preencheEEnvia() {
     fireEvent.click(screen.getByRole('tab', { name: 'Criar conta' }))
     digita('Nome completo', 'Maria Souza')
-    digita('E-mail', 'maria@example.com')
-    digita('Senha', 'SenhaForte123')
     digita('CPF', '52998224725')
     digita('Nascimento', '14031990')
+    digita('E-mail', 'maria@example.com')
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Continuar' })))
+    digita('Senha', 'SenhaForte123')
+    digita('Confirmar senha', 'SenhaForte123')
     return act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
   }
 

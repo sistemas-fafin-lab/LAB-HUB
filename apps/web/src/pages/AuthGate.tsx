@@ -2,7 +2,7 @@ import { useState } from 'react'
 import * as DS from '../ds'
 import { Btn } from '../components/portal'
 import { MolduraAcesso } from '../components/acesso/MolduraAcesso'
-import { TituloAcesso } from '../components/acesso/pecas'
+import { EtapasCadastro, TituloAcesso } from '../components/acesso/pecas'
 import { LoginPage } from './LoginPage'
 import { CadastroPage } from './CadastroPage'
 import { RecuperarSenhaPage } from './RecuperarSenhaPage'
@@ -68,23 +68,26 @@ export function AuthGate({ comSessao }: AuthGateProps) {
     conteudo = <RecuperarSenhaPage onVoltar={() => ir('login')} />
   } else {
     const login = modo !== 'cadastro'
-    conteudo = (
+    const abas = (
+      <DS.Tabs
+        variant="segmented"
+        label="Entrar ou criar conta"
+        items={ABAS}
+        value={login ? 'login' : 'cadastro'}
+        // Trocar de aba não empilha no histórico: o voltar sai da entrada.
+        onChange={(v) => ir(v === 'cadastro' ? 'cadastro' : 'login', { substituir: true })}
+        style={{ marginBottom: 24 }}
+      />
+    )
+    conteudo = login ? (
       <>
-        <TituloAcesso
-          titulo={login ? 'Bem-vindo de volta' : 'Crie sua conta'}
-          sub={login ? 'Acesse seus exames com segurança' : 'Em menos de 1 minuto você está pronto'}
-        />
-        <DS.Tabs
-          variant="segmented"
-          label="Entrar ou criar conta"
-          items={ABAS}
-          value={login ? 'login' : 'cadastro'}
-          // Trocar de aba não empilha no histórico: o voltar sai da entrada.
-          onChange={(v) => ir(v === 'cadastro' ? 'cadastro' : 'login', { substituir: true })}
-          style={{ marginBottom: 24 }}
-        />
-        {login ? <LoginPage onEsqueciSenha={() => ir('recuperar')} /> : <CadastroPage onEmailSent={setEmailEnviado} />}
+        <TituloAcesso titulo="Bem-vindo de volta" sub="Acesse seus exames com segurança" />
+        {abas}
+        <LoginPage onEsqueciSenha={() => ir('recuperar')} />
       </>
+    ) : (
+      // O cadastro monta o próprio título: ele muda a cada etapa.
+      <CadastroPage abas={abas} onEmailSent={setEmailEnviado} />
     )
   }
 
@@ -100,12 +103,12 @@ interface ConfirmacaoEmailProps {
   onVoltarAoLogin: () => void
 }
 
-// Substitui o formulário inteiro (inclusive as abas): nesse ponto não há mais o
-// que preencher, só confirmar o e-mail. Texto do sistema atual (o design não
-// tem esta etapa).
+// Etapa 03 "Confirmação" do cadastro. O design confirma o celular por código
+// SMS; aqui a confirmação é pelo link enviado ao e-mail (texto do sistema atual).
 function ConfirmacaoEmail({ email, onVoltarAoLogin }: ConfirmacaoEmailProps) {
   return (
     <>
+      <EtapasCadastro atual={2} />
       <TituloAcesso
         titulo="Confirme seu e-mail"
         sub={

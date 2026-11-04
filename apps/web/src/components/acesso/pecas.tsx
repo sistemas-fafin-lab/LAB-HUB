@@ -17,6 +17,31 @@ export function TituloAcesso({ titulo, sub }: { titulo: string; sub: ReactNode }
   )
 }
 
+const ETAPAS_DO_CADASTRO = ['Seus dados', 'Senha', 'Confirmação'] as const
+
+/** Indicador "01 Seus dados · 02 Senha · 03 Confirmação", acima do título do cadastro. */
+export function EtapasCadastro({ atual }: { atual: 0 | 1 | 2 }) {
+  return (
+    <ol className="flex items-center gap-4 mb-5" aria-label="Etapas do cadastro">
+      {ETAPAS_DO_CADASTRO.map((nome, i) => (
+        <li key={nome} className="flex items-center gap-2" aria-current={i === atual ? 'step' : undefined}>
+          <span
+            className={
+              'font-display font-medium text-[18px] leading-none tabular-nums ' +
+              (i === atual ? 'text-brand' : i < atual ? 'text-ink' : 'text-faint')
+            }
+          >
+            {String(i + 1).padStart(2, '0')}
+          </span>
+          <span className={'text-[12px] font-medium whitespace-nowrap ' + (i > atual ? 'text-muted' : 'text-ink')}>
+            {nome}
+          </span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
 /** Erro que não é de um campo (resposta do Supabase ou da API). */
 export function AvisoErro({ children }: { children: ReactNode }) {
   return (
