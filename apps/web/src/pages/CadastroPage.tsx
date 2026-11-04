@@ -9,7 +9,9 @@ import { track } from '../lib/analytics'
 import { comTransicao } from '../lib/transicao'
 import {
   apenasDigitos,
+  dataDigitadaParaIso,
   formatarCpf,
+  formatarDataDigitada,
   formatarTelefone,
   validarCpf,
   validarDataNascimento,
@@ -96,7 +98,8 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
         password,
         cpf: apenasDigitos(cpf),
         sexo,
-        dataNascimento,
+        // Validada acima: a conversão não falha aqui.
+        dataNascimento: dataDigitadaParaIso(dataNascimento) ?? dataNascimento,
         ...(telDigits ? { telefone: telDigits } : {}),
       }
       // A transição cobre a criação e, sem confirmação de e-mail, o login
@@ -155,9 +158,10 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
         <Field
           id="cad-nascimento"
           label="Nascimento"
-          type="date"
+          inputMode="numeric"
+          placeholder="DD/MM/AAAA"
           value={dataNascimento}
-          onChange={setDataNascimento}
+          onChange={(v) => setDataNascimento(formatarDataDigitada(v))}
           onBlur={() => handleBlur('dataNascimento', dataNascimento, validarDataNascimento)}
           error={errors.dataNascimento}
           autoComplete="bday"

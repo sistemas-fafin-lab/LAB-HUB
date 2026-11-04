@@ -70,9 +70,22 @@ export function validarSenha(senha: string): string | null {
 }
 
 // Espera o formato YYYY-MM-DD emitido pelo <input type="date">.
+// Data digitada como DD/MM/AAAA (campo com máscara) → YYYY-MM-DD, o formato da
+// API. `null` se não for uma data de calendário (31/02, mês 13…) ou se o ano
+// for anterior a 1900.
+export function dataDigitadaParaIso(data: string): string | null {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(data)
+  if (!m) return null
+  const [dia, mes, ano] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const d = new Date(Date.UTC(ano, mes - 1, dia))
+  if (ano < 1900 || d.getUTCFullYear() !== ano || d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) return null
+  return `${m[3]}-${m[2]}-${m[1]}`
+}
+
+// Recebe a data como digitada (DD/MM/AAAA).
 export function validarDataNascimento(data: string): string | null {
   if (!data) return 'Informe a data de nascimento'
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return 'Data inválida'
+  if (dataDigitadaParaIso(data) === null) return 'Data inválida'
   return null
 }
 
@@ -80,6 +93,15 @@ export function validarDataNascimento(data: string): string | null {
 export function formatarData(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso
+}
+
+// Máscara progressiva de data: DD/MM/AAAA
+export function formatarDataDigitada(v: string): string {
+  const d = apenasDigitos(v).slice(0, 8)
+  let out = d.slice(0, 2)
+  if (d.length > 2) out += '/' + d.slice(2, 4)
+  if (d.length > 4) out += '/' + d.slice(4, 8)
+  return out
 }
 
 // Máscara progressiva de CPF: 000.000.000-00

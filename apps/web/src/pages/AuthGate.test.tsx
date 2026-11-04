@@ -167,18 +167,34 @@ describe('cadastro', () => {
     digita('E-mail', 'maria@example.com')
     digita('Senha', 'SenhaForte123')
     digita('CPF', '52998224725')
-    digita('Nascimento', '1990-03-14')
+    digita('Nascimento', '14031990')
     digita('Telefone (opcional)', '61912345678')
   }
 
-  it('aplica as máscaras de CPF e telefone', () => {
+  it('aplica as máscaras de CPF, nascimento e telefone', () => {
     abre('/entrar')
     vaiParaCadastro()
     digita('CPF', '52998224725')
+    digita('Nascimento', '14031990')
     digita('Telefone (opcional)', '61912345678')
     expect(campo('CPF').value).toBe('529.982.247-25')
+    expect(campo('Nascimento').value).toBe('14/03/1990')
     expect(campo('Telefone (opcional)').value).toBe('(61) 9 1234-5678')
   })
+
+  it.each(['31/02/1990', '14/13/1990', '14/03/1890', '14/03/19'])(
+    'nascimento "%s" não é uma data válida e não chama a API',
+    async (data) => {
+      abre('/entrar')
+      vaiParaCadastro()
+      preencheValido()
+      digita('Nascimento', data)
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
+
+      expect(erroDo('Nascimento')).toBe('Data inválida')
+      expect(apiPost).not.toHaveBeenCalled()
+    },
+  )
 
   it('enviar com dados inválidos mostra os erros junto aos campos e não chama a API', async () => {
     abre('/entrar')
@@ -255,7 +271,7 @@ describe('cadastro com a tela de transição', () => {
     digita('E-mail', 'maria@example.com')
     digita('Senha', 'SenhaForte123')
     digita('CPF', '52998224725')
-    digita('Nascimento', '1990-03-14')
+    digita('Nascimento', '14031990')
     return act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
   }
 
