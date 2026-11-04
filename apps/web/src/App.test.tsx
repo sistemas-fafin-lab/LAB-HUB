@@ -18,6 +18,8 @@ const auth = {
   loading: false,
   ouvintes: new Set<() => void>(),
   snapshot: { session: null as object | null, loading: false },
+  /** Se definido, o signOut espera por ele (a chamada ao Supabase "em curso"). */
+  saida: null as Promise<void> | null,
   set(session: object | null) {
     this.session = session
     this.snapshot = { session, loading: this.loading }
@@ -33,7 +35,13 @@ vi.mock('./lib/AuthContext', () => ({
       },
       () => auth.snapshot,
     )
-    return { ...s, signOut: async () => auth.set(null) }
+    return {
+      ...s,
+      signOut: async () => {
+        if (auth.saida) await auth.saida
+        auth.set(null)
+      },
+    }
   },
 }))
 
@@ -154,11 +162,30 @@ function abre(url: string) {
 const caminho = () => window.location.pathname + window.location.search
 
 beforeEach(() => {
+  auth.loading = false
+  auth.saida = null
   auth.set(SESSAO)
   resultados.exams = [exame()]
   agendamentos.lista = [agendamento()]
   trackPageview.mockClear()
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) // jsdom não implementa
+})
+
+describe('abertura', () => {
+  it('enquanto a sessão carrega, mostra a splash do Lab Hub; depois, a tela da URL', () => {
+    auth.loading = true
+    auth.set(null)
+    abre('/resultados')
+    expect(screen.getByRole('status', { name: 'Carregando o Lab Hub' })).toBeTruthy()
+    expect(screen.queryByText('Carregando…')).toBeNull()
+
+    act(() => {
+      auth.loading = false
+      auth.set(SESSAO)
+    })
+    expect(screen.queryByRole('status', { name: 'Carregando o Lab Hub' })).toBeNull()
+    expect(screen.getByText('Hemograma completo')).toBeTruthy()
+  })
 })
 
 describe('cada tela abre pela própria URL', () => {
@@ -378,6 +405,26 @@ describe('sair', () => {
 
     act(() => auth.set(SESSAO))
     expect(caminho()).toBe('/')
+  })
+})
+
+describe('sair com a tela de transição', () => {
+  it('"Saindo com segurança" cobre a tela enquanto a saída roda e some depois, na entrada', async () => {
+    let conclui = () => {}
+    auth.saida = new Promise<void>((ok) => (conclui = ok))
+    abre('/perfil')
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /Sair/ })))
+    expect(screen.getByRole('status', { name: 'Saindo com segurança' })).toBeTruthy()
+    expect(caminho()).toBe('/perfil')
+    // O que fica atrás da tela cheia sai do alcance do teclado e do leitor.
+    expect(document.querySelector('main')?.closest('[inert]')).toBeTruthy()
+
+    await act(async () => conclui())
+    expect(caminho()).toBe('/entrar')
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Saindo com segurança' })).toBeNull())
+    expect(document.querySelector('[inert]')).toBeNull()
+    expect(screen.getByRole('heading', { level: 1, name: 'Bem-vindo de volta' })).toBeTruthy()
   })
 })
 

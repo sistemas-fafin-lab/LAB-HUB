@@ -6,6 +6,7 @@ import { AvisoErro, CampoSenha, RegrasSenha } from '../components/acesso/pecas'
 import { api } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import { track } from '../lib/analytics'
+import { comTransicao } from '../lib/transicao'
 import {
   apenasDigitos,
   formatarCpf,
@@ -98,18 +99,22 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
         dataNascimento,
         ...(telDigits ? { telefone: telDigits } : {}),
       }
-      const res = await api.post<CadastroResponse>('/cadastro', payload)
-      track('cadastro_sucesso', { confirmacao_email: res.requiresEmailConfirmation === true })
-      if (res.requiresEmailConfirmation) {
-        // Produção: precisa confirmar o e-mail antes de entrar.
-        onEmailSent(email)
-      } else {
-        // Testes: entra direto — o onAuthStateChange troca a tela.
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-        if (signInError) {
-          setError('Conta criada, mas o login automático falhou. Tente entrar manualmente.')
+      // A transição cobre a criação e, sem confirmação de e-mail, o login
+      // automático: a tela só sai quando o próximo passo já está decidido.
+      await comTransicao('Criando sua conta', async () => {
+        const res = await api.post<CadastroResponse>('/cadastro', payload)
+        track('cadastro_sucesso', { confirmacao_email: res.requiresEmailConfirmation === true })
+        if (res.requiresEmailConfirmation) {
+          // Produção: precisa confirmar o e-mail antes de entrar.
+          onEmailSent(email)
+        } else {
+          // Testes: entra direto — o onAuthStateChange troca a tela.
+          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+          if (signInError) {
+            setError('Conta criada, mas o login automático falhou. Tente entrar manualmente.')
+          }
         }
-      }
+      })
     } catch (err: unknown) {
       const motivo = err instanceof Error ? err.message : 'Falha ao cadastrar'
       setError(motivo)

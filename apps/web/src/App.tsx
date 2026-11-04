@@ -16,10 +16,12 @@ import { AuthGate }        from './pages/AuthGate'
 import { NotFoundPage }    from './pages/NotFoundPage'
 import { LimiteDeErro }    from './components/sistema/LimiteDeErro'
 import { ConteudoDeSistema, PaginaDeSistema } from './components/sistema/TelaDeSistema'
+import { Splash, TelaDeTransicao } from './components/sistema/Transicoes'
 import { useAuth }         from './lib/AuthContext'
 import { usePaciente }     from './lib/usePaciente'
 import { useResultados }   from './lib/useResultados'
 import { EM_MANUTENCAO, rotaOculta } from './lib/flags'
+import { comTransicao, useTransicao } from './lib/transicao'
 import { track, trackPageview } from './lib/analytics'
 import type { TelaPageview } from './lib/analytics'
 import { Redireciona, navegar, useInterceptaLinks, useLocal } from './lib/router'
@@ -70,8 +72,23 @@ export function App() {
   }
   return (
     <LimiteDeErro alcance="pagina">
-      <Portal />
+      <PortalSobTransicao />
     </LimiteDeErro>
+  )
+}
+
+// A tela de transição fica acima da entrada e do shell (sobrevive à troca que o
+// login/logout provoca); enquanto ela cobre a tela, o que está atrás fica
+// `inert`: fora do Tab e do leitor de tela.
+function PortalSobTransicao() {
+  const transicao = useTransicao()
+  return (
+    <>
+      <div inert={transicao !== null}>
+        <Portal />
+      </div>
+      {transicao !== null && <TelaDeTransicao texto={transicao} />}
+    </>
   )
 }
 
@@ -85,16 +102,9 @@ function Portal() {
   const local = useLocal()
   useInterceptaLinks()
 
-  // Segue o tema salvo (a classe `dark` já foi aplicada em main.tsx) para quem
-  // usa o modo escuro não tomar um flash branco enquanto a sessão carrega.
-  if (loading) {
-    return (
-      <div role="status" className="min-h-screen w-full bg-page flex flex-col items-center justify-center gap-3 text-[14px] text-muted">
-        <Node loading size={40} />
-        Carregando…
-      </div>
-    )
-  }
+  // Splash azul enquanto a sessão é restaurada: também não dá flash branco a
+  // quem usa o modo escuro.
+  if (loading) return <Splash />
 
   const naEntrada = ehEntrada(local.pathname)
   if (session === null) {
@@ -114,7 +124,7 @@ function Portal() {
   // pessoa, na mesma aba) começa pela Visão geral, não no Perfil de quem saiu.
   const handleLogout = async () => {
     saiuNestaAba = true
-    await signOut()
+    await comTransicao('Saindo com segurança', signOut)
     navegar(CAMINHO_ENTRAR, { substituir: true })
   }
 

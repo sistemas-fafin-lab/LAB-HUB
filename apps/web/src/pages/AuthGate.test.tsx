@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 // ---------------------------------------------------------------------------
 // Acesso (/entrar): login, cadastro, recuperação e nova senha, montados numa
@@ -21,11 +21,38 @@ const track = vi.hoisted(() => vi.fn())
 vi.mock('../lib/analytics', () => ({ track }))
 
 const { AuthGate } = await import('./AuthGate')
+const { TelaDeTransicao } = await import('../components/sistema/Transicoes')
+const { useTransicao } = await import('../lib/transicao')
 
+/** A tela de transição em curso, como o App a monta acima da entrada. */
+function Transicao() {
+  const texto = useTransicao()
+  return texto === null ? null : <TelaDeTransicao texto={texto} />
+}
+
+/** A entrada numa URL, com a tela de transição ao lado. */
 function abre(url: string, { comSessao = false } = {}) {
   window.history.replaceState(null, '', url)
-  return render(<AuthGate comSessao={comSessao} />)
+  return render(
+    <>
+      <AuthGate comSessao={comSessao} />
+      <Transicao />
+    </>,
+  )
 }
+
+/** Promessa que o teste resolve quando quiser: a chamada "em curso". */
+function pendente<T>() {
+  let resolve: (v: T) => void = () => {}
+  let reject: (e: unknown) => void = () => {}
+  const promessa = new Promise<T>((ok, falha) => {
+    resolve = ok
+    reject = falha
+  })
+  return { promessa, resolve, reject }
+}
+
+const transicao = (texto: string) => screen.queryByRole('status', { name: texto })
 
 const caminho = () => window.location.pathname + window.location.search
 
@@ -93,6 +120,33 @@ describe('login', () => {
 
     expect(screen.getByRole('alert').textContent).toContain(traduzida)
     expect(track).toHaveBeenCalledWith('login_erro', { motivo: original })
+  })
+
+  it('"Preparando seus resultados" cobre a tela enquanto o login roda e some ao concluir', async () => {
+    const login = pendente<{ error: null }>()
+    supa.signInWithPassword.mockReturnValue(login.promessa)
+    abre('/entrar')
+    digita('E-mail', 'maria@example.com')
+    digita('Senha', 'senha-legada')
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Entrar' })))
+    expect(transicao('Preparando seus resultados')).toBeTruthy()
+
+    await act(async () => login.resolve({ error: null }))
+    await waitFor(() => expect(transicao('Preparando seus resultados')).toBeNull())
+  })
+
+  it('se o login falha, a transição sai e a mensagem aparece como hoje', async () => {
+    const login = pendente<{ error: { message: string } }>()
+    supa.signInWithPassword.mockReturnValue(login.promessa)
+    abre('/entrar')
+    digita('E-mail', 'maria@example.com')
+    digita('Senha', 'x')
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Entrar' })))
+    expect(transicao('Preparando seus resultados')).toBeTruthy()
+
+    await act(async () => login.resolve({ error: { message: 'Invalid login credentials' } }))
+    expect(screen.getByRole('alert').textContent).toContain('E-mail ou senha incorretos.')
+    await waitFor(() => expect(transicao('Preparando seus resultados')).toBeNull())
   })
 
   it('mostra e esconde a senha', () => {
@@ -191,6 +245,42 @@ describe('cadastro', () => {
 
     expect(screen.getByRole('alert').textContent).toContain(msg)
     expect(track).toHaveBeenCalledWith('cadastro_erro', { motivo: msg })
+  })
+})
+
+describe('cadastro com a tela de transição', () => {
+  function preencheEEnvia() {
+    fireEvent.click(screen.getByRole('tab', { name: 'Criar conta' }))
+    digita('Nome completo', 'Maria Souza')
+    digita('E-mail', 'maria@example.com')
+    digita('Senha', 'SenhaForte123')
+    digita('CPF', '52998224725')
+    digita('Nascimento', '1990-03-14')
+    return act(async () => fireEvent.click(screen.getByRole('button', { name: 'Criar conta' })))
+  }
+
+  it('"Criando sua conta" cobre a tela enquanto o cadastro roda e some ao pedir a confirmação', async () => {
+    const cadastro = pendente<{ requiresEmailConfirmation: boolean; paciente: object }>()
+    apiPost.mockReturnValue(cadastro.promessa)
+    abre('/entrar')
+    await preencheEEnvia()
+    expect(transicao('Criando sua conta')).toBeTruthy()
+
+    await act(async () => cadastro.resolve({ requiresEmailConfirmation: true, paciente: {} }))
+    expect(screen.getByRole('heading', { level: 1, name: 'Confirme seu e-mail' })).toBeTruthy()
+    await waitFor(() => expect(transicao('Criando sua conta')).toBeNull())
+  })
+
+  it('se o cadastro falha, a transição sai e o erro da API aparece como veio', async () => {
+    const cadastro = pendente<never>()
+    apiPost.mockReturnValue(cadastro.promessa)
+    abre('/entrar')
+    await preencheEEnvia()
+    expect(transicao('Criando sua conta')).toBeTruthy()
+
+    await act(async () => cadastro.reject(new Error('CPF já cadastrado.')))
+    expect(screen.getByRole('alert').textContent).toContain('CPF já cadastrado.')
+    await waitFor(() => expect(transicao('Criando sua conta')).toBeNull())
   })
 })
 

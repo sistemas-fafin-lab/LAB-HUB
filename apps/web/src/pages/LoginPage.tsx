@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { validarEmail } from '../lib/validators'
 import { mensagemErroLogin } from '../lib/errosAuth'
 import { track } from '../lib/analytics'
+import { comTransicao } from '../lib/transicao'
 
 type FieldErrors = {
   email?: string | undefined
@@ -54,7 +55,9 @@ export function LoginPage({ onEsqueciSenha }: LoginPageProps) {
     setLoading(true)
     track('login_submit')
     // Sucesso: o onAuthStateChange do AuthProvider troca a tela automaticamente.
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+    const { error: signInError } = await comTransicao('Preparando seus resultados', () =>
+      supabase.auth.signInWithPassword({ email, password }),
+    )
     if (signInError) {
       setError(mensagemErroLogin(signInError.message))
       // Só a mensagem do Supabase ("Invalid login credentials"), nunca o e-mail.

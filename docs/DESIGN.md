@@ -12,7 +12,8 @@ Referência visual aprovada: [`docs/prototipo-v2.html`](prototipo-v2.html) (dado
 | Tema do portal, claro (`:root`) e escuro (`.dark`), com variáveis `--lh-*` | `apps/web/src/styles/lh/tema.css` |
 | Classes Tailwind ligadas ao tema (`bg-page`, `bg-card`, `bg-subtle`, `text-ink`, `text-muted`, `border-line`, `bg-brand`, `text-link`, `bg-coral-soft`, `shadow-float`…) | `apps/web/tailwind.config.js` |
 | Fontes: Ranade (títulos, `font-display`, local em `public/fonts`) e DM Sans (`@fontsource/dm-sans`, texto do `body`) | `styles/lh/fontes.css`, `styles/fontes.ts` |
-| Telas de sistema (404, erro, sem conexão, manutenção) e o limite de erro | `apps/web/src/components/sistema/` |
+| Telas de sistema (404, erro, sem conexão, manutenção) o limite de erro, a splash de abertura e a tela de transição (`Transicoes.tsx`) | `apps/web/src/components/sistema/` |
+| Tela de transição em curso (`comTransicao(texto, operação)` em volta do login, cadastro e saída) | `apps/web/src/lib/transicao.ts` |
 | Tipos do exame consumidos pelas telas | `apps/web/src/lib/exame.ts` |
 | Componentes do LAB DS (Button, IconButton, Input, Select, Checkbox, Radio, Switch, Tabs, Tag, Badge, Card, Dialog, Toast, Tooltip, Grafismo) | `apps/web/src/ds/` |
 | Ícones (Lucide, substituto da família própria da marca) | `ds/Icon.tsx` → registro único `components/icones/registro.ts` |
