@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useMemo } from 'react'
 import type { IconName } from '../ds'
 import { Btn, EmptyState, FalhaAoCarregar, PageHeader, Panel, Pill, Skel, TrendLine } from '../components/portal'
 import type { Exam } from '../lib/exame'
@@ -74,7 +74,7 @@ function Carregando() {
 export function TrendsPage({ onOpenExam, onVerResultados }: TrendsPageProps) {
   const idResumo = useId()
   const { exams, loading, error } = useResultados()
-  const tendencias = tendenciasDosExames(exams)
+  const tendencias = useMemo(() => tendenciasDosExames(exams), [exams])
 
   let corpo: React.ReactNode
   if (loading && exams.length === 0) {
