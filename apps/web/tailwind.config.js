@@ -31,9 +31,9 @@ export default {
         fab: 'var(--lh-fab)',
         'fab-ink': 'var(--lh-fab-ink)',
       },
-      // Ranade nos títulos (servida de public/fonts — ver
-      // src/styles/lh/fontes.css). O texto corrido herda DM Sans do body.
-      fontFamily: { display: ['Ranade', "'DM Sans'", 'system-ui', 'sans-serif'] },
+      // Ranade nos títulos e DM Sans no texto, servidas de public/fonts
+      // (ver src/styles/fonts.css).
+      fontFamily: { display: ['Ranade', 'DM Sans', 'system-ui', 'sans-serif'], sans: ['DM Sans', 'system-ui', 'sans-serif'] },
       boxShadow: { float: 'var(--lh-shadow-float)' },
     },
   },
