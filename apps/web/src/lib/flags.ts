@@ -5,14 +5,14 @@
 // PRESERVADO no lugar; aqui apenas controlamos a exibição. Troque para `true`
 // quando o backend correspondente existir para reexibir a parte.
 //
-// (Alguns itens — Hero e Exames recentes — já usam dado real da API; estão
-//  ocultos por escolha de produto, não por serem mock. Basta reativar a flag.)
+// (Hero e Exames recentes usam dado real da API e estão ligados; as demais
+//  flags da HomePage escondem mocks.)
 // ---------------------------------------------------------------------------
 
 export const MOSTRAR_ACOMPANHAMENTO = false          // HomePage: card de marcadores
 export const MOSTRAR_PROXIMOS_PASSOS_EXTRAS = false  // HomePage: compartilhar/baixar laudos
-export const MOSTRAR_RESULTADO_HERO = false          // HomePage: card "Seu último exame"
-export const MOSTRAR_EXAMES_RECENTES = false         // HomePage: lista "Exames recentes"
+export const MOSTRAR_RESULTADO_HERO = true           // HomePage: card "Seu último exame"
+export const MOSTRAR_EXAMES_RECENTES = true          // HomePage: lista "Exames recentes"
 export const MOSTRAR_CHATBOT = false                 // Shell: chat "Lia" (components/shell/Suporte)
 export const MOSTRAR_NOTIFICACOES = false            // Shell: sino de notificações no cabeçalho
 export const MOSTRAR_DEPENDENTES = false             // Shell: seletor de dependentes no menu da conta (D2 adiado)
