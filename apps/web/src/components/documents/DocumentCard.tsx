@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Documento } from '@lab-hub/shared'
-import { Ico, IconBtn, IconTile, Node, Panel } from '../portal'
-import { MensagemDeErro } from './MensagemDeErro'
+import { Ico, IconBtn, IconTile, MensagemDeErro, Node, Panel } from '../portal'
 import { api } from '../../lib/api'
 import { DOC_META, formatarFormato, formatarTamanho } from '../../lib/documentos'
 import { formatEtapaHora } from '../../lib/datetime'

@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import type { TipoDocumento } from '@lab-hub/shared'
-import { Chip, Ico, Node } from '../portal'
+import { Chip, Ico, MensagemDeErro, Node } from '../portal'
 import { AreaDeArquivos } from './AreaDeArquivos'
 import { ConfirmFileModal } from './ConfirmFileModal'
-import { MensagemDeErro } from './MensagemDeErro'
 import { avisar } from '../../lib/avisos'
 import { DOC_META, validarArquivo } from '../../lib/documentos'
 

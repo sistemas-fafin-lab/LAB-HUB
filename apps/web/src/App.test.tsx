@@ -82,7 +82,7 @@ const PACIENTE: Paciente = {
   dataNascimento: '1990-03-14',
 }
 vi.mock('./lib/usePaciente', () => ({
-  usePaciente: () => ({ paciente: PACIENTE, loading: false, error: null, setPaciente: vi.fn() }),
+  usePaciente: () => ({ paciente: PACIENTE, loading: false, error: null, setPaciente: vi.fn(), recarregar: vi.fn() }),
 }))
 
 // Nenhuma tela precisa de resposta da rede para o que se afirma aqui.
@@ -509,5 +509,33 @@ describe('pageview', () => {
   it('404 registra a página não encontrada', () => {
     abre('/isso-nao-existe')
     expect(trackPageview.mock.calls).toEqual([['nao-encontrada']])
+  })
+})
+
+describe('tema em Configurações', () => {
+  it('escolher Escuro aplica, persiste e registra o mesmo evento do cabeçalho', async () => {
+    const { track } = await import('./lib/analytics')
+    vi.mocked(track).mockClear()
+    // O localStorage do jsdom fica encoberto pelo do Node; um em memória basta.
+    const salvo = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => salvo.get(k) ?? null,
+      setItem: (k: string, v: string) => void salvo.set(k, v),
+    })
+    try {
+      abre('/configuracoes')
+      fireEvent.click(screen.getByRole('button', { name: 'Escuro' }))
+      expect(document.documentElement.classList.contains('dark')).toBe(true)
+      expect(salvo.get('labhub:tema')).toBe('dark')
+      expect(track).toHaveBeenCalledWith('tema_alternado', { modo: 'dark' })
+      expect(screen.getByRole('button', { name: 'Escuro' }).getAttribute('aria-pressed')).toBe('true')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Claro' }))
+      expect(document.documentElement.classList.contains('dark')).toBe(false)
+      expect(salvo.get('labhub:tema')).toBe('light')
+    } finally {
+      vi.unstubAllGlobals()
+      document.documentElement.classList.remove('dark')
+    }
   })
 })

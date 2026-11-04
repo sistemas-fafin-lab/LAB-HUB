@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { WIcon } from '../components/primitives/WIcon'
-import type { Paciente, AtualizarPacientePayload } from '@lab-hub/shared'
-import { iniciais } from '../lib/paciente'
-import { MOSTRAR_NOTIFICACOES } from '../lib/flags'
+import type { AtualizarPacientePayload, Paciente } from '@lab-hub/shared'
+import { Avatar, Btn, FalhaAoCarregar, Field, MensagemDeErro, Node, Panel, PanelHead, Pill, Skel } from '../components/portal'
 import { api } from '../lib/api'
 import { track } from '../lib/analytics'
+import { avisar } from '../lib/avisos'
+import { MOSTRAR_NOTIFICACOES } from '../lib/flags'
+import { iniciais } from '../lib/paciente'
 import {
   apenasDigitos,
   formatarCpf,
@@ -16,259 +17,227 @@ import {
 
 interface ProfilePageProps {
   paciente: Paciente | null
-  dark:     boolean
+  /** GET /pacientes/me em curso */
+  carregando: boolean
+  /** Falha do GET /pacientes/me (mensagem da API) */
+  erro: string | null
+  onRecarregar: () => void
   onLogout: () => void | Promise<void>
-  onSaved:  (p: Paciente) => void
+  onSaved: (p: Paciente) => void
 }
 
-interface Field {
-  label: string
-  value: string
-}
-
-interface FormState {
-  nome:      string
-  telefone:  string
+interface Formulario {
+  nome: string
+  telefone: string
   operadora: string
-  plano:     string
+  plano: string
 }
 
-// Gradiente fixo do avatar enquanto não há foto (dependentes adiados, D2).
-const AVATAR_GRADIENT = 'from-blue-500 to-indigo-600'
+interface ErrosDeCampo {
+  nome?: string
+  telefone?: string
+}
 
-export function ProfilePage({ paciente, dark, onLogout, onSaved }: ProfilePageProps) {
-  const [editing, setEditing] = useState(false)
-  const [saving, setSaving]   = useState(false)
-  const [erro, setErro]       = useState<string | null>(null)
-  const [form, setForm]       = useState<FormState>({ nome: '', telefone: '', operadora: '', plano: '' })
-  const [fieldErr, setFieldErr] = useState<{ nome?: string; telefone?: string }>({})
+const CAMPOS_VALIDADOS: Record<keyof ErrosDeCampo, true> = { nome: true, telefone: true }
 
-  // "Operadora · Plano" quando há convênio; "Não informado" se o paciente já
-  // carregou sem convênio; "—" enquanto o perfil ainda não chegou.
-  const convenioLabel = paciente?.convenio
-    ? [paciente.convenio.operadora, paciente.convenio.plano].filter(Boolean).join(' · ')
-    : paciente
-      ? 'Não informado'
-      : '—'
+// "Operadora · Plano" quando há convênio; "Não informado" sem convênio.
+function rotuloConvenio(p: Paciente): string {
+  return p.convenio ? [p.convenio.operadora, p.convenio.plano].filter(Boolean).join(' · ') : 'Não informado'
+}
 
-  const fields: Field[] = [
-    { label: 'Nome completo',      value: paciente?.nome ?? '—' },
-    { label: 'CPF',                value: paciente ? formatarCpf(paciente.cpf) : '—' },
-    { label: 'Data de nascimento', value: paciente ? formatarData(paciente.dataNascimento) : '—' },
-    { label: 'Email',              value: paciente?.email ?? '—' },
-    { label: 'Telefone',           value: paciente?.telefone ? formatarTelefone(paciente.telefone) : '—' },
-    { label: 'Convênio',           value: convenioLabel },
-  ]
+function formularioDe(p: Paciente): Formulario {
+  return {
+    nome: p.nome,
+    telefone: p.telefone ? formatarTelefone(p.telefone) : '',
+    operadora: p.convenio?.operadora ?? '',
+    plano: p.convenio?.plano ?? '',
+  }
+}
 
-  const startEdit = () => {
-    if (!paciente) return
-    setForm({
-      nome:      paciente.nome,
-      telefone:  paciente.telefone ? formatarTelefone(paciente.telefone) : '',
-      operadora: paciente.convenio?.operadora ?? '',
-      plano:     paciente.convenio?.plano ?? '',
-    })
-    setFieldErr({})
+// Mesmo corpo do PUT de antes: nome e telefone (só dígitos) sempre; convênio
+// nulo sem operadora (limpa), e plano só quando preenchido.
+function payloadDe(f: Formulario): AtualizarPacientePayload {
+  const operadora = f.operadora.trim()
+  const plano = f.plano.trim()
+  return {
+    nome: f.nome.trim(),
+    telefone: apenasDigitos(f.telefone),
+    convenio: operadora ? { operadora, ...(plano ? { plano } : {}) } : null,
+  }
+}
+
+export function ProfilePage({ paciente, carregando, erro: erroAoCarregar, onRecarregar, onLogout, onSaved }: ProfilePageProps) {
+  const [form, setForm] = useState<Formulario | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [errosDeCampo, setErrosDeCampo] = useState<ErrosDeCampo>({})
+
+  if (!paciente) {
+    return (
+      <div className="lh-alvos max-w-4xl mx-auto">
+        {erroAoCarregar && !carregando ? (
+          <Panel pad={0}>
+            <FalhaAoCarregar titulo="Não foi possível carregar seu perfil" erro={erroAoCarregar} onTentar={onRecarregar} />
+          </Panel>
+        ) : (
+          <Panel pad={24}>
+            <div role="status" aria-busy="true" aria-label="Carregando perfil" className="flex items-center gap-5">
+              <Node loading size={40} />
+              <div className="flex-1">
+                <Skel className="h-6 w-1/2" />
+                <Skel className="h-3.5 w-1/3 mt-3" />
+              </div>
+            </div>
+          </Panel>
+        )}
+      </div>
+    )
+  }
+
+  const editando = form !== null
+  const muda = (campo: keyof Formulario, mascara?: (v: string) => string) => (valor: string) => {
+    setForm((f) => (f ? { ...f, [campo]: mascara ? mascara(valor) : valor } : f))
+    if (campo in CAMPOS_VALIDADOS) setErrosDeCampo((e) => ({ ...e, [campo]: undefined }))
+  }
+
+  const comecarEdicao = () => {
+    setForm(formularioDe(paciente))
+    setErrosDeCampo({})
     setErro(null)
-    setEditing(true)
   }
 
   const salvar = async () => {
-    const nomeErr = validarNome(form.nome)
-    const telErr  = validarTelefone(form.telefone)
-    if (nomeErr || telErr) {
-      setFieldErr({ ...(nomeErr ? { nome: nomeErr } : {}), ...(telErr ? { telefone: telErr } : {}) })
+    if (!form || salvando) return
+    const nome = validarNome(form.nome)
+    const telefone = validarTelefone(form.telefone)
+    if (nome || telefone) {
+      setErrosDeCampo({ ...(nome ? { nome } : {}), ...(telefone ? { telefone } : {}) })
       return
     }
-
-    setSaving(true)
+    setSalvando(true)
     setErro(null)
     try {
-      const operadora = form.operadora.trim()
-      const plano = form.plano.trim()
-      const payload: AtualizarPacientePayload = {
-        nome: form.nome.trim(),
-        telefone: apenasDigitos(form.telefone),
-        convenio: operadora ? { operadora, ...(plano ? { plano } : {}) } : null,
-      }
-      const atualizado = await api.put<Paciente>('/pacientes/me', payload)
+      const atualizado = await api.put<Paciente>('/pacientes/me', payloadDe(form))
       track('perfil_salvo')
       onSaved(atualizado)
-      setEditing(false)
+      setForm(null)
+      avisar({ title: 'Dados atualizados' })
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Falha ao salvar')
     } finally {
-      setSaving(false)
+      setSalvando(false)
     }
   }
 
-  const inputCls = `w-full text-sm rounded-lg px-3 h-9 outline-none border transition-colors ${
-    dark ? 'bg-gray-800 border-gray-700 text-white placeholder:text-gray-500' : 'bg-white border-gray-200 text-slate-800 placeholder:text-gray-400'
-  } focus:border-blue-500`
-  const labelCls = 'text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block'
-  const roValueCls = `text-sm font-medium ${dark ? 'text-gray-300' : 'text-slate-700'}`
+  const dados: [string, string][] = [
+    ['Nome completo', paciente.nome],
+    ['CPF', formatarCpf(paciente.cpf)],
+    ['Data de nascimento', formatarData(paciente.dataNascimento)],
+    ['E-mail', paciente.email],
+    ['Telefone', paciente.telefone ? formatarTelefone(paciente.telefone) : '—'],
+    ['Convênio', rotuloConvenio(paciente)],
+  ]
 
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* Header card */}
-      <div className={`rounded-2xl border ${dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'} p-6 shadow-sm mb-5 flex items-center gap-5`}>
-        <div className={`h-20 w-20 rounded-2xl bg-gradient-to-br ${AVATAR_GRADIENT} text-white text-2xl font-bold flex items-center justify-center shadow-lg shadow-blue-500/25`}>
-          {iniciais(paciente?.nome ?? '') || '—'}
-        </div>
-        <div className="flex-1">
-          <h1
-            className={`text-2xl font-bold ${dark ? 'text-white' : 'text-slate-900'}`}
-            style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
-          >
-            {paciente?.nome ?? '—'}
+    <div className="lh-alvos max-w-4xl mx-auto">
+      <Panel pad={24} style={{ marginBottom: 20 }} className="flex items-center gap-5 flex-wrap">
+        <Avatar initials={iniciais(paciente.nome)} size={80} />
+        <div className="flex-1 min-w-0">
+          <h1 className="font-display font-medium text-[28px] md:text-[30px] leading-[1.1] tracking-[-0.02em] break-words">
+            {paciente.nome}
           </h1>
-          <p className="text-sm text-gray-500">
-            {paciente?.convenio ? convenioLabel : 'Titular da conta'}
+          <p className="text-[14px] text-muted mt-1">
+            {paciente.convenio ? `Titular · ${rotuloConvenio(paciente)}` : 'Titular da conta'}
           </p>
-          <div className="flex items-center gap-2 mt-2">
-            <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 rounded-full px-2.5 py-1 text-[11px] font-semibold">
-              <WIcon name="shield-check" className="w-3 h-3" strokeWidth={2.6} />
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            <Pill tone="brand" icon="shield-check">
               Conta verificada
-            </span>
-            {/* Badge de notificações — oculto por flag até haver backend */}
-            {MOSTRAR_NOTIFICACOES && (
-              <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 rounded-full px-2.5 py-1 text-[11px] font-semibold">
-                <WIcon name="bell" className="w-3 h-3" strokeWidth={2.6} />
-                Notificações ativas
-              </span>
-            )}
+            </Pill>
+            {/* Sem backend de notificações: oculto por flag. */}
+            {MOSTRAR_NOTIFICACOES && <Pill icon="bell">Notificações ativas</Pill>}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {editing ? (
-            <>
-              <button
-                onClick={() => void salvar()}
-                disabled={saving}
-                className="bg-blue-600 text-white rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25 hover:bg-blue-700 disabled:opacity-60"
-              >
-                <WIcon name="check" className="w-4 h-4" strokeWidth={2.4} />
-                {saving ? 'Salvando…' : 'Salvar'}
-              </button>
-              <button
-                onClick={() => setEditing(false)}
-                disabled={saving}
-                className={`rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 border disabled:opacity-60 ${
-                  dark ? 'border-gray-700 text-gray-300 hover:bg-gray-800' : 'border-gray-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                Cancelar
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={startEdit}
-                disabled={!paciente}
-                className="bg-blue-600 text-white rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-md shadow-blue-500/25 hover:bg-blue-700 disabled:opacity-60"
-              >
-                <WIcon name="pencil" className="w-4 h-4" strokeWidth={2.2} />
-                Editar
-              </button>
-              <button
-                onClick={() => {
-                  track('logout')
-                  void onLogout()
-                }}
-                className={`rounded-xl px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 border ${
-                  dark ? 'border-gray-700 text-gray-300 hover:bg-gray-800' : 'border-gray-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <WIcon name="log-out" className="w-4 h-4" strokeWidth={2.2} />
-                Sair
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Personal data */}
-      <div className={`rounded-2xl border ${dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'} p-5 shadow-sm`}>
-        <h3 className={`text-sm font-semibold mb-4 ${dark ? 'text-white' : 'text-slate-800'}`}>Dados pessoais</h3>
-
-        {editing ? (
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-            {/* Nome (editável) */}
-            <div className="col-span-2">
-              <label className={labelCls}>Nome completo</label>
-              <input
-                value={form.nome}
-                onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
-                className={inputCls}
-                placeholder="Seu nome completo"
-              />
-              {fieldErr.nome && <p className="text-xs text-red-600 mt-1">{fieldErr.nome}</p>}
-            </div>
-
-            {/* CPF (bloqueado) */}
-            <div>
-              <span className={labelCls}>CPF <span className="normal-case text-gray-400 font-normal">· não editável</span></span>
-              <div className={roValueCls}>{paciente ? formatarCpf(paciente.cpf) : '—'}</div>
-            </div>
-
-            {/* Data de nascimento (bloqueado) */}
-            <div>
-              <span className={labelCls}>Data de nascimento <span className="normal-case text-gray-400 font-normal">· não editável</span></span>
-              <div className={roValueCls}>{paciente ? formatarData(paciente.dataNascimento) : '—'}</div>
-            </div>
-
-            {/* Email (bloqueado) */}
-            <div className="col-span-2">
-              <span className={labelCls}>Email <span className="normal-case text-gray-400 font-normal">· altere pelo login</span></span>
-              <div className={roValueCls}>{paciente?.email ?? '—'}</div>
-            </div>
-
-            {/* Telefone (editável) */}
-            <div className="col-span-2">
-              <label className={labelCls}>Telefone</label>
-              <input
-                value={form.telefone}
-                onChange={(e) => setForm((f) => ({ ...f, telefone: formatarTelefone(e.target.value) }))}
-                className={inputCls}
-                placeholder="(61) 9 0000-0000"
-                inputMode="tel"
-              />
-              {fieldErr.telefone && <p className="text-xs text-red-600 mt-1">{fieldErr.telefone}</p>}
-            </div>
-
-            {/* Convênio (editável) */}
-            <div>
-              <label className={labelCls}>Convênio (operadora)</label>
-              <input
-                value={form.operadora}
-                onChange={(e) => setForm((f) => ({ ...f, operadora: e.target.value }))}
-                className={inputCls}
-                placeholder="Ex.: Unimed"
-              />
-            </div>
-            <div>
-              <label className={labelCls}>Plano</label>
-              <input
-                value={form.plano}
-                onChange={(e) => setForm((f) => ({ ...f, plano: e.target.value }))}
-                className={inputCls}
-                placeholder="Ex.: Premium"
-              />
-            </div>
-
-            {erro && <p className="col-span-2 text-sm text-red-600">{erro}</p>}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-            {fields.map((f) => (
-              <div key={f.label}>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">{f.label}</div>
-                <div className={`text-sm font-medium ${dark ? 'text-gray-200' : 'text-slate-800'}`}>{f.value}</div>
-              </div>
-            ))}
+        {!editando && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Btn icon="pencil" onClick={comecarEdicao}>
+              Editar
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="log-out"
+              onClick={() => {
+                track('logout')
+                void onLogout()
+              }}
+            >
+              Sair
+            </Btn>
           </div>
         )}
-      </div>
+      </Panel>
+
+      <Panel pad={24}>
+        <PanelHead title="Dados pessoais" className="mb-5" />
+        {editando ? (
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault()
+              void salvar()
+            }}
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field
+                className="sm:col-span-2"
+                label="Nome completo"
+                autoComplete="name"
+                placeholder="Seu nome completo"
+                value={form.nome}
+                onChange={muda('nome')}
+                error={errosDeCampo.nome}
+              />
+              <Field label="CPF" value={formatarCpf(paciente.cpf)} disabled hint="Não editável" />
+              <Field label="Data de nascimento" value={formatarData(paciente.dataNascimento)} disabled hint="Não editável" />
+              <Field className="sm:col-span-2" label="E-mail" icon="mail" value={paciente.email} disabled hint="Altere pelo login" />
+              <Field
+                className="sm:col-span-2"
+                label="Telefone"
+                icon="phone"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="(61) 9 0000-0000"
+                value={form.telefone}
+                onChange={muda('telefone', formatarTelefone)}
+                error={errosDeCampo.telefone}
+              />
+              <Field label="Convênio" placeholder="Ex.: Unimed" value={form.operadora} onChange={muda('operadora')} />
+              <Field label="Plano" placeholder="Ex.: Premium" value={form.plano} onChange={muda('plano')} />
+            </div>
+            {erro && (
+              <div className="mt-4">
+                <MensagemDeErro>{erro}</MensagemDeErro>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-6 flex-wrap">
+              <Btn variant="secondary" type="button" disabled={salvando} onClick={() => setForm(null)}>
+                Cancelar
+              </Btn>
+              <Btn type="submit" loading={salvando}>
+                {salvando ? 'Salvando…' : 'Salvar alterações'}
+              </Btn>
+            </div>
+          </form>
+        ) : (
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
+            {dados.map(([rotulo, valor]) => (
+              <div key={rotulo} className="min-w-0">
+                <dt className="lh-ov mb-1.5">{rotulo}</dt>
+                <dd className="text-[14px] font-medium break-words">{valor}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </Panel>
     </div>
   )
 }

@@ -57,7 +57,7 @@ function entradaPara(rota: string): string {
 // Telas já no visual novo: montadas direto na raiz `.lh-v2` do shell. As
 // demais ganham o invólucro `.lh-legado`, que devolve a fonte, a cor e os links
 // do visual antigo (ver styles/lh/tema.css). Cada PR de tela entra aqui.
-const TELAS_V2: ReadonlySet<Rota['tela']> = new Set(['home', 'results', 'exam', 'laudo', 'schedule', 'documents'])
+const TELAS_V2: ReadonlySet<Rota['tela']> = new Set(['home', 'results', 'exam', 'laudo', 'schedule', 'documents', 'settings', 'profile'])
 
 // ---------------------------------------------------------------------------
 // App — porta de autenticação sobre a URL. Sem sessão, qualquer rota vai para
@@ -127,7 +127,7 @@ interface AuthedAppProps {
 }
 
 function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
-  const { paciente, setPaciente } = usePaciente()
+  const { paciente, loading: carregandoPaciente, error: erroPaciente, setPaciente, recarregar: recarregarPaciente } = usePaciente()
   const { exams, loading: carregandoExames } = useResultados()
   const [dark, setDark] = useState(lerTema)
 
@@ -247,9 +247,18 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   } else if (rota.tela === 'billing') {
     content = <BillingPage   dark={dark} />
   } else if (rota.tela === 'settings') {
-    content = <SettingsPage  dark={dark} onSetDark={handleSetDark} />
+    content = <SettingsPage dark={dark} onSetDark={handleSetDark} />
   } else if (rota.tela === 'profile') {
-    content = <ProfilePage paciente={paciente} dark={dark} onLogout={onLogout} onSaved={setPaciente} />
+    content = (
+      <ProfilePage
+        paciente={paciente}
+        carregando={carregandoPaciente}
+        erro={erroPaciente}
+        onRecarregar={recarregarPaciente}
+        onLogout={onLogout}
+        onSaved={setPaciente}
+      />
+    )
   } else if (rota.tela === 'nao-encontrada') {
     content = <NotFoundPage dark={dark} />
   } else {

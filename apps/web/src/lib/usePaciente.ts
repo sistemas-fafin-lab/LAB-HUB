@@ -9,6 +9,8 @@ interface UsePaciente {
   // Atualiza o paciente em cache (ex.: após salvar o perfil), refletindo em
   // toda a UI que consome este estado (cabeçalho do shell, ProfilePage).
   setPaciente: (p: Paciente) => void
+  /** Refaz o GET (ex.: "Tentar novamente" depois de uma falha). */
+  recarregar: () => void
 }
 
 // Busca os dados do paciente autenticado (GET /pacientes/me).
@@ -16,10 +18,12 @@ export function usePaciente(): UsePaciente {
   const [paciente, setPaciente] = useState<Paciente | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [tentativa, setTentativa] = useState(0)
 
   useEffect(() => {
     let alive = true
     setLoading(true)
+    setError(null)
     api
       .get<Paciente>('/pacientes/me')
       .then((data) => {
@@ -36,7 +40,7 @@ export function usePaciente(): UsePaciente {
     return () => {
       alive = false
     }
-  }, [])
+  }, [tentativa])
 
-  return { paciente, loading, error, setPaciente }
+  return { paciente, loading, error, setPaciente, recarregar: () => setTentativa((n) => n + 1) }
 }
