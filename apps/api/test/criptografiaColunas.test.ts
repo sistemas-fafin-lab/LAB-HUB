@@ -374,7 +374,6 @@ describe('fase 2a — rótulos e identificadores', () => {
       status: 'realizado',
       flowlab_id: null,
       criado_em: '2026-08-01T10:00:00.000Z',
-      exames: null,
       exames_enc: cifrarJson(exames, aadDe('agendamentos', 'exames', AG_ID)),
     })
 
@@ -387,7 +386,6 @@ describe('fase 2a — rótulos e identificadores', () => {
       paciente_id: 'pac-1',
       agendamento_id: null,
       tipo: 'pedido_medico',
-      nome_arquivo: 'placeholder.pdf',
       storage_path: 'pac-1/x.pdf',
       mime_type: 'application/pdf',
       tamanho_bytes: 10,

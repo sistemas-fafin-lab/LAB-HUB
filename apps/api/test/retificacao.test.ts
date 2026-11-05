@@ -4,8 +4,10 @@ import { marcarRetificados } from '../src/lib/retificacao.js'
 
 const AG = 'ag-1'
 
-function r(over: Partial<Resultado> & { id: string }): Resultado {
-  return {
+// `undefined` em `over` remove o campo do padrão: com exactOptionalPropertyTypes,
+// "sem agendamento" é a chave ausente, não a chave com `undefined`.
+function r(over: { [K in keyof Resultado]?: Resultado[K] | undefined } & { id: string }): Resultado {
+  const linha = {
     pacienteId: 'pac-1',
     agendamentoId: AG,
     exameNome: 'Hemograma completo',
@@ -14,6 +16,10 @@ function r(over: Partial<Resultado> & { id: string }): Resultado {
     liberadoEm: '2026-08-01T12:00:00.000Z',
     ...over,
   }
+  for (const k of Object.keys(linha) as (keyof typeof linha)[]) {
+    if (linha[k] === undefined) delete linha[k]
+  }
+  return linha as Resultado
 }
 
 describe('marcarRetificados', () => {

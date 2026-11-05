@@ -115,7 +115,7 @@ function laudoLis(over: Record<string, unknown> = {}): Record<string, unknown> {
 function completarExamResults(res: SupaResult): SupaResult {
   const completar = (linha: unknown, i: number): unknown => {
     if (!linha || typeof linha !== 'object') return linha
-    const l = { id: `exam-row-${i + 1}`, ...(linha as Record<string, unknown>) }
+    const l: Record<string, unknown> = { id: `exam-row-${i + 1}`, ...(linha as Record<string, unknown>) }
     const id = l.id as string
     const { cpf, result, ...resto } = l
     return {

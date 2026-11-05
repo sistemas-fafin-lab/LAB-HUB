@@ -68,7 +68,7 @@ function laudo(over: Record<string, unknown> = {}): Record<string, unknown> {
 function completarExamResults(res: SupaResult): SupaResult {
   const completar = (linha: unknown, i: number): unknown => {
     if (!linha || typeof linha !== 'object') return linha
-    const l = { id: `row-${i + 1}`, ...(linha as Record<string, unknown>) }
+    const l: Record<string, unknown> = { id: `row-${i + 1}`, ...(linha as Record<string, unknown>) }
     const id = l.id as string
     // Depois do corte do S-06 as colunas em claro não existem mais: o cenário
     // escreve `cpf`/`result` por legibilidade e a conversão para envelope
