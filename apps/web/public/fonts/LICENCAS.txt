@@ -1,0 +1,9 @@
+Fontes da marca LAB usadas no portal Lab Hub
+
+Ranade (Ranade-*.woff2)
+  Indian Type Foundry — ITF Free Font License (https://www.fontshare.com/licenses/itf-ffl)
+  Uso em web e app confirmado pela LAB.
+
+DM Sans (DMSans-*.woff2)
+  Copyright The DM Sans Project Authors (https://github.com/googlefonts/dm-fonts)
+  SIL Open Font License 1.1 — texto completo em DM-Sans-OFL.txt

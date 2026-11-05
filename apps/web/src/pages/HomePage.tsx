@@ -1,248 +1,304 @@
-import { WIcon } from '../components/primitives/WIcon'
-import { WebHero } from '../components/shared/WebHero'
+import { useId } from 'react'
+import type { ReactNode } from 'react'
+import type { IconName } from '../ds'
+import { Btn, EmptyState, ETAPAS, FalhaAoCarregar, IconTile, Node, PageHeader, Pill, Panel, PanelHead, SkeletonRows } from '../components/portal'
+import type { Exam } from '../lib/exame'
+import { DestaqueCarregando, DestaqueExame, DestaquePrimeiraColeta } from '../components/visao-geral/Destaque'
 import { ExamRow } from '../components/shared/ExamRow'
-import type { Exam } from '../components/shared/WebHero'
-import { useResultados } from '../lib/useResultados'
-import { useAgendamentos } from '../lib/useAgendamentos'
+import { coletasEmAndamento, proximaColeta, situacaoDaColeta } from '../lib/coletas'
+import { formatDataHora } from '../lib/datetime'
 import {
   MOSTRAR_ACOMPANHAMENTO,
+  MOSTRAR_EXAMES_RECENTES,
   MOSTRAR_PROXIMOS_PASSOS_EXTRAS,
   MOSTRAR_RESULTADO_HERO,
-  MOSTRAR_EXAMES_RECENTES,
+  rotaOculta,
 } from '../lib/flags'
+import { primeiroNome } from '../lib/paciente'
+import { partesNoFuso } from '../lib/regiao'
+import { useAgendamentos } from '../lib/useAgendamentos'
+import { atualizaResultados, useResultados } from '../lib/useResultados'
 
-// Próxima coleta: dd/mmm às hh:mm (ex.: "28 jun · 09:30").
-const proximaColetaFmt = new Intl.DateTimeFormat('pt-BR', {
-  day: '2-digit',
-  month: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-})
-
-// ---------------------------------------------------------------------------
-// Inline data for "Acompanhamento" and "Próximos passos" cards
-// ---------------------------------------------------------------------------
-type Tone = 'amber' | 'green' | 'blue'
-
-interface TrackingItem {
-  label: string
-  note: string
-  icon: string
-  tone: Tone
+function saudacao(agora: Date): string {
+  const { hora } = partesNoFuso(agora)
+  return hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite'
 }
 
-const TRACKING_ITEMS: TrackingItem[] = [
-  { label: 'Colesterol LDL', note: 'Acima da referência',           icon: 'trending-up', tone: 'amber' },
-  { label: 'Vitamina D',     note: 'Subindo após suplementação',    icon: 'trending-up', tone: 'green' },
-  { label: 'Glicemia',       note: 'Estável há 3 meses',            icon: 'minus',       tone: 'blue'  },
-]
-
-interface NextStep {
-  icon: string
+interface Passo {
+  icon: IconName
   title: string
   sub: string
   action: string
   onClick?: () => void
 }
 
-const NEXT_STEPS: NextStep[] = [
-  { icon: 'calendar-plus', title: 'Agendar nova coleta',       sub: 'Próxima recomendada: 06 Mai',            action: 'Agendar' },
-  { icon: 'send',          title: 'Compartilhar com médico',   sub: 'Dr. Carlos Silva — última troca há 2 sem.', action: 'Enviar'  },
-  { icon: 'download',      title: 'Baixar todos os laudos',    sub: 'ZIP com 12 PDFs · 4,2 MB',               action: 'Baixar'  },
+// Mockups sem fonte de dados real: só aparecem com as flags ligadas (lib/flags).
+const ACOMPANHAMENTO: readonly { label: string; note: string; icon: IconName; atencao?: boolean }[] = [
+  { label: 'Colesterol LDL', note: 'Acima da referência', icon: 'trending-up', atencao: true },
+  { label: 'Vitamina D', note: 'Subindo após suplementação', icon: 'trending-up' },
+  { label: 'Glicemia', note: 'Estável há 3 meses', icon: 'minus' },
 ]
 
-const TONE_CLASSES: Record<Tone, string> = {
-  amber: 'bg-amber-100 text-amber-600',
-  green: 'bg-emerald-100 text-emerald-600',
-  blue:  'bg-blue-100 text-blue-600',
+const PASSOS_EXTRAS: readonly Passo[] = [
+  { icon: 'send', title: 'Compartilhar com médico', sub: 'Dr. Carlos Silva — última troca há 2 sem.', action: 'Enviar' },
+  { icon: 'download', title: 'Baixar todos os laudos', sub: 'ZIP com 12 PDFs · 4,2 MB', action: 'Baixar' },
+]
+
+/** Cartão da grade com título acessível: leitor de tela navega por blocos. */
+function Bloco({ title, right, className, children }: { title: string; right?: ReactNode; className: string; children: ReactNode }) {
+  const id = useId()
+  return (
+    <section aria-labelledby={id} className={className}>
+      <Panel style={{ height: '100%' }}>
+        <PanelHead title={<span id={id}>{title}</span>} right={right} className="mb-1" />
+        {children}
+      </Panel>
+    </section>
+  )
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-interface HomePageProps {
-  dark: boolean
+/** Esqueleto dentro de um Bloco: encosta nas bordas do cartão (padding 20). */
+function BlocoCarregando({ linhas = 1 }: { linhas?: number }) {
+  return (
+    <div className="-mx-5 -mb-5">
+      <SkeletonRows n={linhas} />
+    </div>
+  )
+}
+
+function SemResultados() {
+  return <EmptyState icon="file-text" title="Nenhum resultado ainda" text="Os resultados aparecem aqui assim que forem liberados." />
+}
+
+export interface HomePageProps {
+  /** Nome do paciente; vazio enquanto o cadastro carrega. */
+  nome: string
   onOpenExam: (exam: Exam) => void
   onOpenColeta: (agendamentoId: string) => void
   onAgendar: () => void
+  onVerColetas: () => void
+  onVerResultados: () => void
 }
 
-export function HomePage({ dark, onOpenExam, onOpenColeta, onAgendar }: HomePageProps) {
-  const { exams, loading } = useResultados()
-  const { agendamentos } = useAgendamentos()
-  const last = exams[0]
+export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColetas, onVerResultados }: HomePageProps) {
+  const { exams, loading: carregandoExames, error: erroExames } = useResultados()
+  const { agendamentos, loading: carregandoColetas, error: erroColetas, reload: recarregarColetas } = useAgendamentos()
 
-  // Próximo agendamento ativo (pendente/confirmado) no futuro.
-  const proximoAgendamento = agendamentos
-    .filter(
-      (a) =>
-        (a.status === 'pendente' || a.status === 'confirmado') &&
-        new Date(a.dataHora).getTime() > Date.now(),
-    )
-    .sort((a, b) => new Date(a.dataHora).getTime() - new Date(b.dataHora).getTime())[0]
-
-  // O primeiro passo reflete o agendamento real (ou um CTA para agendar).
-  const agendamentoStep: NextStep = proximoAgendamento
+  const proxima = proximaColeta(agendamentos)
+  const passoDaColeta: Passo = proxima
     ? {
         icon: 'calendar-check',
-        title: 'Próxima coleta agendada',
-        sub: `${proximaColetaFmt.format(new Date(proximoAgendamento.dataHora))} · ${proximoAgendamento.postoNome}`,
-        action: 'Detalhes',
-        onClick: () => onOpenColeta(proximoAgendamento.id),
+        title: 'Preparo para a próxima coleta',
+        sub: `${formatDataHora(proxima.dataHora)} · ${proxima.postoNome}`,
+        action: 'Ver',
+        onClick: () => onOpenColeta(proxima.id),
       }
     : {
         icon: 'calendar-plus',
         title: 'Agendar nova coleta',
-        sub: 'Você não tem coletas agendadas',
+        sub: 'Escolha a unidade, o dia e o horário',
         action: 'Agendar',
         onClick: onAgendar,
       }
-  // Só o primeiro passo (agendamento real) é exibido; os extras mockados
-  // (Compartilhar com médico, Baixar todos os laudos) ficam ocultos por flag.
-  const steps: NextStep[] = MOSTRAR_PROXIMOS_PASSOS_EXTRAS
-    ? [agendamentoStep, ...NEXT_STEPS.slice(1)]
-    : [agendamentoStep]
+  const passos = MOSTRAR_PROXIMOS_PASSOS_EXTRAS ? [passoDaColeta, ...PASSOS_EXTRAS] : [passoDaColeta]
+  const emAndamento = coletasEmAndamento(agendamentos)
+
+  const ultimoLiberado = exams.find((e) => e.status === 'ready')
+  // "Primeira coleta" é uma afirmação sobre a conta: só com as duas listas
+  // carregadas e sem erro. Conta como coleta a realizada (mesmo sem resultado
+  // ainda) e a em andamento; cancelada e falta não contam.
+  const carregando = carregandoExames || carregandoColetas
+  const nuncaColetou =
+    !carregando &&
+    !erroExames &&
+    !erroColetas &&
+    exams.length === 0 &&
+    emAndamento.length === 0 &&
+    !agendamentos.some((a) => a.status === 'realizado')
+
+  // A flag governa o cartão do último exame. O convite à primeira coleta não
+  // depende dela: não há exame nenhum a esconder, e sem ele o paciente novo
+  // não teria estado vazio.
+  let destaque: ReactNode = null
+  if (nuncaColetou) destaque = <DestaquePrimeiraColeta onAgendar={onAgendar} />
+  else if (MOSTRAR_RESULTADO_HERO) {
+    if (ultimoLiberado) destaque = <DestaqueExame exam={ultimoLiberado} onOpen={() => onOpenExam(ultimoLiberado)} />
+    else if (carregando) destaque = <DestaqueCarregando />
+    else if (erroExames)
+      destaque = (
+        <Panel style={{ height: '100%' }}>
+          <FalhaAoCarregar titulo="Não foi possível carregar seus exames" erro={erroExames} onTentar={() => void atualizaResultados()} />
+        </Panel>
+      )
+    else
+      destaque = (
+        <Panel style={{ height: '100%' }}>
+          <SemResultados />
+        </Panel>
+      )
+  }
+
+  const ola = saudacao(new Date())
+  const primeiro = primeiroNome(nome)
 
   return (
-    <div className="grid grid-cols-12 gap-5">
-      {/* Greeting */}
+    <div className="lh-alvos grid grid-cols-12 gap-5">
       <div className="col-span-12">
-        <p className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Bom dia,</p>
-        <h1
-          className={`text-3xl font-bold ${dark ? 'text-white' : 'text-slate-900'}`}
-          style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
-        >
-          Que bom te ver de volta.
-        </h1>
-        <p className={`text-sm mt-1 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-          Aqui está um resumo dos seus exames mais recentes.
-        </p>
+        <PageHeader
+          className="mb-1"
+          eyebrow={primeiro ? `${ola}, ${primeiro}` : ola}
+          title="Que bom te ver de volta"
+          sub="Aqui está um resumo dos seus exames mais recentes."
+        />
       </div>
 
-      {/* Hero — card "Seu último exame" (oculto por flag; dado real da API) */}
-      {MOSTRAR_RESULTADO_HERO && (
-      <div className={`col-span-12 ${MOSTRAR_ACOMPANHAMENTO ? 'lg:col-span-8' : ''}`}>
-        {last ? (
-          <WebHero exam={last} onOpen={() => onOpenExam(last)} dark={dark} />
+      {destaque && <div className={'col-span-12 ' + (MOSTRAR_ACOMPANHAMENTO ? 'lg:col-span-8' : '')}>{destaque}</div>}
+
+      {MOSTRAR_ACOMPANHAMENTO && (
+        <Bloco title="Acompanhamento" className="col-span-12 lg:col-span-4" right={<Pill tone="brand">Ativo</Pill>}>
+          <div>
+            {ACOMPANHAMENTO.map((item) => (
+              <div key={item.label} className="flex items-center gap-3 py-3 border-t border-line first:border-t-0">
+                <IconTile name={item.icon} size={36} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14px] font-semibold truncate">{item.label}</span>
+                  <span className="text-[12px] text-muted truncate flex items-center gap-1.5">
+                    {item.atencao && <span className="lh-bl" style={{ background: 'var(--lh-coral)' }} />}
+                    {item.note}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </Bloco>
+      )}
+
+      <Bloco title="Próximos passos" className="col-span-12 lg:col-span-7">
+        {carregandoColetas ? (
+          <BlocoCarregando />
         ) : (
-          <div
-            className={`rounded-3xl p-7 h-full flex items-center justify-center text-sm ${
-              dark ? 'bg-gray-900 border border-gray-800 text-gray-400' : 'bg-white border border-gray-100 text-gray-500'
-            }`}
-          >
-            {loading ? 'Carregando seus exames…' : 'Você ainda não tem resultados disponíveis.'}
+          <div>
+            {passos.map((p) => (
+              <div key={p.title} className="flex items-center gap-3 py-3 border-t border-line first:border-t-0">
+                <IconTile name={p.icon} size={36} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] font-semibold">{p.title}</div>
+                  <div className="text-[12px] text-muted tabular-nums">{p.sub}</div>
+                </div>
+                <Btn variant="ghost" size="sm" {...(p.onClick ? { onClick: p.onClick } : {})}>
+                  {p.action}
+                </Btn>
+              </div>
+            ))}
           </div>
         )}
-      </div>
-      )}
+      </Bloco>
 
-      {/* Acompanhamento (oculto por flag — mock sem fonte de dados real) */}
-      {MOSTRAR_ACOMPANHAMENTO && (
-      <div className="col-span-12 lg:col-span-4">
-        <div
-          className={`rounded-2xl border ${
-            dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-          } p-5 shadow-sm h-full`}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>Acompanhamento</h3>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
-              Ativo
-            </span>
-          </div>
-          <div className="flex flex-col gap-3">
-            {TRACKING_ITEMS.map((item) => (
-              <div
-                key={item.label}
-                className={`flex items-center gap-3 p-2.5 rounded-xl ${dark ? 'bg-gray-800/50' : 'bg-slate-50'}`}
-              >
-                <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${TONE_CLASSES[item.tone]}`}>
-                  <WIcon name={item.icon} className="w-4 h-4" strokeWidth={2.4} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className={`text-sm font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>
-                    {item.label}
+      <Bloco
+        title="Em andamento"
+        className="col-span-12 lg:col-span-5"
+        right={
+          <Btn variant="ghost" size="sm" onClick={onVerColetas}>
+            Minhas coletas
+          </Btn>
+        }
+      >
+        {carregandoColetas ? (
+          <BlocoCarregando linhas={2} />
+        ) : erroColetas ? (
+          <FalhaAoCarregar titulo="Não foi possível carregar suas coletas" erro={erroColetas} onTentar={recarregarColetas} />
+        ) : emAndamento.length === 0 ? (
+          <EmptyState
+            icon="calendar"
+            title="Nenhuma coleta em andamento"
+            action={
+              <Btn size="sm" icon="calendar-plus" onClick={onAgendar}>
+                Agendar coleta
+              </Btn>
+            }
+          />
+        ) : (
+          <>
+            <div>
+              {emAndamento.slice(0, 3).map((c) => {
+                const { rotulo, passo, alerta } = situacaoDaColeta(c.status)
+                return (
+                  <div key={c.id} className="flex items-center gap-4 py-3.5 border-t border-line first:border-t-0">
+                    <button type="button" onClick={() => onOpenColeta(c.id)} className="flex items-center gap-4 flex-1 min-w-0 text-left">
+                      <Node step={passo} alert={alerta} size={40} ring />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[14px] font-semibold">{c.postoNome}</span>
+                        <span className="block text-[12px] text-muted tabular-nums">
+                          {rotulo} · {formatDataHora(c.dataHora)}
+                        </span>
+                      </span>
+                    </button>
+                    <span className="text-[12px] text-muted tabular-nums shrink-0">{passo} de {ETAPAS.length}</span>
                   </div>
-                  <div className="text-[11px] text-gray-400 truncate">{item.note}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      )}
-
-      {/* Próximos passos */}
-      <div className="col-span-12 lg:col-span-7">
-        <div
-          className={`rounded-2xl border ${
-            dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-          } p-5 shadow-sm`}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>Próximos passos</h3>
-          </div>
-          <div className="flex flex-col gap-2">
-            {steps.map((s, i) => (
-              <div
-                key={i}
-                className={`flex items-center gap-3 p-3 rounded-xl border ${
-                  dark ? 'border-gray-800 hover:bg-gray-800/50' : 'border-gray-100 hover:bg-slate-50'
-                } transition`}
-              >
-                <div className="h-9 w-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <WIcon name={s.icon} className="w-4 h-4" strokeWidth={2.2} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className={`text-sm font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>
-                    {s.title}
-                  </div>
-                  <div className="text-[11px] text-gray-400 truncate">{s.sub}</div>
-                </div>
-                <button
-                  onClick={s.onClick}
-                  className="text-xs font-semibold text-blue-600 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 transition"
-                >
-                  {s.action}
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Exames recentes (oculto por flag; dado real da API) */}
-      {MOSTRAR_EXAMES_RECENTES && (
-      <div className="col-span-12">
-        <div
-          className={`rounded-2xl border ${
-            dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-          } p-5 shadow-sm`}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>Exames recentes</h3>
-            <div className="flex items-center gap-2">
-              <button
-                className={`text-xs font-medium px-2.5 py-1 rounded-lg border ${
-                  dark ? 'border-gray-700 text-gray-300' : 'border-gray-200 text-gray-600'
-                }`}
-              >
-                <WIcon name="filter" className="w-3.5 h-3.5 inline mr-1" strokeWidth={2.2} />Filtrar
-              </button>
-              <button className="text-xs font-semibold text-blue-600">Ver todos</button>
+                )
+              })}
             </div>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {exams.map((e) => (
-              <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(e)} dark={dark} />
-            ))}
-            {!loading && exams.length === 0 && (
-              <div className="text-center text-sm text-gray-400 py-6">Nenhum exame recente.</div>
-            )}
-          </div>
-        </div>
-      </div>
+            <p className="text-[11.5px] text-muted mt-3 pt-3 border-t border-line">
+              Cada ramificação do nó é uma etapa: {ETAPAS.map((e) => e.nome).join(' · ')}.
+            </p>
+          </>
+        )}
+      </Bloco>
+
+      {MOSTRAR_EXAMES_RECENTES && (
+        <ExamesRecentes
+          exams={exams}
+          carregando={carregandoExames}
+          erro={erroExames}
+          onOpenExam={onOpenExam}
+          onVerResultados={onVerResultados}
+        />
       )}
     </div>
+  )
+}
+
+interface ExamesRecentesProps {
+  exams: readonly Exam[]
+  carregando: boolean
+  erro: string | null
+  onOpenExam: (exam: Exam) => void
+  onVerResultados: () => void
+}
+
+function ExamesRecentes({ exams, carregando, erro, onOpenExam, onVerResultados }: ExamesRecentesProps) {
+  const id = useId()
+  let corpo: ReactNode
+  if (exams.length > 0) {
+    corpo = (
+      <div className="divide-y divide-line">
+        {exams.slice(0, 5).map((e) => (
+          <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(e)} />
+        ))}
+      </div>
+    )
+  } else if (carregando) {
+    corpo = <SkeletonRows n={3} />
+  } else if (erro) {
+    corpo = <FalhaAoCarregar titulo="Não foi possível carregar seus exames" erro={erro} onTentar={() => void atualizaResultados()} />
+  } else {
+    corpo = <SemResultados />
+  }
+  return (
+    <section aria-labelledby={id} className="col-span-12">
+      <Panel pad={0}>
+        <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3 min-h-[60px]">
+          <h3 id={id} className="text-[15px] font-semibold">
+            Exames recentes
+          </h3>
+          {exams.length > 0 && !rotaOculta('results') && (
+            <Btn variant="ghost" size="sm" onClick={onVerResultados}>
+              Ver todos
+            </Btn>
+          )}
+        </div>
+        <div className="border-t border-line">{corpo}</div>
+      </Panel>
+    </section>
   )
 }

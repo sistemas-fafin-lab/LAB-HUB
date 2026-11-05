@@ -1,209 +1,122 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  dayNumFmt,
-  formatDia,
-  formatDiaSemanaCurto,
-  formatMesCurto,
-  timeFmt,
-} from "../../lib/datetime";
-import { scrollSlim } from "../../lib/ui";
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Chip, EmptyState, IconBtn, Panel, PanelHead } from '../portal'
+import { diasDeColeta } from '../../lib/coletas'
+import type { DiaDeColeta } from '../../lib/coletas'
+import { dayNumFmt, formatDiaSemanaCurto, formatMesCurto, relDia, timeFmt } from '../../lib/datetime'
 
 interface SlotPickerProps {
-  slots: string[]; // horários ISO 8601
-  /** ISO do horário em envio (desabilita a grade enquanto agenda). */
-  submitting: string | null;
-  onPick: (iso: string) => void;
-  dark: boolean;
+  /** Unidade escolhida, mostrada no título. */
+  posto: string
+  slots: string[] // horários ISO 8601
+  /** ISO do horário à espera de confirmação. */
+  selecionado: string | null
+  onPick: (iso: string) => void
 }
 
-interface SlotGroup {
-  key: string; // id estável do dia (toDateString)
-  date: Date; // primeiro horário do dia — usado p/ formatar a pílula
-  label: string; // "quarta, 01 de julho" — cabeçalho da grade
-  slots: string[];
-}
+// Quanto cada clique nas setas anda: dois dias (72 px + 8 de vão) e um pouco.
+const PASSO_DO_CARROSSEL = 168
 
-// Agrupa os horários ISO por dia, preservando a ordem cronológica.
-function groupByDay(slots: string[]): SlotGroup[] {
-  const groups = new Map<string, SlotGroup>();
-  for (const iso of [...slots].sort()) {
-    const d = new Date(iso);
-    const key = d.toDateString();
-    const group = groups.get(key);
-    if (group) group.slots.push(iso);
-    else groups.set(key, { key, date: d, label: formatDia(d), slots: [iso] });
-  }
-  return [...groups.values()];
-}
-
-// Seta de navegação do carrossel de dias.
-function ChevronIcon({ direction }: { direction: "left" | "right" }) {
+function BotaoDoDia({ dia, ativo, onClick }: { dia: DiaDeColeta; ativo: boolean; onClick: () => void }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-4 w-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
+    <button
+      type="button"
+      data-dia=""
+      aria-pressed={ativo}
+      aria-label={dia.label}
+      onClick={onClick}
+      className="shrink-0 w-[72px] py-2.5 rounded-[14px] border-[1.5px] text-center transition-colors"
+      style={
+        ativo
+          ? { background: 'var(--lh-action)', borderColor: 'var(--lh-action)', color: '#fff' }
+          : { background: 'var(--lh-card)', borderColor: 'var(--lh-line-strong)' }
+      }
     >
-      <path
-        d={direction === "left" ? "M15 18l-6-6 6-6" : "M9 18l6-6-6-6"}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+      <span className="block text-[11px] font-semibold uppercase tracking-[.06em]">
+        {relDia(dia.date) ?? formatDiaSemanaCurto(dia.date)}
+      </span>
+      <span className="block font-display font-medium text-[22px] leading-tight tabular-nums">{dayNumFmt.format(dia.date)}</span>
+      <span className="block text-[11px]">{formatMesCurto(dia.date)}</span>
+    </button>
+  )
 }
 
-// Grade de horários: uma faixa de dias no topo e os horários do dia escolhido.
-export function SlotPicker({
-  slots,
-  submitting,
-  onPick,
-  dark,
-}: SlotPickerProps) {
-  const groups = useMemo(() => groupByDay(slots), [slots]);
-  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
+/** Carrossel de dias com botões e os horários do dia escolhido. */
+export function SlotPicker({ posto, slots, selecionado, onPick }: SlotPickerProps) {
+  const dias = useMemo(() => diasDeColeta(slots), [slots])
+  const [diaEscolhido, setDiaEscolhido] = useState<string | null>(null)
+  const trilho = useRef<HTMLDivElement>(null)
+  const [podeVoltar, setPodeVoltar] = useState(false)
+  const [podeAvancar, setPodeAvancar] = useState(false)
 
-  // Dia ativo: o selecionado, ou o primeiro caso a seleção não exista mais
-  // (ex.: troca de unidade ou dia esgotado após um agendamento).
-  const activeGroup = useMemo(
-    () => groups.find((g) => g.key === selectedDayKey) ?? groups[0] ?? null,
-    [groups, selectedDayKey],
-  );
+  // Dia ativo: o escolhido, ou o primeiro caso ele não exista mais (troca de
+  // unidade, dia esgotado após um agendamento).
+  const ativo = dias.find((d) => d.key === diaEscolhido) ?? dias[0] ?? null
 
-  const updateScrollButtons = () => {
-    const el = trackRef.current;
-    if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 0);
-    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
-  };
-
-  // Reavalia os botões quando a lista de dias muda (ex.: troca de unidade).
-  useEffect(() => {
-    updateScrollButtons();
-  }, [groups]);
-
-  const scrollByPage = (direction: 1 | -1) => {
-    trackRef.current?.scrollBy({ left: direction * 168, behavior: "smooth" });
-  };
-
-  if (groups.length === 0) {
-    return (
-      <div className="text-center text-sm text-gray-400 py-8">
-        Sem horários disponíveis nesta unidade.
-      </div>
-    );
+  const atualizaSetas = () => {
+    const el = trilho.current
+    if (!el) return
+    setPodeVoltar(el.scrollLeft > 0)
+    setPodeAvancar(el.scrollLeft + el.clientWidth < el.scrollWidth - 1)
   }
 
+  useEffect(() => {
+    atualizaSetas()
+    window.addEventListener('resize', atualizaSetas)
+    return () => window.removeEventListener('resize', atualizaSetas)
+  }, [dias])
+
+  const anda = (direcao: 1 | -1) => {
+    const reduzido = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    trilho.current?.scrollBy({ left: direcao * PASSO_DO_CARROSSEL, behavior: reduzido ? 'auto' : 'smooth' })
+  }
+
+  if (!ativo) {
+    return (
+      <Panel>
+        <EmptyState icon="calendar" title="Sem horários disponíveis nesta unidade." />
+      </Panel>
+    )
+  }
+
+  const temIndisponivel = ativo.horarios.some((h) => !h.disponivel)
+
   return (
-    <div className="flex flex-col gap-4">
-      {/* Faixa de dias (rolagem horizontal) */}
-      <div>
-        <div
-          className={`text-sm font-semibold mb-2 ${dark ? "text-gray-300" : "text-slate-700"}`}
-        >
-          Escolha o dia
-        </div>
-        <div className="flex items-center gap-6">
-          <button
-            type="button"
-            aria-label="Dias anteriores"
-            onClick={() => scrollByPage(-1)}
-            disabled={!canScrollLeft}
-            className={`shrink-0 flex items-center justify-center h-8 w-8 rounded-full border transition disabled:opacity-30 disabled:pointer-events-none ${
-              dark
-                ? "border-gray-800 bg-gray-900 text-gray-300 hover:border-blue-500 hover:text-blue-400"
-                : "border-gray-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600"
-            }`}
-          >
-            <ChevronIcon direction="left" />
-          </button>
-
-          <div
-            ref={trackRef}
-            onScroll={updateScrollButtons}
-            className={`flex gap-2 overflow-x-auto pb-1.5 px-1 min-w-0 flex-1 ${scrollSlim(dark)}`}
-          >
-            {groups.map((g) => {
-              const active = g.key === activeGroup?.key;
-              return (
-                <button
-                  key={g.key}
-                  onClick={() => setSelectedDayKey(g.key)}
-                  className={`shrink-0 flex flex-col items-center rounded-xl px-3.5 py-2 border transition active:scale-95 ${
-                    active
-                      ? "border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-500/30"
-                      : dark
-                        ? "border-gray-800 bg-gray-900 text-gray-300 hover:border-blue-500"
-                        : "border-gray-100 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
-                  }`}
-                >
-                  <span
-                    className={`text-[11px] font-semibold uppercase tracking-wide ${
-                      active ? "text-blue-100" : "text-gray-400"
-                    }`}
-                  >
-                    {formatDiaSemanaCurto(g.date)}
-                  </span>
-                  <span className="text-lg font-bold leading-none mt-0.5">
-                    {dayNumFmt.format(g.date)}
-                  </span>
-                  <span
-                    className={`text-[10px] ${active ? "text-blue-100/80" : "text-gray-400"}`}
-                  >
-                    {formatMesCurto(g.date)}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            type="button"
-            aria-label="Próximos dias"
-            onClick={() => scrollByPage(1)}
-            disabled={!canScrollRight}
-            className={`shrink-0 flex items-center justify-center h-8 w-8 rounded-full border transition disabled:opacity-30 disabled:pointer-events-none ${
-              dark
-                ? "border-gray-800 bg-gray-900 text-gray-300 hover:border-blue-500 hover:text-blue-400"
-                : "border-gray-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600"
-            }`}
-          >
-            <ChevronIcon direction="right" />
-          </button>
+    <Panel>
+      <PanelHead
+        title="Escolha o dia e o horário"
+        right={<span className="text-[12px] text-muted truncate">{posto}</span>}
+      />
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="lh-ov">Dia</div>
+        <div className="flex items-center gap-1">
+          <IconBtn icon="chevron-left" label="Dias anteriores" size="md" disabled={!podeVoltar} onClick={() => anda(-1)} />
+          <IconBtn icon="chevron-right" label="Próximos dias" size="md" disabled={!podeAvancar} onClick={() => anda(1)} />
         </div>
       </div>
-
-      {/* Grade de horários do dia ativo */}
-      {activeGroup && (
-        <div>
-          <div
-            className={`text-sm font-semibold mb-2 ${dark ? "text-gray-300" : "text-slate-700"}`}
-          >
-            Horários · <span className="capitalize">{activeGroup.label}</span>
-          </div>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-            {activeGroup.slots.map((iso) => (
-              <button
-                key={iso}
-                disabled={submitting !== null}
-                onClick={() => onPick(iso)}
-                className={`rounded-xl py-2.5 text-sm font-semibold transition active:scale-95 border disabled:opacity-50 ${
-                  dark
-                    ? "border-gray-800 bg-gray-900 text-gray-200 hover:border-blue-500 hover:bg-blue-500/10"
-                    : "border-gray-100 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                }`}
-              >
-                {submitting === iso ? "…" : timeFmt.format(new Date(iso))}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+      {/* Respiro interno para o anel de foco não ser cortado pela rolagem. */}
+      <div
+        ref={trilho}
+        role="group"
+        aria-label="Dias com horário"
+        onScroll={atualizaSetas}
+        className="flex gap-2 overflow-x-auto p-1 -m-1 mb-4"
+      >
+        {dias.map((d) => (
+          <BotaoDoDia key={d.key} dia={d} ativo={d.key === ativo.key} onClick={() => setDiaEscolhido(d.key)} />
+        ))}
+      </div>
+      <div className="lh-ov mb-2">
+        Horários · <span className="normal-case tracking-normal">{ativo.label}</span>
+      </div>
+      <div className="flex flex-wrap gap-x-2 gap-y-3 lg:gap-y-2">
+        {ativo.horarios.map((h) => (
+          <Chip key={h.iso} selected={h.iso === selecionado} disabled={!h.disponivel} onClick={() => onPick(h.iso)}>
+            <span className="tabular-nums">{timeFmt.format(new Date(h.iso))}</span>
+            {!h.disponivel && <span className="sr-only"> indisponível</span>}
+          </Chip>
+        ))}
+      </div>
+      {temIndisponivel && <p className="text-[12px] text-muted mt-4">Horários riscados não estão disponíveis.</p>}
+    </Panel>
+  )
 }

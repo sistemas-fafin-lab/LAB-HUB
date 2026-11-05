@@ -6,7 +6,7 @@
 // são os achados principais do laudo e saem em negrito — a mesma regra que o
 // LaudoTexto aplica ao formato legado em texto plano.
 
-import type { Exam, ExamGroup } from './WebHero'
+import type { Exam, ExamGroup } from '../../lib/exame'
 
 // Mesma regra do LaudoTexto: linha toda em CAIXA ALTA (sozinha ou seguida de
 // dois-pontos) é achado principal. Pontuação final de frase ("HEMORRÁGICO.")
@@ -27,25 +27,15 @@ export function isLaudoEmSecoes(exam: Exam): boolean {
   )
 }
 
-interface LaudoSecoesProps {
-  groups: ExamGroup[]
-  dark?: boolean
-}
-
-export function LaudoSecoes({ groups, dark = false }: LaudoSecoesProps) {
-  const titulo = `text-[11px] font-bold uppercase tracking-wider mb-1.5 ${
-    dark ? 'text-blue-400' : 'text-blue-600'
-  }`
-  const forte = `font-semibold ${dark ? 'text-white' : 'text-slate-900'}`
-
+export function LaudoSecoes({ groups }: { groups: ExamGroup[] }) {
   return (
-    <div className={`text-sm leading-relaxed ${dark ? 'text-gray-200' : 'text-slate-700'}`}>
+    <div className="text-[14px] leading-relaxed">
       {groups.map((g, gi) => {
         const isConclusao = /^conclus[ãa]o$/i.test(g.name)
         const corpo = g.panels.map((p, pi) => (
           <div key={pi} className={pi > 0 ? 'mt-1' : ''}>
             {p.value.split('\n').map((linha, li) => (
-              <p key={li} className={linhaForte(linha) ? forte : ''}>
+              <p key={li} className={linhaForte(linha) ? 'font-semibold' : ''}>
                 {linha}
               </p>
             ))}
@@ -54,18 +44,12 @@ export function LaudoSecoes({ groups, dark = false }: LaudoSecoesProps) {
 
         return (
           <div key={`${g.name}-${gi}`} className={gi > 0 ? 'mt-5' : ''}>
-            {g.name && <div className={titulo}>{g.name}</div>}
-            {isConclusao ? (
-              <div
-                className={`rounded-xl border p-4 ${
-                  dark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-100'
-                }`}
-              >
-                {corpo}
+            {g.name && (
+              <div className="lh-ov mb-1.5" style={{ color: 'var(--lh-link)' }}>
+                {g.name}
               </div>
-            ) : (
-              corpo
             )}
+            {isConclusao ? <div className="rounded-[14px] p-4 bg-subtle">{corpo}</div> : corpo}
           </div>
         )
       })}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { direcaoDoDesvio, documentoDoExame, idadePorExtenso, secoesDoTexto } from './modelo'
-import type { Exam, ExamPanel } from '../shared/WebHero'
+import type { Exam, ExamPanel } from '../../lib/exame'
 import type { Paciente } from '@lab-hub/shared'
 
 const painel = (over: Partial<ExamPanel> = {}): ExamPanel => ({
@@ -165,6 +165,62 @@ describe('laudo descritivo', () => {
 
     expect(doc.grupos).toEqual([])
     expect(doc.secoes).toHaveLength(1)
+  })
+})
+
+describe('todos os campos do laudo', () => {
+  it('leva ao documento cada campo que o exame e o paciente informam', () => {
+    // A rede de proteção do restyle: nenhum campo some quando o visual muda.
+    const doc = documentoDoExame(
+      exame({
+        name: 'HEMOGRAMA',
+        category: 'Análises clínicas',
+        numeroLaudo: 'COLP-001',
+        doctor: 'Dra. Larissa Mendes',
+        crm: 'CRM-DF 15750',
+        dataColeta: '24 de julho de 2026',
+        dataEmissao: '28 de julho de 2026',
+        laboratorio: 'Lab Central',
+        material: 'Sangue',
+        metodo: 'Automatizado',
+        summary: ' Amostra adequada. ',
+        panels: [painel()],
+      }),
+      paciente(),
+      new Date('2026-07-29T12:00:00'),
+    )
+
+    expect(doc).toEqual({
+      titulo: 'HEMOGRAMA',
+      categoria: 'Análises clínicas',
+      numeroLaudo: 'COLP-001',
+      paciente: {
+        nome: 'Maria Souza',
+        cpf: '529.982.247-25',
+        nascimento: '14/03/1990',
+        sexo: 'F',
+        idade: '36 anos e 4 meses',
+      },
+      medico: 'Dra. Larissa Mendes',
+      crm: 'CRM-DF 15750',
+      coleta: '24 de julho de 2026',
+      liberacao: '28 de julho de 2026',
+      geracao: '29 de julho de 2026',
+      laboratorio: 'Lab Central',
+      material: 'Sangue',
+      metodo: 'Automatizado',
+      grupos: [
+        {
+          nome: null,
+          linhas: [
+            { analito: 'Glicose', resultado: '92', unidade: 'mg/dL', referencia: '70 a 99', estado: 'ok' },
+          ],
+        },
+      ],
+      secoes: [],
+      observacoes: 'Amostra adequada.',
+      resumo: { total: 1, comReferencia: 1, dentro: 1, alterados: 0 },
+    })
   })
 })
 

@@ -1,235 +1,226 @@
-import { useState } from 'react'
-import { WIcon } from '../components/primitives/WIcon'
+import { useId, useState } from 'react'
+import type { ReactNode } from 'react'
+import * as DS from '../ds'
+import type { IconName } from '../ds'
+import { Btn, IconTile, Ico, PageHeader, Panel, PanelHead, Pill, SelectField } from '../components/portal'
+import type { IconTileTone } from '../components/portal'
 import { MOSTRAR_NOVIDADES, MOSTRAR_PRIVACIDADE_EXTRAS } from '../lib/flags'
+import { FUSOS, IDIOMAS, UNIDADES, salvarFuso, useFuso } from '../lib/regiao'
 
 interface SettingsPageProps {
   dark: boolean
   onSetDark: (dark: boolean) => void
 }
 
+// Preferências sem backend: só existem nos cartões atrás de flag e não saem
+// desta tela (nada é salvo).
 interface Prefs {
   emailResults: boolean
-  smsResults:   boolean
-  pushResults:  boolean
-  marketing:    boolean
-  sharing:      boolean
-  twoFA:        boolean
+  smsResults: boolean
+  pushResults: boolean
+  marketing: boolean
+  sharing: boolean
+  twoFA: boolean
 }
 
-// ---------------------------------------------------------------------------
-// Inline sub-components (Toggle + Row) — kept inline per project convention
-// ---------------------------------------------------------------------------
-
-interface ToggleProps {
-  on:       boolean
-  onChange: () => void
-  dark:     boolean
+const PREFS_INICIAIS: Prefs = {
+  emailResults: true,
+  smsResults: false,
+  pushResults: true,
+  marketing: false,
+  sharing: true,
+  twoFA: true,
 }
 
-function Toggle({ on, onChange, dark }: ToggleProps) {
+/** Cartão com título; a região leva o nome do cartão a quem navega por regiões. */
+function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {
+  const id = useId()
   return (
-    <button
-      onClick={onChange}
-      className={`relative h-6 w-11 rounded-full transition ${on ? 'bg-blue-600' : dark ? 'bg-gray-700' : 'bg-gray-300'}`}
-    >
-      <span
-        className={`absolute top-0.5 h-5 w-5 bg-white rounded-full shadow transition-all ${on ? 'left-[22px]' : 'left-0.5'}`}
-      />
-    </button>
+    <Panel>
+      <section aria-labelledby={id}>
+        <PanelHead title={<span id={id}>{titulo}</span>} className="mb-2" />
+        {children}
+      </section>
+    </Panel>
   )
 }
 
-interface RowProps {
-  icon:  string
+interface LinhaProps {
+  icon: IconName
   title: string
-  sub:   string
-  k:     keyof Prefs
-  pref:  Prefs
-  setPref: React.Dispatch<React.SetStateAction<Prefs>>
-  dark:  boolean
+  sub: string
+  tone?: IconTileTone
+  /** Controle à direita (interruptor ou botão) */
+  children: ReactNode
 }
 
-function Row({ icon, title, sub, k, pref, setPref, dark }: RowProps) {
+function Linha({ icon, title, sub, tone, children }: LinhaProps) {
   return (
-    <div className={`flex items-center gap-3 py-3 ${dark ? 'border-gray-800' : 'border-gray-100'} border-b last:border-b-0`}>
-      <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${dark ? 'bg-gray-800 text-gray-300' : 'bg-slate-100 text-slate-600'}`}>
-        <WIcon name={icon} className="w-4 h-4" strokeWidth={2.2} />
-      </div>
+    <div className="flex items-center gap-3 py-3 border-t border-line first:border-t-0">
+      <IconTile name={icon} size={36} {...(tone ? { tone } : {})} />
       <div className="flex-1 min-w-0">
-        <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>{title}</div>
-        <div className="text-[11px] text-gray-400">{sub}</div>
+        <div className="text-[14px] font-semibold">{title}</div>
+        <div className="text-[12px] text-muted">{sub}</div>
       </div>
-      <Toggle on={pref[k]} onChange={() => setPref((p) => ({ ...p, [k]: !p[k] }))} dark={dark} />
+      {children}
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// SettingsPage
-// ---------------------------------------------------------------------------
-
-const INITIAL_PREFS: Prefs = {
-  emailResults: true,
-  smsResults:   false,
-  pushResults:  true,
-  marketing:    false,
-  sharing:      true,
-  twoFA:        true,
-}
-
-// Dispositivo atual, derivado do navegador. Sem backend de sessões, listamos
-// apenas o aparelho em uso (SO + navegador). Ordem dos testes importa: Edge/Opera
-// contêm "Chrome" na UA, e Chrome contém "Safari".
-function dispositivoAtual(): { nome: string; detalhe: string; icon: string } {
+// Aparelho atual, derivado do navegador. Sem backend de sessões, listamos só o
+// aparelho em uso (sistema + navegador). A ordem dos testes importa: Edge e Opera
+// contêm "Chrome" na UA, e o Chrome contém "Safari"; a UA do iOS contém
+// "Mac OS X" e a do Android contém "Linux".
+function aparelhoAtual(): { nome: string; icon: IconName } {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua)
-  // Mobile antes de desktop: UA de iOS contém "Mac OS X" e a de Android contém "Linux".
-  const so =
-    /Windows/i.test(ua)              ? 'Windows' :
-    /Android/i.test(ua)              ? 'Android' :
-    /iPhone|iPad|iPod/i.test(ua)     ? 'iOS'     :
-    /Mac OS X|Macintosh/i.test(ua)   ? 'macOS'   :
-    /Linux/i.test(ua)                ? 'Linux'   : 'Sistema desconhecido'
-  const navegador =
-    /Edg\//i.test(ua)                ? 'Edge'    :
-    /OPR\/|Opera/i.test(ua)          ? 'Opera'   :
-    /Chrome\//i.test(ua)             ? 'Chrome'  :
-    /Firefox\//i.test(ua)            ? 'Firefox' :
-    /Safari\//i.test(ua)             ? 'Safari'  : 'Navegador'
-  return {
-    nome:    `${navegador} · ${so}`,
-    detalhe: 'Este dispositivo · sessão atual',
-    icon:    mobile ? 'smartphone' : 'monitor',
-  }
+  const celular = /Android|iPhone|iPad|iPod|Mobile/i.test(ua)
+  const sistema = /Windows/i.test(ua)
+    ? 'Windows'
+    : /Android/i.test(ua)
+      ? 'Android'
+      : /iPhone|iPad|iPod/i.test(ua)
+        ? 'iOS'
+        : /Mac OS X|Macintosh/i.test(ua)
+          ? 'macOS'
+          : /Linux/i.test(ua)
+            ? 'Linux'
+            : 'Sistema desconhecido'
+  const navegador = /Edg\//i.test(ua)
+    ? 'Edge'
+    : /OPR\/|Opera/i.test(ua)
+      ? 'Opera'
+      : /Chrome\//i.test(ua)
+        ? 'Chrome'
+        : /Firefox\//i.test(ua)
+          ? 'Firefox'
+          : /Safari\//i.test(ua)
+            ? 'Safari'
+            : 'Navegador'
+  return { nome: `${navegador} · ${sistema}`, icon: celular ? 'smartphone' : 'monitor' }
 }
+
+// Miniaturas do OUTRO tema também: não dá para usar --lh-*, que segue o tema
+// atual. Valores de tema.css (fundo e cartão de cada modo).
+const TEMAS = [
+  { escuro: false, rotulo: 'Claro', page: '#eef2f6', card: '#ffffff' },
+  { escuro: true, rotulo: 'Escuro', page: '#0b1a33', card: '#1c3c6b' },
+] as const
 
 export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
-  const [pref, setPref] = useState<Prefs>(INITIAL_PREFS)
-  const dispositivo = dispositivoAtual()
+  const [pref, setPref] = useState<Prefs>(PREFS_INICIAIS)
+  const aparelho = aparelhoAtual()
+  const fuso = useFuso()
 
-  const card = `rounded-2xl border ${dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'} p-5 shadow-sm`
-
-  const rowProps = { pref, setPref, dark }
+  const alternar = (k: keyof Prefs, titulo: string) => (
+    <DS.Switch label={titulo} checked={pref[k]} onChange={(v) => setPref((p) => ({ ...p, [k]: v }))} />
+  )
 
   return (
-    <div>
-      <div className="mb-5">
-        <h1
-          className={`text-3xl font-bold ${dark ? 'text-white' : 'text-slate-900'}`}
-          style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
-        >
-          Configurações
-        </h1>
-        <p className={`text-sm mt-1 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-          Preferências, notificações, privacidade e segurança da conta.
-        </p>
-      </div>
+    <div className="lh-alvos">
+      <PageHeader title="Configurações" sub="Preferências, notificações, privacidade e segurança da conta." />
 
       <div className="grid grid-cols-12 gap-5">
-        {/* Left column */}
         <div className="col-span-12 lg:col-span-8 flex flex-col gap-5">
-          {/* Notifications — "receber novidades" oculto por flag (sem backend) */}
+          {/* "Receber novidades" sem backend: oculto por flag. */}
           {MOSTRAR_NOVIDADES && (
-          <div className={card}>
-            <h3 className={`text-sm font-semibold mb-2 ${dark ? 'text-white' : 'text-slate-800'}`}>
-              Como você quer receber novidades
-            </h3>
-            <p className="text-xs text-gray-400 mb-2">
-              Avisamos quando seu exame fica pronto, quando há documentos novos e lembretes de coleta.
-            </p>
-            <Row icon="mail"           title="Por e-mail"            sub="joao.madeiro@email.com"        k="emailResults" {...rowProps} />
-            <Row icon="message-square" title="Por SMS"               sub="+55 (61) 9 8123-4567"          k="smsResults"   {...rowProps} />
-            <Row icon="bell"           title="Notificação push"      sub="No celular e navegador"        k="pushResults"  {...rowProps} />
-            <Row icon="megaphone"      title="Novidades e promoções" sub="Comunicações de marketing"     k="marketing"    {...rowProps} />
-          </div>
+            <Secao titulo="Como você quer receber novidades">
+              <p className="text-[12px] text-muted mb-2">
+                Avisamos quando seu exame fica pronto, quando há documentos novos e lembretes de coleta.
+              </p>
+              <div>
+                <Linha icon="mail" title="Por e-mail" sub="No e-mail da conta">
+                  {alternar('emailResults', 'Por e-mail')}
+                </Linha>
+                <Linha icon="message-square" title="Por SMS" sub="No telefone do cadastro">
+                  {alternar('smsResults', 'Por SMS')}
+                </Linha>
+                <Linha icon="bell" title="Notificação push" sub="No celular e no navegador">
+                  {alternar('pushResults', 'Notificação push')}
+                </Linha>
+                <Linha icon="megaphone" title="Novidades e promoções" sub="Comunicações de marketing">
+                  {alternar('marketing', 'Novidades e promoções')}
+                </Linha>
+              </div>
+            </Secao>
           )}
 
-          {/* Privacy */}
-          <div className={card}>
-            <h3 className={`text-sm font-semibold mb-2 ${dark ? 'text-white' : 'text-slate-800'}`}>Privacidade</h3>
-            {/* Toggles sem backend — ocultos por flag; fica só "Excluir minha conta" */}
-            {MOSTRAR_PRIVACIDADE_EXTRAS && (
-              <>
-                <Row icon="share-2"     title="Compartilhar com médicos"       sub="Permite que profissionais cadastrados acessem seus laudos" k="sharing" {...rowProps} />
-                <Row icon="shield-check" title="Verificação em duas etapas"    sub="Exige código por SMS no login"                             k="twoFA"   {...rowProps} />
-              </>
-            )}
-            {/* Delete account (no toggle) */}
-            <div className="flex items-center gap-3 py-3">
-              <div className="h-9 w-9 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
-                <WIcon name="trash-2" className="w-4 h-4" strokeWidth={2.2} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>Excluir minha conta</div>
-                <div className="text-[11px] text-gray-400">Apaga todos os seus dados após 30 dias</div>
-              </div>
-              <button className="text-xs font-semibold text-rose-600">Solicitar</button>
+          <Secao titulo="Privacidade">
+            <div>
+              {/* Compartilhar e duas etapas sem backend: ocultos por flag. */}
+              {MOSTRAR_PRIVACIDADE_EXTRAS && (
+                <>
+                  <Linha icon="share-2" title="Compartilhar com médicos" sub="Permite que profissionais cadastrados acessem seus laudos">
+                    {alternar('sharing', 'Compartilhar com médicos')}
+                  </Linha>
+                  <Linha icon="shield-check" title="Verificação em duas etapas" sub="Exige código por SMS no login">
+                    {alternar('twoFA', 'Verificação em duas etapas')}
+                  </Linha>
+                </>
+              )}
+              {/* Como hoje: o botão ainda não chama a exclusão (DELETE /pacientes/me). */}
+              <Linha icon="trash-2" tone="coral" title="Excluir minha conta" sub="Apaga todos os seus dados após 30 dias">
+                <Btn variant="secondary" size="sm">
+                  Solicitar
+                </Btn>
+              </Linha>
             </div>
-          </div>
+          </Secao>
         </div>
 
-        {/* Right column */}
         <div className="col-span-12 lg:col-span-4 flex flex-col gap-5">
-          {/* Appearance */}
-          <div className={card}>
-            <h3 className={`text-sm font-semibold mb-3 ${dark ? 'text-white' : 'text-slate-800'}`}>Aparência</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {([{ id: 'light', l: 'Claro', bg: 'bg-white border-gray-200' }, { id: 'dark', l: 'Escuro', bg: 'bg-gray-900 border-gray-700' }] as const).map((o) => (
-                <button
-                  key={o.id}
-                  onClick={() => onSetDark(o.id === 'dark')}
-                  className={`rounded-xl border-2 p-3 text-left ${
-                    dark === (o.id === 'dark')
-                      ? 'border-blue-500 ring-2 ring-blue-500/20'
-                      : dark ? 'border-gray-800' : 'border-gray-100'
-                  }`}
-                >
-                  <div className={`h-12 rounded-md ${o.bg} border mb-2`} />
-                  <div className={`text-xs font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>{o.l}</div>
-                </button>
-              ))}
+          <Secao titulo="Aparência">
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              {TEMAS.map((t) => {
+                const marcado = dark === t.escuro
+                return (
+                  <button
+                    key={t.rotulo}
+                    type="button"
+                    onClick={() => onSetDark(t.escuro)}
+                    aria-pressed={marcado}
+                    className="rounded-[14px] p-2.5 text-left border-2 transition-colors"
+                    style={{ borderColor: marcado ? 'var(--lh-action)' : 'var(--lh-line)' }}
+                  >
+                    <span aria-hidden="true" className="h-12 rounded-[8px] mb-2 p-1.5 flex items-end" style={{ background: t.page }}>
+                      <span className="block h-5 w-3/4 rounded-[5px]" style={{ background: t.card }} />
+                    </span>
+                    <span className="block text-[13px] font-semibold">{t.rotulo}</span>
+                  </button>
+                )
+              })}
             </div>
-          </div>
+          </Secao>
 
-          {/* Language & region */}
-          <div className={card}>
-            <h3 className={`text-sm font-semibold mb-3 ${dark ? 'text-white' : 'text-slate-800'}`}>Idioma e região</h3>
-            <div className="flex flex-col gap-2">
-              {[
-                { label: 'Idioma',      value: 'Português · BR'      },
-                { label: 'Fuso horário', value: 'America/São_Paulo'  },
-                { label: 'Unidades',    value: 'Métrico (mg/dL)'     },
-              ].map((item) => (
-                <div key={item.label} className={`flex items-center justify-between p-3 rounded-xl ${dark ? 'bg-gray-800/50' : 'bg-slate-50'}`}>
-                  <span className={`text-sm ${dark ? 'text-white' : 'text-slate-800'}`}>{item.label}</span>
-                  <span className={`text-sm font-semibold ${dark ? 'text-gray-300' : 'text-slate-700'}`}>{item.value}</span>
-                </div>
-              ))}
+          <Secao titulo="Idioma e região">
+            {/* Só o fuso muda o portal; idioma e unidades têm uma opção ativa (lib/regiao). */}
+            <div className="flex flex-col gap-3">
+              <SelectField label="Idioma" options={IDIOMAS} value="pt-BR" />
+              <SelectField
+                label="Fuso horário"
+                options={FUSOS}
+                value={fuso}
+                onChange={(v) => {
+                  const escolhido = FUSOS.find((f) => f.value === v)
+                  if (escolhido) salvarFuso(escolhido.value)
+                }}
+              />
+              <SelectField label="Unidades" options={UNIDADES} value="metric" />
             </div>
-          </div>
+          </Secao>
 
-          {/* Connected devices */}
-          <div className={card}>
-            <h3 className={`text-sm font-semibold mb-2 ${dark ? 'text-white' : 'text-slate-800'}`}>
-              Dispositivos conectados
-            </h3>
-            <p className="text-xs text-gray-400 mb-3">Você está logado neste dispositivo.</p>
-            <div className="flex flex-col gap-2">
-              <div className={`flex items-center gap-3 p-2.5 rounded-xl ${dark ? 'bg-gray-800/50' : 'bg-slate-50'}`}>
-                <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${dark ? 'bg-gray-800 text-gray-300' : 'bg-white text-slate-600 border border-gray-100'}`}>
-                  <WIcon name={dispositivo.icon} className="w-4 h-4" strokeWidth={2.2} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>{dispositivo.nome}</div>
-                  <div className="text-[11px] text-gray-400">{dispositivo.detalhe}</div>
-                </div>
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Ativo
-                </span>
+          <Secao titulo="Dispositivos conectados">
+            <p className="text-[12px] text-muted mb-3">Você está conectado neste aparelho.</p>
+            <div className="flex items-center gap-3 p-2.5 rounded-[12px] bg-subtle">
+              <span className="h-8 w-8 rounded-[8px] bg-card text-ink inline-flex items-center justify-center shrink-0">
+                <Ico name={aparelho.icon} size={16} />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] font-semibold truncate">{aparelho.nome}</div>
+                <div className="text-[12px] text-muted">Este aparelho · sessão atual</div>
               </div>
+              <Pill tone="brand">Ativo</Pill>
             </div>
-          </div>
+          </Secao>
         </div>
       </div>
     </div>

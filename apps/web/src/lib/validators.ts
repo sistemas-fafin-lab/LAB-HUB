@@ -48,18 +48,44 @@ export function validarTelefone(tel: string): string | null {
 // minúscula, uma maiúscula e um dígito. Precisa bater com a do projeto — o Auth
 // recusa depois, e a mensagem dele vem em inglês e sem contexto. Uma regra a
 // mais aqui é melhor que uma recusa opaca lá.
+//
+// As regras ficam numa lista para as telas mostrarem os requisitos (rótulo +
+// atendido ou não) com a MESMA política que valida — na ordem em que o erro
+// é apontado.
+export interface RegraSenha {
+  rotulo: string
+  erro: string
+  atende: (senha: string) => boolean
+}
+
+export const REGRAS_SENHA: readonly RegraSenha[] = [
+  { rotulo: '12 caracteres ou mais', erro: 'Senha deve ter ao menos 12 caracteres', atende: (s) => s.length >= 12 },
+  { rotulo: 'Uma letra minúscula', erro: 'Senha deve ter ao menos uma letra minúscula', atende: (s) => /[a-z]/.test(s) },
+  { rotulo: 'Uma letra maiúscula', erro: 'Senha deve ter ao menos uma letra maiúscula', atende: (s) => /[A-Z]/.test(s) },
+  { rotulo: 'Um número', erro: 'Senha deve ter ao menos um número', atende: (s) => /\d/.test(s) },
+]
+
 export function validarSenha(senha: string): string | null {
-  if (senha.length < 12) return 'Senha deve ter ao menos 12 caracteres'
-  if (!/[a-z]/.test(senha)) return 'Senha deve ter ao menos uma letra minúscula'
-  if (!/[A-Z]/.test(senha)) return 'Senha deve ter ao menos uma letra maiúscula'
-  if (!/\d/.test(senha)) return 'Senha deve ter ao menos um número'
-  return null
+  return REGRAS_SENHA.find((r) => !r.atende(senha))?.erro ?? null
 }
 
 // Espera o formato YYYY-MM-DD emitido pelo <input type="date">.
+// Data digitada como DD/MM/AAAA (campo com máscara) → YYYY-MM-DD, o formato da
+// API. `null` se não for uma data de calendário (31/02, mês 13…) ou se o ano
+// for anterior a 1900.
+export function dataDigitadaParaIso(data: string): string | null {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(data)
+  if (!m) return null
+  const [dia, mes, ano] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const d = new Date(Date.UTC(ano, mes - 1, dia))
+  if (ano < 1900 || d.getUTCFullYear() !== ano || d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) return null
+  return `${m[3]}-${m[2]}-${m[1]}`
+}
+
+// Recebe a data como digitada (DD/MM/AAAA).
 export function validarDataNascimento(data: string): string | null {
   if (!data) return 'Informe a data de nascimento'
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return 'Data inválida'
+  if (dataDigitadaParaIso(data) === null) return 'Data inválida'
   return null
 }
 
@@ -67,6 +93,15 @@ export function validarDataNascimento(data: string): string | null {
 export function formatarData(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso
+}
+
+// Máscara progressiva de data: DD/MM/AAAA
+export function formatarDataDigitada(v: string): string {
+  const d = apenasDigitos(v).slice(0, 8)
+  let out = d.slice(0, 2)
+  if (d.length > 2) out += '/' + d.slice(2, 4)
+  if (d.length > 4) out += '/' + d.slice(4, 8)
+  return out
 }
 
 // Máscara progressiva de CPF: 000.000.000-00

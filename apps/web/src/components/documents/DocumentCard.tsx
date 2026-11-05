@@ -1,27 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Documento } from '@lab-hub/shared'
-import { WIcon } from '../primitives/WIcon'
+import { Ico, IconBtn, IconTile, MensagemDeErro, Node, Panel } from '../portal'
 import { api } from '../../lib/api'
-import { DOC_META, TONE_CLASSES, formatarFormato, formatarTamanho } from '../../lib/documentos'
+import { DOC_META, formatarFormato, formatarTamanho } from '../../lib/documentos'
 import { formatEtapaHora } from '../../lib/datetime'
 
 interface DocumentCardProps {
   documento: Documento
-  dark: boolean
-  onRemover?: (id: string) => void
+  /** Pede a exclusão (a lista confirma antes). Sem ela, o botão não aparece. */
+  onExcluir?: (documento: Documento) => void
 }
 
-export function DocumentCard({ documento, dark, onRemover }: DocumentCardProps) {
-  const [abrindo, setAbrindo] = useState<'ver' | 'baixar' | null>(null)
+export function DocumentCard({ documento, onExcluir }: DocumentCardProps) {
+  const [abrindo, setAbrindo] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
-  const meta = DOC_META[documento.tipo]
-  const ehImagem = documento.mimeType.startsWith('image/')
+  const { id, tipo, nomeArquivo, mimeType, tamanhoBytes, criadoEm } = documento
+  const meta = DOC_META[tipo]
+  const ehImagem = mimeType.startsWith('image/')
 
-  // Preview real da imagem. A signed URL é buscada só quando o card entra na
-  // viewport (não no mount): preserva o motivo do design original — nada de N
-  // requests de uma vez — mostrando a miniatura apenas dos cards visíveis.
-  // previewFalhou (URL vencida/arquivo corrompido/rede) cai de volta no ícone,
-  // em vez de deixar a imagem quebrada na tela — mesmo padrão do check-in.
+  // Miniatura real da imagem. A signed URL é buscada só quando o card entra na
+  // tela: nada de N requests de uma vez. Se falhar (URL vencida, arquivo
+  // corrompido, rede), cai de volta no ícone em vez de mostrar imagem quebrada.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFalhou, setPreviewFalhou] = useState(false)
   const previewRef = useRef<HTMLDivElement>(null)
@@ -35,129 +34,83 @@ export function DocumentCard({ documento, dark, onRemover }: DocumentCardProps) 
       if (!entries.some((e) => e.isIntersecting)) return
       observer.disconnect()
       api
-        .documentoUrl(documento.id)
+        .documentoUrl(id)
         .then(({ url }) => setPreviewUrl(url))
         .catch(() => setPreviewFalhou(true))
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [ehImagem, documento.id])
+  }, [ehImagem, id])
 
-  // O arquivo vive num bucket privado: pedimos uma signed URL sob demanda, em vez
-  // de emitir uma por card no mount (N requests e N capabilities que o usuário
-  // nem pediu). Mesmo padrão de api.declaracao() nas páginas de laudo.
+  // O arquivo vive num bucket privado: a signed URL é pedida sob demanda, em vez
+  // de emitir uma por card. Os botões seguem habilitados durante o pedido para
+  // o foco do teclado não se perder; o guarda evita abrir duas vezes.
   const abrir = async (modo: 'ver' | 'baixar') => {
-    setAbrindo(modo)
+    if (abrindo) return
+    setAbrindo(true)
     setErro(null)
     try {
-      const { url } = await api.documentoUrl(documento.id, modo === 'baixar')
+      const { url } = await api.documentoUrl(id, modo === 'baixar')
       window.open(url, '_blank', 'noopener')
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Falha ao abrir o documento')
     } finally {
-      setAbrindo(null)
+      setAbrindo(false)
     }
   }
 
-  const acaoBase = `h-7 w-7 rounded-lg flex items-center justify-center disabled:opacity-40 ${
-    dark ? 'hover:bg-gray-800' : 'hover:bg-slate-100'
-  }`
-
   const mostrandoImagem = ehImagem && previewUrl !== null && !previewFalhou
-  const previewBase = 'aspect-[3/2] rounded-xl mb-3 overflow-hidden'
-  const previewClasse = mostrandoImagem
-    ? `${previewBase} ${dark ? 'border border-gray-800' : 'border border-gray-100'}`
-    : `${previewBase} border-2 border-dashed flex items-center justify-center ${
-        dark ? 'border-gray-800 bg-gray-800/30' : 'border-gray-100 bg-slate-50'
-      }`
 
   return (
-    <div
-      className={`rounded-2xl border ${
-        dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'
-      } p-4 shadow-sm hover:shadow-md transition group`}
-    >
+    <Panel pad={16}>
       <div className="flex items-start gap-3 mb-3">
-        <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${TONE_CLASSES[meta.tone]}`}>
-          <WIcon name={meta.icon} className="w-5 h-5" strokeWidth={2.2} />
-        </div>
+        <IconTile name={meta.icon} size={40} />
         <div className="flex-1 min-w-0">
-          <div className={`text-sm font-semibold truncate ${dark ? 'text-white' : 'text-slate-900'}`}>
-            {meta.label}
-          </div>
-          <div className="text-[11px] text-gray-400 truncate" title={documento.nomeArquivo}>
-            {documento.nomeArquivo}
+          <div className="text-[14px] font-semibold truncate">{meta.label}</div>
+          <div className="text-[12px] text-muted truncate" title={nomeArquivo}>
+            {nomeArquivo}
           </div>
         </div>
       </div>
 
-      {/* Imagem: miniatura real (signed URL sob demanda) clicável, que abre em nova
-          aba pelo fluxo "ver". PDF/carregando/falha: ícone tracejado como antes. */}
-      <div ref={previewRef} className={previewClasse}>
-        {mostrandoImagem ? (
-          <button type="button" onClick={() => void abrir('ver')} title="Visualizar" className="block w-full h-full">
-            <img
-              src={previewUrl ?? undefined}
-              alt={documento.nomeArquivo}
-              loading="lazy"
-              onError={() => setPreviewFalhou(true)}
-              className="w-full h-full object-cover"
-            />
-          </button>
-        ) : (
-          <WIcon
-            name={documento.mimeType === 'application/pdf' ? 'file-text' : 'image'}
-            className={`w-8 h-8 ${dark ? 'text-gray-600' : 'text-gray-300'}`}
-            strokeWidth={1.6}
-          />
-        )}
-      </div>
-
-      {erro && <div className="text-[11px] text-red-500 mb-2">{erro}</div>}
-
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] text-gray-400 truncate">
-          {formatarFormato(documento.mimeType)} · {formatarTamanho(documento.tamanhoBytes)} ·{' '}
-          {formatEtapaHora(documento.criadoEm)}
-        </span>
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={() => void abrir('ver')}
-            disabled={abrindo !== null}
-            title="Visualizar"
-            className={acaoBase}
-          >
-            <WIcon
-              name={abrindo === 'ver' ? 'loader-2' : 'eye'}
-              className={`w-3.5 h-3.5 text-gray-500 ${abrindo === 'ver' ? 'animate-spin' : ''}`}
-              strokeWidth={2.2}
-            />
-          </button>
-          <button
-            onClick={() => void abrir('baixar')}
-            disabled={abrindo !== null}
-            title="Baixar"
-            className={acaoBase}
-          >
-            <WIcon
-              name={abrindo === 'baixar' ? 'loader-2' : 'download'}
-              className={`w-3.5 h-3.5 text-gray-500 ${abrindo === 'baixar' ? 'animate-spin' : ''}`}
-              strokeWidth={2.2}
-            />
-          </button>
-          {onRemover && (
-            <button
-              onClick={() => onRemover(documento.id)}
-              title="Excluir"
-              className={`h-7 w-7 rounded-lg flex items-center justify-center ${
-                dark ? 'hover:bg-red-500/10' : 'hover:bg-red-50'
-              }`}
-            >
-              <WIcon name="trash-2" className="w-3.5 h-3.5 text-gray-500 hover:text-red-500" strokeWidth={2.2} />
-            </button>
+      <div ref={previewRef} className="mb-3">
+        <button
+          type="button"
+          onClick={() => void abrir('ver')}
+          aria-label={`Visualizar ${nomeArquivo}`}
+          className="w-full h-24 rounded-[12px] overflow-hidden bg-subtle flex items-center justify-center text-faint hover:text-muted transition-colors"
+        >
+          {mostrandoImagem ? (
+            <img src={previewUrl} alt={nomeArquivo} loading="lazy" onError={() => setPreviewFalhou(true)} className="w-full h-full object-cover" />
+          ) : (
+            <Ico name={mimeType === 'application/pdf' ? 'file-text' : 'image'} size={30} stroke={1.25} />
           )}
+        </button>
+      </div>
+
+      {erro && (
+        <div className="mb-2">
+          <MensagemDeErro>{erro}</MensagemDeErro>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between gap-x-2 gap-y-1 flex-wrap">
+        {abrindo ? (
+          <span role="status" className="inline-flex items-center gap-2 text-[12px] text-muted">
+            <Node loading size={16} />
+            Preparando…
+          </span>
+        ) : (
+          <span className="text-[12px] text-muted tabular-nums">
+            {formatarFormato(mimeType)} · {formatarTamanho(tamanhoBytes)} · {formatEtapaHora(criadoEm)}
+          </span>
+        )}
+        <div className="flex items-center gap-1 ml-auto">
+          <IconBtn icon="eye" label="Visualizar" onClick={() => void abrir('ver')} />
+          <IconBtn icon="download" label="Baixar" onClick={() => void abrir('baixar')} />
+          {onExcluir && <IconBtn icon="trash-2" label="Excluir" onClick={() => onExcluir(documento)} />}
         </div>
       </div>
-    </div>
+    </Panel>
   )
 }

@@ -1,17 +1,17 @@
 import { useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import type { CadastroPacientePayload, Paciente, Sexo } from '@lab-hub/shared'
-import { WIcon } from '../components/primitives/WIcon'
-import { AuthField } from '../components/auth/AuthField'
-import { AuthSelect } from '../components/auth/AuthSelect'
-import type { OpcaoSelect } from '../components/auth/AuthSelect'
-import { BotaoOlho } from '../components/auth/BotaoOlho'
+import { Btn, Field, SelectField } from '../components/portal'
+import { AvisoErro, CampoSenha, EtapasCadastro, RegrasSenha, TituloAcesso } from '../components/acesso/pecas'
 import { api } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import { track } from '../lib/analytics'
+import { comTransicao } from '../lib/transicao'
 import {
   apenasDigitos,
+  dataDigitadaParaIso,
   formatarCpf,
+  formatarDataDigitada,
   formatarTelefone,
   validarCpf,
   validarDataNascimento,
@@ -27,33 +27,40 @@ interface CadastroResponse {
 }
 
 interface CadastroPageProps {
+  /** Abas "Entrar · Criar conta": só aparecem na primeira etapa, como no design. */
+  abas: ReactNode
   /** Conta criada, mas falta confirmar o e-mail: o AuthGate assume a tela. */
   onEmailSent: (email: string) => void
 }
 
-const OPCOES_SEXO: readonly OpcaoSelect<Sexo>[] = [
-  { valor: 'M', rotulo: 'Masculino' },
-  { valor: 'F', rotulo: 'Feminino' },
+const OPCOES_SEXO: readonly { value: Sexo; label: string }[] = [
+  { value: 'M', label: 'Masculino' },
+  { value: 'F', label: 'Feminino' },
 ]
 
 type FieldErrors = {
   nome?: string | undefined
   email?: string | undefined
   password?: string | undefined
+  confirmacao?: string | undefined
   cpf?: string | undefined
   dataNascimento?: string | undefined
   telefone?: string | undefined
 }
 
 // ---------------------------------------------------------------------------
-// CadastroPage — corpo do formulário de criação de conta. A moldura (painel da
-// marca, card, abas) vem do AuthShell/AuthGate.
+// CadastroPage — criação de conta nas etapas do design: 01 "Seus dados" e
+// 02 "Senha" ficam aqui; a 03 "Confirmação" é a tela de confirmar o e-mail do
+// AuthGate (o design pede um código por SMS, que não temos). A conta só é
+// criada no fim da etapa 2: não há como conferir CPF/e-mail antes, então um
+// erro da API aparece na etapa da senha.
 // ---------------------------------------------------------------------------
-export function CadastroPage({ onEmailSent }: CadastroPageProps) {
+export function CadastroPage({ abas, onEmailSent }: CadastroPageProps) {
+  const [etapa, setEtapa] = useState<0 | 1>(0)
   const [nome, setNome] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [mostrarSenha, setMostrarSenha] = useState(false)
+  const [confirmacao, setConfirmacao] = useState('')
   const [cpf, setCpf] = useState('')
   const [sexo, setSexo] = useState<Sexo>('M')
   const [dataNascimento, setDataNascimento] = useState('')
@@ -72,20 +79,41 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
     if (valor) setFieldError(field, validar(valor))
   }
 
+  const validarConfirmacao = (v: string) => (v === password ? null : 'As senhas não conferem')
+
+  // Valida os campos da etapa; devolve true se pode seguir.
+  const confere = (proximos: FieldErrors) => {
+    setErrors(proximos)
+    return !Object.values(proximos).some(Boolean)
+  }
+
+  const handleDados = (e: FormEvent) => {
+    e.preventDefault()
+    const ok = confere({
+      nome: validarNome(nome) ?? undefined,
+      cpf: validarCpf(cpf) ?? undefined,
+      dataNascimento: validarDataNascimento(dataNascimento) ?? undefined,
+      telefone: validarTelefone(telefone) ?? undefined,
+      email: validarEmail(email) ?? undefined,
+    })
+    if (ok) setEtapa(1)
+  }
+
+  const voltarAosDados = () => {
+    setError(null)
+    setErrors({})
+    setEtapa(0)
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
 
-    const nextErrors: FieldErrors = {
-      nome: validarNome(nome) ?? undefined,
-      email: validarEmail(email) ?? undefined,
+    const ok = confere({
       password: validarSenha(password) ?? undefined,
-      cpf: validarCpf(cpf) ?? undefined,
-      dataNascimento: validarDataNascimento(dataNascimento) ?? undefined,
-      telefone: validarTelefone(telefone) ?? undefined,
-    }
-    setErrors(nextErrors)
-    if (Object.values(nextErrors).some(Boolean)) return
+      confirmacao: validarConfirmacao(confirmacao) ?? undefined,
+    })
+    if (!ok) return
 
     setLoading(true)
     track('cadastro_submit')
@@ -97,21 +125,26 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
         password,
         cpf: apenasDigitos(cpf),
         sexo,
-        dataNascimento,
+        // Validada acima: a conversão não falha aqui.
+        dataNascimento: dataDigitadaParaIso(dataNascimento) ?? dataNascimento,
         ...(telDigits ? { telefone: telDigits } : {}),
       }
-      const res = await api.post<CadastroResponse>('/cadastro', payload)
-      track('cadastro_sucesso', { confirmacao_email: res.requiresEmailConfirmation === true })
-      if (res.requiresEmailConfirmation) {
-        // Produção: precisa confirmar o e-mail antes de entrar.
-        onEmailSent(email)
-      } else {
-        // Testes: entra direto — o onAuthStateChange troca a tela.
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-        if (signInError) {
-          setError('Conta criada, mas o login automático falhou. Tente entrar manualmente.')
+      // A transição cobre a criação e, sem confirmação de e-mail, o login
+      // automático: a tela só sai quando o próximo passo já está decidido.
+      await comTransicao('Criando sua conta', async () => {
+        const res = await api.post<CadastroResponse>('/cadastro', payload)
+        track('cadastro_sucesso', { confirmacao_email: res.requiresEmailConfirmation === true })
+        if (res.requiresEmailConfirmation) {
+          // Produção: precisa confirmar o e-mail antes de entrar.
+          onEmailSent(email)
+        } else {
+          // Testes: entra direto — o onAuthStateChange troca a tela.
+          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+          if (signInError) {
+            setError('Conta criada, mas o login automático falhou. Tente entrar manualmente.')
+          }
         }
-      }
+      })
     } catch (err: unknown) {
       const motivo = err instanceof Error ? err.message : 'Falha ao cadastrar'
       setError(motivo)
@@ -121,135 +154,123 @@ export function CadastroPage({ onEmailSent }: CadastroPageProps) {
     }
   }
 
-  return (
-    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-3">
-      <AuthField id="cad-nome" label="Nome completo" icon="user" error={errors.nome}>
-        {(c) => (
-          <input
-            {...c}
+  if (etapa === 0) {
+    return (
+      <>
+        <EtapasCadastro atual={0} />
+        <TituloAcesso titulo="Crie sua conta" sub="Em menos de 1 minuto você está pronto" />
+        {abas}
+        <form onSubmit={handleDados} noValidate className="flex flex-col gap-4">
+          <Field
+            id="cad-nome"
+            label="Nome completo"
+            icon="user-round"
             value={nome}
-            onChange={(e) => setNome(e.target.value)}
+            onChange={setNome}
             onBlur={() => handleBlur('nome', nome, validarNome)}
-            placeholder="Nome completo"
+            error={errors.nome}
             autoComplete="name"
           />
-        )}
-      </AuthField>
 
-      <AuthField id="cad-email" label="E-mail" icon="mail" error={errors.email}>
-        {(c) => (
-          <input
-            {...c}
+          <Field
+            id="cad-cpf"
+            label="CPF"
+            icon="id-card"
+            inputMode="numeric"
+            value={cpf}
+            onChange={(v) => setCpf(formatarCpf(v))}
+            onBlur={() => handleBlur('cpf', cpf, validarCpf)}
+            error={errors.cpf}
+            placeholder="000.000.000-00"
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              id="cad-nascimento"
+              label="Nascimento"
+              inputMode="numeric"
+              placeholder="DD/MM/AAAA"
+              value={dataNascimento}
+              onChange={(v) => setDataNascimento(formatarDataDigitada(v))}
+              onBlur={() => handleBlur('dataNascimento', dataNascimento, validarDataNascimento)}
+              error={errors.dataNascimento}
+              autoComplete="bday"
+            />
+            <SelectField
+              label="Sexo"
+              options={OPCOES_SEXO}
+              value={sexo}
+              onChange={(v) => setSexo(v === 'F' ? 'F' : 'M')}
+            />
+          </div>
+
+          <Field
+            id="cad-telefone"
+            label="Telefone (opcional)"
+            icon="smartphone"
+            inputMode="numeric"
+            value={telefone}
+            onChange={(v) => setTelefone(formatarTelefone(v))}
+            onBlur={() => handleBlur('telefone', telefone, validarTelefone)}
+            error={errors.telefone}
+            placeholder="(00) 0 0000-0000"
+            autoComplete="tel"
+          />
+
+          <Field
+            id="cad-email"
+            label="E-mail"
             type="email"
+            icon="mail"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={setEmail}
             onBlur={() => handleBlur('email', email, validarEmail)}
+            error={errors.email}
             placeholder="voce@email.com"
             autoComplete="email"
           />
-        )}
-      </AuthField>
 
-      <AuthField
-        id="cad-senha"
-        label="Senha"
-        icon="lock"
-        error={errors.password}
-        slotDireito={
-          <BotaoOlho visivel={mostrarSenha} onToggle={() => setMostrarSenha((v) => !v)} />
-        }
-      >
-        {(c) => (
-          <input
-            {...c}
-            type={mostrarSenha ? 'text' : 'password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onBlur={() => handleBlur('password', password, validarSenha)}
-            placeholder="Senha (mín. 12, com maiúscula, minúscula e número)"
-            autoComplete="new-password"
-          />
-        )}
-      </AuthField>
+          <Btn type="submit" size="lg" fullWidth iconRight="arrow-right">
+            Continuar
+          </Btn>
+        </form>
+      </>
+    )
+  }
 
-      <AuthField id="cad-cpf" label="CPF" icon="id-card" error={errors.cpf}>
-        {(c) => (
-          <input
-            {...c}
-            inputMode="numeric"
-            value={cpf}
-            onChange={(e) => setCpf(formatarCpf(e.target.value))}
-            onBlur={() => handleBlur('cpf', cpf, validarCpf)}
-            placeholder="000.000.000-00"
-          />
-        )}
-      </AuthField>
+  return (
+    <>
+      <EtapasCadastro atual={1} />
+      <TituloAcesso titulo="Crie uma senha" sub="Ela protege seus resultados e os da sua família." />
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+        {error !== null && <AvisoErro>{error}</AvisoErro>}
 
-      {/* Sexo e Nascimento não têm placeholder visível, então levam label à vista. */}
-      <div className="grid grid-cols-2 gap-3">
-        <AuthSelect
-          id="cad-sexo"
-          label="Sexo"
-          icon="venus-and-mars"
-          labelVisivel
-          valor={sexo}
-          opcoes={OPCOES_SEXO}
-          onChange={setSexo}
+        <CampoSenha
+          id="cad-senha"
+          value={password}
+          onChange={setPassword}
+          onBlur={() => handleBlur('password', password, validarSenha)}
+          error={errors.password}
+          autoComplete="new-password"
+        />
+        <RegrasSenha senha={password} />
+        <CampoSenha
+          id="cad-senha-confirmacao"
+          label="Confirmar senha"
+          value={confirmacao}
+          onChange={setConfirmacao}
+          onBlur={() => handleBlur('confirmacao', confirmacao, validarConfirmacao)}
+          error={errors.confirmacao}
+          autoComplete="new-password"
         />
 
-        {/* Sem ícone: o input[type=date] já traz o seu, e num campo estreito os
-            dois juntos truncam a data no celular. */}
-        <AuthField
-          id="cad-nascimento"
-          label="Nascimento"
-          error={errors.dataNascimento}
-          labelVisivel
-        >
-          {(c) => (
-            <input
-              {...c}
-              className={`${c.className} campo-data`}
-              type="date"
-              value={dataNascimento}
-              onChange={(e) => setDataNascimento(e.target.value)}
-              onBlur={() => handleBlur('dataNascimento', dataNascimento, validarDataNascimento)}
-              autoComplete="bday"
-            />
-          )}
-        </AuthField>
-      </div>
-
-      <AuthField id="cad-telefone" label="Telefone (opcional)" icon="phone" error={errors.telefone}>
-        {(c) => (
-          <input
-            {...c}
-            inputMode="numeric"
-            value={telefone}
-            onChange={(e) => setTelefone(formatarTelefone(e.target.value))}
-            onBlur={() => handleBlur('telefone', telefone, validarTelefone)}
-            placeholder="Telefone (opcional)"
-            autoComplete="tel"
-          />
-        )}
-      </AuthField>
-
-      {error !== null && (
-        <div
-          role="alert"
-          className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/30 rounded-lg px-3 py-2"
-        >
-          {error}
-        </div>
-      )}
-
-      <button
-        type="submit"
-        disabled={loading}
-        className="mt-2 w-full py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold text-sm inline-flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 transition-all hover:from-blue-600 hover:to-blue-700 hover:shadow-xl active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100"
-      >
-        {loading ? 'Criando…' : 'Criar conta'}
-        {!loading && <WIcon name="arrow-right" className="w-4 h-4" strokeWidth={2.4} />}
-      </button>
-    </form>
+        <Btn type="submit" size="lg" fullWidth loading={loading} iconRight="arrow-right">
+          {loading ? 'Criando conta' : 'Criar conta'}
+        </Btn>
+        <Btn variant="ghost" fullWidth onClick={voltarAosDados} disabled={loading}>
+          Voltar
+        </Btn>
+      </form>
+    </>
   )
 }

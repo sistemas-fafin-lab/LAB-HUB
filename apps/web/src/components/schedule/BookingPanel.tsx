@@ -1,39 +1,38 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Agendamento, PostoDisponivel } from '@lab-hub/shared'
-import { WIcon } from '../primitives/WIcon'
+import { EmptyState, FalhaAoCarregar, Panel, PanelHead, SkeletonRows } from '../portal'
 import { api } from '../../lib/api'
 import { track } from '../../lib/analytics'
+import { avisar } from '../../lib/avisos'
 import { formatDataHora } from '../../lib/datetime'
-import { UnitSelector } from './UnitSelector'
-import { SlotPicker } from './SlotPicker'
-import { BookingSkeleton } from './BookingSkeleton'
 import { ConfirmBookingModal } from './ConfirmBookingModal'
+import { ConteudoPreparo } from './PreparoColeta'
+import { SlotPicker } from './SlotPicker'
+import { UnitSelector } from './UnitSelector'
 
 interface BookingPanelProps {
-  dark: boolean
   /**
-   * Chamado após confirmar uma coleta, p/ que a lista possa recarregar. Recebe o
-   * agendamento criado: é dele que sai o id necessário para abrir a coleta e
-   * anexar documentos a ela.
+   * Chamado após confirmar uma coleta, para a lista recarregar. Recebe o
+   * agendamento criado: é dele que sai o id para abrir a coleta e anexar
+   * documentos a ela.
    */
   onBooked?: (agendamento: Agendamento) => void
   /** Força recarregamento da disponibilidade quando o valor muda. */
   refreshKey?: number
 }
 
-// Aba "Agendar": escolhe a unidade, exibe a disponibilidade e confirma a coleta.
-export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) {
+// Escolhe a unidade, mostra a disponibilidade e confirma a coleta. A validação
+// do horário e a janela retroativa do FlowLab ficam na API.
+export function BookingPanel({ onBooked, refreshKey }: BookingPanelProps) {
   const [postos, setPostos] = useState<PostoDisponivel[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [tentativa, setTentativa] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState<string | null>(null) // slot ISO em envio
-  const [pending, setPending] = useState<string | null>(null) // slot ISO aguardando confirmação
-  const [confirmed, setConfirmed] = useState<
-    { posto: string; dataHora: string } | null
-  >(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [pending, setPending] = useState<string | null>(null) // horário aguardando confirmação
 
-  const fetchData = () => {
+  useEffect(() => {
     let alive = true
     setLoading(true)
     api
@@ -53,20 +52,13 @@ export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) 
     return () => {
       alive = false
     }
-  }
+  }, [refreshKey, tentativa])
 
-  useEffect(() => {
-    return fetchData()
-  }, [refreshKey])
-
-  const selected = useMemo(
-    () => postos.find((p) => p.id === selectedId) ?? null,
-    [postos, selectedId],
-  )
+  const selected = useMemo(() => postos.find((p) => p.id === selectedId) ?? null, [postos, selectedId])
 
   const handleConfirm = async (dataHora: string) => {
     if (!selected) return
-    setSubmitting(dataHora)
+    setSubmitting(true)
     setError(null)
     try {
       // O POST /agendamentos só aceita posto + data/hora. Os exames não são
@@ -78,12 +70,10 @@ export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) 
       })
       // Nome da unidade é dado do laboratório, não do paciente.
       track('agendamento_confirmado', { posto: selected.nome })
-      setConfirmed({ posto: selected.nome, dataHora })
+      avisar({ title: 'Coleta confirmada', message: `${selected.nome}, ${formatDataHora(dataHora)}` })
       // Remove o horário recém-agendado da lista local.
       setPostos((prev) =>
-        prev.map((p) =>
-          p.id === selected.id ? { ...p, slots: p.slots.filter((s) => s !== dataHora) } : p,
-        ),
+        prev.map((p) => (p.id === selected.id ? { ...p, slots: p.slots.filter((s) => s !== dataHora) } : p)),
       )
       onBooked?.(criado)
     } catch (e: unknown) {
@@ -91,68 +81,65 @@ export function BookingPanel({ dark, onBooked, refreshKey }: BookingPanelProps) 
       setError(motivo)
       track('agendamento_erro', { motivo })
     } finally {
-      setSubmitting(null)
+      setSubmitting(false)
       setPending(null)
     }
   }
 
   if (loading) {
-    return <BookingSkeleton dark={dark} />
+    return (
+      <div className="flex flex-col gap-5">
+        <Panel pad={0}>
+          <SkeletonRows n={2} />
+        </Panel>
+        <Panel pad={0}>
+          <SkeletonRows n={2} />
+        </Panel>
+      </div>
+    )
+  }
+
+  if (postos.length === 0) {
+    return (
+      <Panel>
+        {error ? (
+          <FalhaAoCarregar
+            titulo="Não foi possível carregar os horários"
+            erro={error}
+            onTentar={() => setTentativa((t) => t + 1)}
+          />
+        ) : (
+          <EmptyState icon="map-pin" title="Nenhuma unidade disponível no momento." />
+        )}
+      </Panel>
+    )
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      {confirmed && (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-800 p-4 flex items-start gap-3">
-          <WIcon name="check-circle" className="w-5 h-5 mt-0.5 shrink-0" strokeWidth={2.2} />
-          <div className="text-sm">
-            <div>
-              Coleta confirmada na <strong>{confirmed.posto}</strong> para{' '}
-              <strong className="capitalize">{formatDataHora(confirmed.dataHora)}</strong>.
-            </div>
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
+      <div className="flex flex-col gap-5 min-w-0">
+        {error && (
+          <div role="alert" className="rounded-[16px] bg-coral-soft p-4 text-[14px]">
+            {error}
           </div>
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-2xl border border-red-200 bg-red-50 text-red-700 p-4 text-sm">
-          {error}
-        </div>
-      )}
-
-      {postos.length === 0 && !error && (
-        <div className="text-center text-sm text-gray-400 py-10">
-          Nenhuma unidade disponível no momento.
-        </div>
-      )}
-
-      {postos.length > 0 && (
-        <>
-          <UnitSelector
-            postos={postos}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            dark={dark}
-          />
-          {selected && (
-            <SlotPicker
-              slots={selected.slots}
-              submitting={submitting}
-              onPick={(iso) => setPending(iso)}
-              dark={dark}
-            />
-          )}
-        </>
-      )}
+        )}
+        <UnitSelector postos={postos} selectedId={selectedId} onSelect={setSelectedId} />
+        {selected && <SlotPicker posto={selected.nome} slots={selected.slots} selecionado={pending} onPick={setPending} />}
+      </div>
+      <aside className="lg:sticky lg:top-24">
+        <Panel>
+          <PanelHead title="Preparo" />
+          <ConteudoPreparo />
+        </Panel>
+      </aside>
 
       {pending && selected && (
         <ConfirmBookingModal
           postoNome={selected.nome}
           dataHora={pending}
-          submitting={submitting !== null}
+          submitting={submitting}
           onConfirm={() => void handleConfirm(pending)}
           onCancel={() => setPending(null)}
-          dark={dark}
         />
       )}
     </div>

@@ -1,4 +1,5 @@
 import type { Agendamento, AgendamentoStatus } from '@lab-hub/shared'
+import type { NomeIcone } from '../components/icones/registro'
 import { timeFmt, formatDiaRelativoEmFrase } from './datetime'
 
 // ---------------------------------------------------------------------------
@@ -25,8 +26,8 @@ export const JEJUM_LABEL = `${JEJUM_MIN_H} a ${JEJUM_IDEAL_MAX_H} horas`
 
 export interface RegraPreparo {
   id: string
-  /** Nome Lucide kebab-case. WIcon não tipa: nome errado some sem erro. */
-  icon: string
+  /** Nome kebab-case do registro de ícones (components/icones/registro.ts). */
+  icon: NomeIcone
   titulo: string
   texto: string
 }

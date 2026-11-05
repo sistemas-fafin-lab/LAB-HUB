@@ -1,0 +1,521 @@
+/* Portal v2 — tema do LAB Design System (variáveis --lh-*), claro em :root e
+   escuro em .dark. A classe `dark` no <html> continua vindo de lib/tema.ts
+   (aplicada antes do primeiro render), então o escuro não pisca. */
+
+:root,
+.dark .lh-paper {
+  --lh-page: #eef2f6;
+  --lh-card: #fff;
+  --lh-subtle: #eef2f6;
+  --lh-tint: #f4f6f9;
+  --lh-chip: #eef2f6;
+  --lh-line: #d6dfea;
+  --lh-line-strong: #b6c3ce;
+  --lh-ink: #0b1a33;
+  --lh-muted: #5b6672;
+  --lh-faint: #8e9aa5;
+  --lh-brand: #416ef5;
+  --lh-action: #3a63de;
+  --lh-action-hover: #2f55c9;
+  --lh-link: #3a63de;
+  --lh-brand-soft: #e6edfe;
+  --lh-brand-text: #2f55c9;
+  --lh-coral: #ff6869;
+  --lh-coral-soft: #ffe8e8;
+  --lh-av-navy: #1c3c6b;
+  --lh-av-gray: #5b6672;
+  --lh-track: #d6dfea;
+  --lh-fab: #0b1a33;
+  --lh-fab-ink: #fff;
+  --lh-shadow-float: 0 8px 24px rgba(11, 26, 51, 0.1);
+  --lh-scrim: rgba(11, 26, 51, 0.5);
+  /* Avisos (toasts): azul de ação; erro em tinta. Iguais no claro e no escuro. */
+  --lh-toast: #3a63de;
+  --lh-toast-alerta: #0b1a33;
+  --lh-toast-borda: rgba(255, 255, 255, 0.16);
+  /* Tokens do DS reapontados para o tema do portal (os componentes do DS leem
+     --action-*, --lab-* e --text-* direto no style inline). */
+  --action-primary: #3a63de;
+  --action-primary-hover: #2f55c9;
+  --action-primary-active: #2f55c9;
+  --lab-gray-50: #eef2f6;
+  --lab-gray-100: #d6dfea;
+  --lab-gray-300: #b6c3ce;
+  --lab-blue-50: #f2f6ff;
+  --lab-blue-100: #e6edfe;
+  --text-body: #0b1a33;
+  --text-muted: #5b6672;
+  --text-subtle: #8e9aa5;
+  --border-default: #d6dfea;
+  --border-strong: #b6c3ce;
+}
+
+.dark {
+  --lh-page: #0b1a33;
+  --lh-card: #1c3c6b;
+  --lh-subtle: #17335e;
+  --lh-tint: #22457a;
+  --lh-chip: #17335e;
+  --lh-line: #2d5088;
+  --lh-line-strong: #3d619b;
+  --lh-ink: #fff;
+  --lh-muted: #b6c3ce;
+  --lh-faint: #8e9aa5;
+  --lh-link: #96aff9;
+  --lh-brand-soft: #27467a;
+  --lh-brand-text: #e6edfe;
+  --lh-coral-soft: #543143;
+  --lh-av-navy: #2d5088;
+  --lh-track: #2d5088;
+  --lh-fab: #fff;
+  --lh-fab-ink: #0b1a33;
+  --lh-shadow-float: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --lh-scrim: rgba(0, 0, 0, 0.55);
+  --lab-gray-50: #17335e;
+  --lab-gray-100: #17335e;
+  --lab-gray-300: #2d5088;
+  --lab-blue-50: #22457a;
+  --lab-blue-100: #27467a;
+  --text-body: #fff;
+  --text-muted: #b6c3ce;
+  --text-subtle: #8e9aa5;
+  --border-default: #2d5088;
+  --border-strong: #3d619b;
+}
+
+/* ---- Base global (no pacote: html/body/#root) --------------------------- */
+html,
+body,
+#root {
+  min-height: 100%;
+}
+body {
+  background: var(--lh-page);
+  color: var(--lh-ink);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+/* `body a` e não `a`: este arquivo vem antes do preflight do Tailwind, cujo
+   `a { color: inherit; text-decoration: inherit }` ganharia o empate. Uma
+   utility (`text-white`) ganha do estado normal, mas não do `:hover` (0,1,2):
+   link com cor própria precisa repetir no hover (`hover:text-white
+   hover:no-underline`). */
+body a {
+  color: var(--lh-link);
+  text-decoration: none;
+}
+body a:hover {
+  color: var(--lh-action-hover);
+  text-decoration: underline;
+}
+::selection {
+  background: var(--lh-brand-soft);
+}
+:focus-visible {
+  outline: 2px solid var(--lh-brand);
+  outline-offset: 2px;
+}
+
+/* ---- Peças e assinaturas visuais ---------------------------------------- */
+.lh-paper {
+  background: var(--lh-card);
+  color: var(--lh-ink);
+}
+.lh-ov {
+  font: 600 10.5px/1.2 'DM Sans', sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lh-muted);
+}
+.lh-dot {
+  display: inline-block;
+  width: 0.15em;
+  height: 0.15em;
+  background: var(--lh-brand);
+  border-radius: 18%;
+  margin-left: 0.06em;
+}
+.lh-sup {
+  font: 600 0.3em/0 'DM Sans', sans-serif;
+  vertical-align: 1.5em;
+  margin-left: 0.22em;
+  letter-spacing: 0.02em;
+  color: var(--lh-muted);
+}
+.lh-supc {
+  font: 600 0.72em/0 'DM Sans', sans-serif;
+  vertical-align: 0.7em;
+  margin-left: 0.25em;
+  color: var(--lh-link);
+}
+.lh-bl {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex: none;
+}
+.lh-row {
+  transition: background 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.lh-row:hover {
+  background: var(--lh-tint);
+}
+.lh-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--lh-muted);
+  transition:
+    background 120ms,
+    color 120ms;
+}
+body a.lh-nav {
+  color: var(--lh-muted);
+  text-decoration: none;
+}
+.lh-nav:hover,
+body a.lh-nav:hover {
+  background: var(--lh-tint);
+  color: var(--lh-ink);
+}
+.lh-nav.is-active,
+body a.lh-nav.is-active {
+  background: var(--lh-subtle);
+  color: var(--lh-ink);
+  font-weight: 600;
+}
+.lh-nav.is-active svg {
+  color: var(--lh-brand);
+}
+.lh-notif {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--lh-coral);
+  box-shadow: 0 0 0 2px var(--lh-card);
+  pointer-events: none;
+}
+.lh-field:focus-within {
+  box-shadow: 0 0 0 3px rgba(65, 110, 245, 0.35);
+}
+/* O anel é o do campo inteiro; sem isto o foco global desenha outro no input. */
+.lh-field input:focus-visible {
+  outline: none;
+}
+.lh-tile {
+  width: 46px;
+  height: 46px;
+  border-radius: 7px;
+  background: var(--lh-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+/* Alvos de toque de 44 px no mobile, inclusive nos botões `sm` do DS. */
+@media (max-width: 1023px) {
+  .lh-alvos button {
+    min-height: 44px;
+  }
+}
+.lh-hero {
+  --lh-hero-altura: 290px;
+  --lh-hero-respiro: 30px 32px;
+}
+.lh-hero :focus-visible {
+  outline-color: #fff;
+}
+.lh-hero-ov {
+  font: 600 11px/1.2 'DM Sans', sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff;
+  margin-bottom: 12px;
+  max-width: 64%;
+}
+.lh-hero-h {
+  font:
+    500 36px/1.05 Ranade,
+    'DM Sans',
+    sans-serif;
+  letter-spacing: -0.02em;
+  color: #fff;
+  margin: 0;
+  max-width: 64%;
+}
+.lh-hero-p {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #fff;
+  margin: 14px 0 20px;
+  max-width: 330px;
+  /* Nome de exame muito longo não empurra os botões para fora da forma. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.lh-hero-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #fff;
+  font: 500 15px/1 'DM Sans', sans-serif;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+.lh-hero-stats {
+  position: absolute;
+  right: 32px;
+  bottom: 30px;
+  gap: 32px;
+}
+.lh-hero-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lh-hero-stats b {
+  font:
+    500 40px/1 Ranade,
+    sans-serif;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.lh-hero-stats span {
+  font-size: 12px;
+  line-height: 1.3;
+  color: #fff;
+}
+/* Telas estreitas: o título segue ao lado do recorte (branco sobre o fundo da
+   página sumiria) e o parágrafo, já abaixo dele, ocupa a largura. A forma cresce
+   para caber. Depois das regras acima, que ele sobrepõe. */
+@media (max-width: 639px) {
+  .lh-hero {
+    --lh-hero-altura: 340px;
+    --lh-hero-respiro: 24px;
+  }
+  .lh-hero-h {
+    font-size: 26px;
+  }
+  .lh-hero-p {
+    max-width: 100%;
+  }
+}
+.lh-hero-notch {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 30%;
+  height: 36%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-left: 14px;
+  box-sizing: border-box;
+}
+
+/* ---- Movimento ----------------------------------------------------------- */
+.lh-node-loading .arm {
+  animation: lhn 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+  animation-delay: calc(var(--i) * 0.16s);
+}
+@keyframes lhn {
+  0%,
+  100% {
+    opacity: 0.18;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+.lh-skel {
+  background: linear-gradient(90deg, var(--lh-subtle) 25%, var(--lh-tint) 50%, var(--lh-subtle) 75%);
+  background-size: 200% 100%;
+  animation: lhsk 1.4s ease-in-out infinite;
+  border-radius: 6px;
+}
+@keyframes lhsk {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+.lh-page {
+  animation: lhpage 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes lhpage {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.lh-fade {
+  animation: lhfade 200ms ease-out;
+}
+@keyframes lhfade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.lh-sheet {
+  animation: lhsheet 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes lhsheet {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* Caixa de diálogo do DS (no pacote o seletor era global por [role=dialog]). */
+.lh-dialog {
+  animation: lhdlg 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes lhdlg {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.lh-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 2px;
+  background: var(--lh-brand);
+  z-index: 80;
+  pointer-events: none;
+  animation: lhprog 650ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+@keyframes lhprog {
+  0% {
+    width: 0;
+    opacity: 1;
+  }
+  70% {
+    width: 85%;
+    opacity: 1;
+  }
+  100% {
+    width: 100%;
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lh-node-loading .arm,
+  .lh-skel,
+  .lh-page,
+  .lh-fade,
+  .lh-sheet,
+  .lh-dialog {
+    animation: none !important;
+  }
+  .lh-progress {
+    display: none;
+  }
+}
+
+/* ---- Campos do DS no tema do portal -------------------------------------- */
+.lh-in input::placeholder {
+  color: var(--lh-faint);
+}
+.lh-in .lh-in-erro {
+  color: var(--lh-ink) !important;
+}
+.lh-in .lh-in-erro::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  background: var(--lh-coral);
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.dark .lh-in span:has(> input),
+.dark .lh-in span:has(> select) {
+  background: var(--lh-subtle) !important;
+  border-color: var(--lh-line-strong) !important;
+}
+.dark .lh-in input,
+.dark .lh-in select {
+  color: var(--lh-ink) !important;
+}
+.dark .lh-in select option {
+  background: #1c3c6b;
+  color: #fff;
+}
+.dark [role='checkbox'][aria-checked='false'],
+.dark [role='radio'] {
+  background: transparent !important;
+}
+.dark [role='tab'][aria-selected='true'] {
+  background: var(--lh-card) !important;
+}
+
+/* ---- Impressão ----------------------------------------------------------- */
+@media print {
+  body {
+    background: #fff !important;
+  }
+  .lh-noprint,
+  .lh-top,
+  .lh-side,
+  .lh-dock,
+  .lh-toasts,
+  .lh-banner,
+  .lh-topnav {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .lh-print-doc {
+    box-shadow: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* Campo de data (cadastro): o ícone do calendário é do navegador; sem isto ele
+   encosta na borda e some no escuro. O calendário que ele abre é do sistema
+   (segue o color-scheme aplicado por lib/tema.ts). */
+.lh-in input[type='date']::-webkit-calendar-picker-indicator {
+  margin-inline-start: 8px;
+  padding: 2px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.lh-in input[type='date']::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}

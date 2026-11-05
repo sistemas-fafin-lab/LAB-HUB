@@ -3,7 +3,7 @@ import type { Laudo, RespostaLaudos, Resultado } from '@lab-hub/shared'
 import { api } from './api'
 import { supabase } from './supabase'
 import { laudoToExam, resultadoToExam } from './mappers'
-import type { Exam } from '../components/shared/WebHero'
+import type { Exam } from './exame'
 
 interface UseResultados {
   exams: Exam[]
@@ -67,7 +67,7 @@ export function combinaExams(resultados: Resultado[], laudos: Laudo[]): Exam[] {
 // Cache de módulo (stale-while-revalidate no cliente)
 //
 // O estado vive FORA do React: todos os consumidores (ResultsPage, HomePage,
-// TopbarSearch, Sidebar) observam o mesmo snapshot, então trocar de tela mostra
+// busca e menu do shell) observam o mesmo snapshot, então trocar de tela mostra
 // a lista já carregada na hora — o "Carregando resultados…" só existe na
 // primeira busca da sessão. Montar um consumidor só dispara busca nova se o
 // cache passou do TTL, e mesmo então a revalidação é silenciosa: a lista antiga

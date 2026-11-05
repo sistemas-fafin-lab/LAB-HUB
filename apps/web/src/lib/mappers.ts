@@ -1,5 +1,7 @@
 import type { Laudo, Resultado } from '@lab-hub/shared'
-import type { Exam } from '../components/shared/WebHero'
+import type { Exam } from './exame'
+import { nomeDoExame } from './nomeDoExame'
+import { formatador } from './regiao'
 
 // As duas fontes de resultado do LAB-HUB convergem aqui para o mesmo `Exam`:
 //   Resultado → o que o FlowLab EMPURRA pelo webhook (tabela `resultados`)
@@ -10,16 +12,9 @@ import type { Exam } from '../components/shared/WebHero'
 // virem do snapshot do agendamento/laudo.
 const PLACEHOLDER = '—'
 
-const shortDate = new Intl.DateTimeFormat('pt-BR', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-})
-const longDate = new Intl.DateTimeFormat('pt-BR', {
-  day: '2-digit',
-  month: 'long',
-  year: 'numeric',
-})
+// Instantes (liberação) no fuso escolhido nas Configurações.
+const shortDate = { format: (d: Date) => formatador({ day: '2-digit', month: 'short', year: 'numeric' }).format(d) }
+const longDate = { format: (d: Date) => formatador({ day: '2-digit', month: 'long', year: 'numeric' }).format(d) }
 
 const MESES = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
@@ -54,7 +49,7 @@ export function resultadoToExam(r: Resultado): Exam {
 
   return {
     id: r.id,
-    name: r.exameNome,
+    name: nomeDoExame(r.exameNome),
     category: r.categoria ?? PLACEHOLDER,
     date: liberado ? shortDate.format(liberado) : PLACEHOLDER,
     fullDate: liberado ? longDate.format(liberado) : PLACEHOLDER,
@@ -99,7 +94,7 @@ export function laudoToExam(l: Laudo): Exam {
   const totalExames = totalExamesDoPedido(l)
   return {
     id: l.id,
-    name: l.name,
+    name: nomeDoExame(l.name),
     category: l.category,
     // O Laudo já vem com as datas formatadas em pt-BR pela API (o mapeamento
     // acontece lá porque os LIS mandam formatos diferentes entre si).
@@ -110,7 +105,7 @@ export function laudoToExam(l: Laudo): Exam {
     crm: l.crm || PLACEHOLDER,
     // 'pending' (resultado não liberado) e 'partial' (faltou uma das fontes)
     // são ambos "ainda não está pronto" para o paciente — a UI só tem dois
-    // estados (WStatus).
+    // estados (ExamStatus em lib/exame.ts).
     status: l.status === 'ready' ? 'ready' : 'analyzing',
     summary: l.summary,
     panels: l.panels.map((p) => ({

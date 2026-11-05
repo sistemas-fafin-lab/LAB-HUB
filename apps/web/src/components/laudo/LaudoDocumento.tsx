@@ -11,15 +11,19 @@
 // escondida com a largura útil da folha, depois distribui os blocos em folhas
 // respeitando a altura disponível (que é MENOR na primeira página, onde o
 // cabeçalho é completo). Tabela grande quebra por LINHA e reabre na folha
-// seguinte com o mesmo cabeçalho, marcado "(continuação)".
+// seguinte com o mesmo cabeçalho, marcado "(continuação)". Seção descritiva
+// grande quebra por PARÁGRAFO do mesmo jeito: a folha corta o que transborda,
+// então um bloco maior que a folha perderia o final do texto no papel.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import { Logo } from '../shell/Logo'
 import type { DocumentoLaudo, EstadoAnalito, GrupoLaudo, LinhaLaudo, SecaoLaudo } from './modelo'
 
 const MM = 96 / 25.4
 const ALTURA_FOLHA = 297 * MM
 const LARGURA_FOLHA = 210 * MM
-/** `gap` do .flow e padding vertical do .pg-main — ver o CSS no index.html. */
+/** `gap` do .flow e padding vertical do .pg-main — ver styles/laudo.css. */
 const GAP = 10
 const PADDING_MAIN = 16
 
@@ -27,20 +31,18 @@ const PADDING_MAIN = 16
 // Blocos do fluxo
 // ---------------------------------------------------------------------------
 
-type Item =
-  | { tipo: 'titulo' }
-  | { tipo: 'grupo'; indice: number }
-  | { tipo: 'secao'; indice: number }
-  | { tipo: 'meta' }
-  | { tipo: 'obs' }
+type ItemAtomico = { tipo: 'titulo' } | { tipo: 'meta' } | { tipo: 'obs' }
 
-/** Um bloco já colocado numa folha. Grupo carrega o intervalo de linhas da fatia. */
-type Fatia =
-  | { tipo: 'titulo' }
-  | { tipo: 'grupo'; indice: number; de: number; ate: number; continuacao: boolean }
-  | { tipo: 'secao'; indice: number }
-  | { tipo: 'meta' }
-  | { tipo: 'obs' }
+/** Bloco que pode continuar na folha seguinte: tabela por linha, seção por parágrafo. */
+type ItemFatiavel = { tipo: 'grupo'; indice: number } | { tipo: 'secao'; indice: number }
+
+type Item = ItemAtomico | ItemFatiavel
+
+/** Um bloco já colocado numa folha. O fatiável carrega o intervalo de partes da fatia. */
+type FatiaParcial = ItemFatiavel & { de: number; ate: number; continuacao: boolean }
+type Fatia = ItemAtomico | FatiaParcial
+
+const eFatiavel = (item: Item): item is ItemFatiavel => item.tipo === 'grupo' || item.tipo === 'secao'
 
 function itensDo(doc: DocumentoLaudo): Item[] {
   const itens: Item[] = [{ tipo: 'titulo' }]
@@ -51,8 +53,16 @@ function itensDo(doc: DocumentoLaudo): Item[] {
   return itens
 }
 
-const chaveItem = (item: Item): string =>
-  item.tipo === 'grupo' || item.tipo === 'secao' ? `${item.tipo}-${item.indice}` : item.tipo
+/** Chave da moldura de um fatiável nas medidas ("g0", "s0"). */
+const chaveMoldura = (item: ItemFatiavel): string => `${item.tipo === 'grupo' ? 'g' : 's'}${item.indice}`
+
+const totalDePartes = (doc: DocumentoLaudo, item: ItemFatiavel): number =>
+  item.tipo === 'grupo' ? doc.grupos[item.indice]!.linhas.length : doc.secoes[item.indice]!.paragrafos.length
+
+/** Chave de uma parte nas medidas: linha de tabela ou parágrafo ("g0:p3", "s0:p3"). */
+const chaveParte = (moldura: string, parte: number): string => `${moldura}:p${parte}`
+
+const chaveItem = (item: Item): string => (eFatiavel(item) ? chaveMoldura(item) : item.tipo)
 
 // ---------------------------------------------------------------------------
 // Paginação
@@ -61,10 +71,10 @@ const chaveItem = (item: Item): string =>
 interface Medidas {
   /** Altura de cada bloco atômico, pela chave. */
   blocos: Record<string, number>
-  /** Cabeçalho+tabela vazios de cada grupo ("g0"), sem as linhas. */
+  /** O que reabre em toda fatia, sem as partes: título + cabeçalho da tabela ("g0") ou da seção ("s0"). */
   molduras: Record<string, number>
-  /** Altura de cada linha ("g0:l3"). */
-  linhas: Record<string, number>
+  /** Altura de cada parte, por `chaveParte`. */
+  partes: Record<string, number>
   cabecalhoPrimeira: number
   cabecalhoSeguinte: number
   rodape: number
@@ -77,18 +87,6 @@ function paginar(doc: DocumentoLaudo, m: Medidas): Fatia[][] {
     (pagina === 0 ? m.cabecalhoPrimeira : m.cabecalhoSeguinte) -
     m.rodape -
     PADDING_MAIN
-
-  // Sem layout (jsdom nos testes, ou antes da primeira medição) tudo cai numa
-  // folha só: melhor uma página longa que N páginas vazias.
-  if (util(0) <= 0) {
-    return [
-      itens.map((item): Fatia =>
-        item.tipo === 'grupo'
-          ? { ...item, de: 0, ate: doc.grupos[item.indice]!.linhas.length, continuacao: false }
-          : item,
-      ),
-    ]
-  }
 
   const paginas: Fatia[][] = [[]]
   let atual = 0
@@ -108,35 +106,31 @@ function paginar(doc: DocumentoLaudo, m: Medidas): Fatia[][] {
   for (let i = 0; i < itens.length; i++) {
     const item = itens[i]!
 
-    if (item.tipo === 'grupo') {
-      const grupo = doc.grupos[item.indice]!
-      const moldura = m.molduras[`g${item.indice}`] ?? 0
-      const alturaLinha = (j: number) => m.linhas[`g${item.indice}:l${j}`] ?? 0
+    if (eFatiavel(item)) {
+      const chave = chaveMoldura(item)
+      const total = totalDePartes(doc, item)
+      const moldura = m.molduras[chave] ?? 0
+      const alturaParte = (j: number) => m.partes[chaveParte(chave, j)] ?? 0
+      const fatia = (de: number, ate: number): Fatia => ({ ...item, de, ate, continuacao: de > 0 })
 
       // A moldura sozinha nunca fecha a folha: só desce quando não cabe nem
-      // ela nem a primeira linha, senão o cabeçalho da tabela ficaria órfão.
-      if (paginas[atual]!.length > 0 && disponivel() < moldura + alturaLinha(0)) novaFolha()
+      // ela nem a primeira parte, senão o título ficaria órfão.
+      if (paginas[atual]!.length > 0 && disponivel() < moldura + alturaParte(0)) novaFolha()
 
       let inicio = 0
       consome(moldura)
 
-      for (let j = 0; j < grupo.linhas.length; j++) {
-        const h = alturaLinha(j)
+      for (let j = 0; j < total; j++) {
+        const h = alturaParte(j)
         if (j > 0 && disponivel() < h) {
-          paginas[atual]!.push({ tipo: 'grupo', indice: item.indice, de: inicio, ate: j, continuacao: inicio > 0 })
+          paginas[atual]!.push(fatia(inicio, j))
           novaFolha()
           inicio = j
           consome(moldura)
         }
         usado += h
       }
-      paginas[atual]!.push({
-        tipo: 'grupo',
-        indice: item.indice,
-        de: inicio,
-        ate: grupo.linhas.length,
-        continuacao: inicio > 0,
-      })
+      paginas[atual]!.push(fatia(inicio, total))
       continue
     }
 
@@ -148,8 +142,8 @@ function paginar(doc: DocumentoLaudo, m: Medidas): Fatia[][] {
       if (proximo) {
         altura +=
           GAP +
-          (proximo.tipo === 'grupo'
-            ? (m.molduras[`g${proximo.indice}`] ?? 0) + (m.linhas[`g${proximo.indice}:l0`] ?? 0)
+          (eFatiavel(proximo)
+            ? (m.molduras[chaveMoldura(proximo)] ?? 0) + (m.partes[chaveParte(chaveMoldura(proximo), 0)] ?? 0)
             : (m.blocos[chaveItem(proximo)] ?? 0))
       }
     }
@@ -166,21 +160,38 @@ function paginar(doc: DocumentoLaudo, m: Medidas): Fatia[][] {
 // Peças do documento
 // ---------------------------------------------------------------------------
 
-const SETAS: Record<EstadoAnalito, string> = { ok: '', lo: '▼', hi: '▲', alt: '•' }
+// As setas são desenhadas, não caracteres: a DM Sans não tem ▼/▲ e cada
+// aparelho cairia numa fonte diferente (no Windows, a Segoe UI), com outra
+// largura e outro desenho no papel. O "•" a DM Sans tem.
+function Seta({ direcao, rotulo }: { direcao: 'lo' | 'hi'; rotulo?: string }) {
+  return (
+    <svg
+      width="7"
+      height="6"
+      viewBox="0 0 7 6"
+      fill="currentColor"
+      {...(rotulo ? { role: 'img', 'aria-label': rotulo } : { 'aria-hidden': true })}
+    >
+      <path d={direcao === 'lo' ? 'M0 0h7L3.5 6z' : 'M0 6h7L3.5 0z'} />
+    </svg>
+  )
+}
 
-// 'alt' (fora da faixa, direção indeterminada) vira 'ind' no CSS: a classe
-// `alt` já marca a LINHA como alterada, e repetir a palavra colapsaria as duas.
-const classeEstado = (e: EstadoAnalito): string => (e === 'alt' ? 'ind' : e)
+const MARCA: Record<EstadoAnalito, ReactNode> = {
+  ok: null,
+  lo: <Seta direcao="lo" rotulo="abaixo da referência" />,
+  hi: <Seta direcao="hi" rotulo="acima da referência" />,
+  alt: '•',
+}
 
 function Celulas({ linha }: { linha: LinhaLaudo }) {
-  const classe = classeEstado(linha.estado)
   return (
     <>
       <td className="an">{linha.analito}</td>
       <td>
-        <span className={`res ${classe}`}>
+        <span className="res">
           {linha.resultado}
-          {SETAS[linha.estado] && <span className={`car ${classe}`}>{SETAS[linha.estado]}</span>}
+          {MARCA[linha.estado] && <span className="car">{MARCA[linha.estado]}</span>}
         </span>
         {linha.unidade && <span className="unit">{linha.unidade}</span>}
       </td>
@@ -191,7 +202,7 @@ function Celulas({ linha }: { linha: LinhaLaudo }) {
 
 function Linha({ linha }: { linha: LinhaLaudo }) {
   return (
-    <tr className={linha.estado !== 'ok' ? `alt ${classeEstado(linha.estado)}` : undefined}>
+    <tr className={linha.estado !== 'ok' ? 'alt' : undefined}>
       <Celulas linha={linha} />
     </tr>
   )
@@ -218,9 +229,9 @@ function Grupo({
       <table className="rt">
         <thead>
           <tr>
-            <th className="an">Analito</th>
+            <th className="an">Marcador</th>
             <th>Resultado</th>
-            <th>Intervalo de referência</th>
+            <th>Referência</th>
           </tr>
         </thead>
         <tbody>
@@ -233,29 +244,36 @@ function Grupo({
   )
 }
 
-function Secao({ secao }: { secao: SecaoLaudo }) {
-  const corpo = secao.paragrafos.map((p, i) => (
-    <p key={i} className={p.forte ? 'forte' : undefined}>
-      {p.texto}
-    </p>
-  ))
-
+function Secao({
+  secao,
+  de,
+  ate,
+  continuacao,
+}: {
+  secao: SecaoLaudo
+  de: number
+  ate: number
+  continuacao: boolean
+}) {
   return (
-    <div className={`sec${secao.destaque ? ' destaque' : ''}`}>
+    <div className={`sec${secao.destaque ? ' destaque' : ''}${continuacao ? ' cont' : ''}`}>
       {secao.titulo && <div className="cap"><span className="nm">{secao.titulo}</span></div>}
-      {corpo}
+      {secao.paragrafos.slice(de, ate).map((p, i) => (
+        <p key={de + i} className={p.forte ? 'forte' : undefined}>
+          {p.texto}
+        </p>
+      ))}
     </div>
   )
 }
 
-function Bloco({ item, doc }: { item: Item; doc: DocumentoLaudo }) {
+function Bloco({ item, doc }: { item: ItemAtomico; doc: DocumentoLaudo }) {
   switch (item.tipo) {
     case 'titulo':
       // Sem a categoria aqui: ela já é a etiqueta ao lado do nome do paciente
       // ("Laudo · Análises clínicas"), e repetida logo abaixo virava eco.
       return (
         <div className="exam-title">
-          <span className="bar" />
           <h2>{doc.titulo}</h2>
         </div>
       )
@@ -284,17 +302,6 @@ function Bloco({ item, doc }: { item: Item; doc: DocumentoLaudo }) {
           <p>{doc.observacoes}</p>
         </div>
       )
-    case 'secao':
-      return <Secao secao={doc.secoes[item.indice]!} />
-    case 'grupo':
-      return (
-        <Grupo
-          grupo={doc.grupos[item.indice]!}
-          de={0}
-          ate={doc.grupos[item.indice]!.linhas.length}
-          continuacao={false}
-        />
-      )
   }
 }
 
@@ -303,12 +310,7 @@ function Cabecalho({ doc, primeira }: { doc: DocumentoLaudo; primeira: boolean }
     return (
       <div className="pg-head">
         <div className="run">
-          <div className="brand">
-            <div className="mark">L</div>
-            <span className="name">
-              Lab Hub<b>.</b>
-            </span>
-          </div>
+          <Logo dark={false} className="logo" />
           <div>
             {doc.paciente.nome && <b>{doc.paciente.nome}</b>}
             {doc.numeroLaudo && <> · Laudo nº {doc.numeroLaudo}</>}
@@ -343,14 +345,9 @@ function Cabecalho({ doc, primeira }: { doc: DocumentoLaudo; primeira: boolean }
   return (
     <div className="pg-head">
       <div className="brand-row">
-        <div className="brand">
-          <div className="mark">L</div>
-          <div>
-            <div className="name">
-              Lab Hub<b>.</b>
-            </div>
-            <div className="desc">Medicina diagnóstica</div>
-          </div>
+        <div>
+          <Logo dark={false} className="logo" />
+          <div className="desc">Medicina diagnóstica</div>
         </div>
         {doc.numeroLaudo && (
           <div className="c">
@@ -382,7 +379,7 @@ function Cabecalho({ doc, primeira }: { doc: DocumentoLaudo; primeira: boolean }
           <div className="summ">
             <div className="chips">
               <span className="chip tot">
-                <span className="n">{resumo.total}</span> {resumo.total === 1 ? 'analito' : 'analitos'}
+                <span className="n">{resumo.total}</span> {resumo.total === 1 ? 'marcador' : 'marcadores'}
               </span>
               <span className="chip ok">
                 <span className="n">{resumo.dentro}</span> dentro da referência
@@ -394,11 +391,22 @@ function Cabecalho({ doc, primeira }: { doc: DocumentoLaudo; primeira: boolean }
             </div>
             <div className="legend">
               <span className="it">
-                <span className="mk lo">▼</span>Abaixo
+                <span className="mk">
+                  <Seta direcao="lo" />
+                </span>
+                Abaixo
               </span>
               <span className="it">
-                <span className="mk hi">▲</span>Acima
+                <span className="mk">
+                  <Seta direcao="hi" />
+                </span>
+                Acima
               </span>
+              {doc.grupos.some((g) => g.linhas.some((l) => l.estado === 'alt')) && (
+                <span className="it">
+                  <span className="mk">•</span>Fora da referência
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -427,46 +435,63 @@ function Rodape({ pagina, total }: { pagina: number; total: number }) {
 // Documento
 // ---------------------------------------------------------------------------
 
+/** Alturas da camada de medição; null quando ela está fora do layout. */
+function medir(raiz: HTMLElement | null): Medidas | null {
+  // Com a camada fora do layout (`display: none` na impressão) tudo mediria
+  // zero e o laudo inteiro cairia numa folha só: fica a paginação anterior.
+  if (!raiz || getComputedStyle(raiz).display === 'none') return null
+
+  const altura = (seletor: string): number => {
+    const el = raiz.querySelector<HTMLElement>(seletor)
+    return el ? el.getBoundingClientRect().height : 0
+  }
+  const porAtributo = (atributo: 'bloco' | 'moldura' | 'parte') => {
+    const alturas: Record<string, number> = {}
+    for (const el of raiz.querySelectorAll<HTMLElement>(`[data-${atributo}]`)) {
+      alturas[el.dataset[atributo]!] = el.getBoundingClientRect().height
+    }
+    return alturas
+  }
+
+  return {
+    blocos: porAtributo('bloco'),
+    molduras: porAtributo('moldura'),
+    partes: porAtributo('parte'),
+    cabecalhoPrimeira: altura('[data-medida="head-first"]'),
+    cabecalhoSeguinte: altura('[data-medida="head-run"]'),
+    rodape: altura('[data-medida="foot"]'),
+  }
+}
+
+interface Paginacao {
+  folhas: Fatia[][]
+  /** Linhas da tabela mais baixas: só quando isso poupa uma folha inteira. */
+  compacto: boolean
+}
+
 export function LaudoDocumento({ doc }: { doc: DocumentoLaudo }) {
   const medicaoRef = useRef<HTMLDivElement>(null)
+  const medicaoCompactaRef = useRef<HTMLDivElement>(null)
   const caixaRef = useRef<HTMLDivElement>(null)
-  const [paginas, setPaginas] = useState<Fatia[][] | null>(null)
+  const [paginacao, setPaginacao] = useState<Paginacao | null>(null)
   const [escala, setEscala] = useState(1)
 
   const medirEPaginar = useCallback(() => {
-    const raiz = medicaoRef.current
-    if (!raiz) return
-
-    const altura = (seletor: string): number => {
-      const el = raiz.querySelector<HTMLElement>(seletor)
-      return el ? el.getBoundingClientRect().height : 0
+    const normal = medir(medicaoRef.current)
+    if (!normal) return
+    let proxima: Paginacao = { folhas: paginar(doc, normal), compacto: false }
+    // Sobrou pouco para a última folha (o caso típico: só as observações)?
+    // A versão compacta fica se ela couber em menos folhas.
+    if (proxima.folhas.length > 1) {
+      const compacta = medir(medicaoCompactaRef.current)
+      const folhasCompactas = compacta ? paginar(doc, compacta) : null
+      if (folhasCompactas && folhasCompactas.length < proxima.folhas.length) {
+        proxima = { folhas: folhasCompactas, compacto: true }
+      }
     }
 
-    const blocos: Record<string, number> = {}
-    const molduras: Record<string, number> = {}
-    const linhas: Record<string, number> = {}
-
-    for (const el of raiz.querySelectorAll<HTMLElement>('[data-bloco]')) {
-      blocos[el.dataset.bloco!] = el.getBoundingClientRect().height
-    }
-    for (const el of raiz.querySelectorAll<HTMLElement>('[data-moldura]')) {
-      molduras[el.dataset.moldura!] = el.getBoundingClientRect().height
-    }
-    for (const el of raiz.querySelectorAll<HTMLElement>('[data-linha]')) {
-      linhas[el.dataset.linha!] = el.getBoundingClientRect().height
-    }
-
-    const proximas = paginar(doc, {
-      blocos,
-      molduras,
-      linhas,
-      cabecalhoPrimeira: altura('[data-medida="head-first"]'),
-      cabecalhoSeguinte: altura('[data-medida="head-run"]'),
-      rodape: altura('[data-medida="foot"]'),
-    })
-
-    setPaginas((anteriores) =>
-      anteriores && JSON.stringify(anteriores) === JSON.stringify(proximas) ? anteriores : proximas,
+    setPaginacao((anterior) =>
+      anterior && JSON.stringify(anterior) === JSON.stringify(proxima) ? anterior : proxima,
     )
   }, [doc])
 
@@ -475,7 +500,8 @@ export function LaudoDocumento({ doc }: { doc: DocumentoLaudo }) {
   }, [medirEPaginar])
 
   // A folha é medida com a fonte carregada: com a fonte de fallback as alturas
-  // saem menores e a última linha de cada página vazaria quando a Inter chega.
+  // saem menores e a última linha de cada página vazaria quando a DM Sans e a
+  // Ranade chegam.
   useEffect(() => {
     let vivo = true
     void document.fonts?.ready.then(() => {
@@ -490,7 +516,7 @@ export function LaudoDocumento({ doc }: { doc: DocumentoLaudo }) {
   }, [medirEPaginar])
 
   // Na tela a folha A4 é maior que a área útil no celular: encolhe para caber
-  // (a impressão ignora a escala — ver o @media print no index.html).
+  // (a impressão ignora a escala — ver o @media print em styles/laudo.css).
   useEffect(() => {
     const caixa = caixaRef.current
     if (!caixa) return
@@ -511,53 +537,24 @@ export function LaudoDocumento({ doc }: { doc: DocumentoLaudo }) {
     return () => observador.disconnect()
   }, [])
 
-  const folhas = paginas ?? paginar(doc, {
-    blocos: {}, molduras: {}, linhas: {},
+  const folhas = paginacao?.folhas ?? paginar(doc, {
+    blocos: {}, molduras: {}, partes: {},
     cabecalhoPrimeira: 0, cabecalhoSeguinte: 0, rodape: 0,
   })
 
   return (
     <div ref={caixaRef} className="laudo-caixa">
-      {/* Camada de medição: mesma largura útil da folha, fora da tela e fora
-          da árvore de acessibilidade. Nunca é impressa. */}
-      <div
-        ref={medicaoRef}
-        className="laudo-folhas laudo-medicao"
-        aria-hidden="true"
-        style={{ width: LARGURA_FOLHA }}
-      >
-        <div className="sheet" style={{ height: 'auto' }}>
-          <div data-medida="head-first">
-            <Cabecalho doc={doc} primeira />
-          </div>
-          <div data-medida="head-run">
-            <Cabecalho doc={doc} primeira={false} />
-          </div>
-          <div className="pg-main">
-            <div className="flow" style={{ gap: 0 }}>
-              {itensDo(doc).map((item) =>
-                item.tipo === 'grupo' ? (
-                  <MedeGrupo key={chaveItem(item)} grupo={doc.grupos[item.indice]!} indice={item.indice} />
-                ) : (
-                  <div key={chaveItem(item)} data-bloco={chaveItem(item)}>
-                    <Bloco item={item} doc={doc} />
-                  </div>
-                ),
-              )}
-            </div>
-          </div>
-          <div data-medida="foot">
-            <Rodape pagina={1} total={1} />
-          </div>
-        </div>
-      </div>
+      {/* Camadas de medição (normal e compacta): mesma largura útil da folha,
+          fora da tela e fora da árvore de acessibilidade. Nunca são impressas. */}
+      <CamadaDeMedicao doc={doc} refCamada={medicaoRef} compacto={false} />
+      <CamadaDeMedicao doc={doc} refCamada={medicaoCompactaRef} compacto />
 
       {/* `zoom` e não `transform: scale()`: o zoom entra no cálculo de layout,
           então a altura da pilha de folhas encolhe junto e não sobra um vão
           embaixo. A impressão zera o zoom (ver o @media print). */}
-      <div className="laudo-folhas" style={{ zoom: escala }}>
+      <div className={`laudo-folhas${paginacao?.compacto ? ' compacto' : ''}`} style={{ zoom: escala }}>
         {folhas.map((fatias, i) => (
-          <div className="sheet" key={i}>
+          <div className="sheet lh-paper" key={i}>
             <Cabecalho doc={doc} primeira={i === 0} />
             <div className="pg-main">
               <div className="flow">
@@ -566,6 +563,14 @@ export function LaudoDocumento({ doc }: { doc: DocumentoLaudo }) {
                     <Grupo
                       key={`${j}-g${fatia.indice}`}
                       grupo={doc.grupos[fatia.indice]!}
+                      de={fatia.de}
+                      ate={fatia.ate}
+                      continuacao={fatia.continuacao}
+                    />
+                  ) : fatia.tipo === 'secao' ? (
+                    <Secao
+                      key={`${j}-s${fatia.indice}`}
+                      secao={doc.secoes[fatia.indice]!}
                       de={fatia.de}
                       ate={fatia.ate}
                       continuacao={fatia.continuacao}
@@ -579,6 +584,52 @@ export function LaudoDocumento({ doc }: { doc: DocumentoLaudo }) {
             <Rodape pagina={i + 1} total={folhas.length} />
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function CamadaDeMedicao({
+  doc,
+  refCamada,
+  compacto,
+}: {
+  doc: DocumentoLaudo
+  refCamada: RefObject<HTMLDivElement | null>
+  compacto: boolean
+}) {
+  return (
+    <div
+      ref={refCamada}
+      className={`laudo-folhas laudo-medicao${compacto ? ' compacto' : ''}`}
+      aria-hidden="true"
+      style={{ width: LARGURA_FOLHA }}
+    >
+      <div className="sheet lh-paper" style={{ height: 'auto' }}>
+        <div data-medida="head-first">
+          <Cabecalho doc={doc} primeira />
+        </div>
+        <div data-medida="head-run">
+          <Cabecalho doc={doc} primeira={false} />
+        </div>
+        <div className="pg-main">
+          <div className="flow" style={{ gap: 0 }}>
+            {itensDo(doc).map((item) =>
+              item.tipo === 'grupo' ? (
+                <MedeGrupo key={chaveItem(item)} grupo={doc.grupos[item.indice]!} indice={item.indice} />
+              ) : item.tipo === 'secao' ? (
+                <MedeSecao key={chaveItem(item)} secao={doc.secoes[item.indice]!} indice={item.indice} />
+              ) : (
+                <div key={chaveItem(item)} data-bloco={chaveItem(item)}>
+                  <Bloco item={item} doc={doc} />
+                </div>
+              ),
+            )}
+          </div>
+        </div>
+        <div data-medida="foot">
+          <Rodape pagina={1} total={1} />
+        </div>
       </div>
     </div>
   )
@@ -598,9 +649,9 @@ function MedeGrupo({ grupo, indice }: { grupo: GrupoLaudo; indice: number }) {
           <table className="rt">
             <thead>
               <tr>
-                <th className="an">Analito</th>
+                <th className="an">Marcador</th>
                 <th>Resultado</th>
-                <th>Intervalo de referência</th>
+                <th>Referência</th>
               </tr>
             </thead>
           </table>
@@ -612,14 +663,35 @@ function MedeGrupo({ grupo, indice }: { grupo: GrupoLaudo; indice: number }) {
             {grupo.linhas.map((l, j) => (
               <tr
                 key={j}
-                data-linha={`g${indice}:l${j}`}
-                className={l.estado !== 'ok' ? `alt ${classeEstado(l.estado)}` : undefined}
+                data-parte={chaveParte(`g${indice}`, j)}
+                className={l.estado !== 'ok' ? 'alt' : undefined}
               >
                 <Celulas linha={l} />
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+/** Só na camada de medição: o título da seção (com a caixa, se houver) e cada parágrafo. */
+function MedeSecao({ secao, indice }: { secao: SecaoLaudo; indice: number }) {
+  const caixa = `sec${secao.destaque ? ' destaque' : ''}`
+  return (
+    <div>
+      <div data-moldura={`s${indice}`}>
+        <div className={caixa}>
+          {secao.titulo && <div className="cap"><span className="nm">{secao.titulo}</span></div>}
+        </div>
+      </div>
+      <div className={`${caixa} partes`}>
+        {secao.paragrafos.map((p, j) => (
+          <p key={j} data-parte={chaveParte(`s${indice}`, j)} className={p.forte ? 'forte' : undefined}>
+            {p.texto}
+          </p>
+        ))}
       </div>
     </div>
   )

@@ -1,152 +1,142 @@
-import { WIcon } from '../components/primitives/WIcon'
+import { useId, useMemo } from 'react'
+import type { IconName } from '../ds'
+import { Btn, EmptyState, FalhaAoCarregar, PageHeader, Panel, Pill, Skel, TrendLine } from '../components/portal'
+import type { Exam } from '../lib/exame'
+import { resumoDasTendencias, tendenciasDosExames } from '../lib/tendencias'
+import type { Direcao, Tendencia } from '../lib/tendencias'
+import { atualizaResultados, useResultados } from '../lib/useResultados'
+
+// Tendências montadas dos resultados reais do paciente (lib/tendencias): um
+// marcador aparece a partir de duas coletas com valor numérico.
 
 interface TrendsPageProps {
-  dark: boolean
+  onOpenExam: (exam: Exam) => void
+  onVerResultados: () => void
 }
 
-type StoryTone = 'amber' | 'green' | 'blue'
-type Direction  = 'up' | 'down' | 'flat'
-
-interface Story {
-  marker:    string
-  value:     string
-  delta:     string
-  tone:      StoryTone
-  direction: Direction
-  note:      string
-  spark:     number[]
-}
-
-const STORIES: Story[] = [
-  {
-    marker:    'Colesterol LDL',
-    value:     '138 mg/dL',
-    delta:     '+12 nos últimos 6 meses',
-    tone:      'amber',
-    direction: 'up',
-    note:      'Está acima do valor recomendado (até 130 mg/dL). Vale conversar com seu médico sobre alimentação e atividade física.',
-    spark:     [108, 115, 120, 124, 130, 138],
-  },
-  {
-    marker:    'Vitamina D',
-    value:     '42 ng/mL',
-    delta:     '+18 desde a suplementação',
-    tone:      'green',
-    direction: 'up',
-    note:      'Excelente resposta à suplementação iniciada em fevereiro. Você está dentro da faixa ideal (30–60).',
-    spark:     [22, 24, 28, 33, 38, 42],
-  },
-  {
-    marker:    'Glicemia em jejum',
-    value:     '92 mg/dL',
-    delta:     'Estável há 3 coletas',
-    tone:      'blue',
-    direction: 'flat',
-    note:      'Tudo certo por aqui. Continue mantendo a rotina de exames anuais.',
-    spark:     [91, 93, 92, 91, 92, 92],
-  },
-  {
-    marker:    'Hemoglobina',
-    value:     '14,2 g/dL',
-    delta:     '+0,3 desde a última coleta',
-    tone:      'blue',
-    direction: 'up',
-    note:      'Dentro da referência (13,0–17,5). Nenhuma preocupação no momento.',
-    spark:     [13.4, 13.8, 14.0, 13.9, 14.0, 14.2],
-  },
-]
-
-const TONE_CLASSES: Record<StoryTone, { bg: (dark: boolean) => string; text: string; chip: string; line: string }> = {
-  amber: { bg: (d) => d ? 'bg-amber-500/10'   : 'bg-amber-50',   text: 'text-amber-700',   chip: 'bg-amber-100 text-amber-700',   line: 'stroke-amber-500'   },
-  green: { bg: (d) => d ? 'bg-emerald-500/10' : 'bg-emerald-50', text: 'text-emerald-700', chip: 'bg-emerald-100 text-emerald-700', line: 'stroke-emerald-500' },
-  blue:  { bg: (d) => d ? 'bg-blue-500/10'    : 'bg-blue-50',    text: 'text-blue-700',    chip: 'bg-blue-100 text-blue-700',     line: 'stroke-blue-500'    },
-}
-
-const DIR_ICON: Record<Direction, string> = {
-  up:   'trending-up',
+const ICONE_DA_DIRECAO: Record<Direcao, IconName> = {
+  up: 'trending-up',
   down: 'trending-down',
   flat: 'minus',
 }
 
-function sparkPath(vals: number[]): string {
-  const min   = Math.min(...vals)
-  const max   = Math.max(...vals)
-  const range = max - min || 1
-  return vals
-    .map((v, i) => `${i === 0 ? 'M' : 'L'} ${(i / (vals.length - 1)) * 100} ${30 - ((v - min) / range) * 26}`)
-    .join(' ')
+function CartaoDoMarcador({ tendencia: t, onVerExame }: { tendencia: Tendencia; onVerExame: () => void }) {
+  const id = useId()
+  return (
+    <Panel>
+      <section aria-labelledby={id}>
+        <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
+          <div className="min-w-0">
+            <h2 id={id} className="text-[13px] text-muted">
+              {t.marcador}
+            </h2>
+            <div className="font-display font-medium text-[36px] leading-none tracking-[-0.02em] mt-2 tabular-nums">
+              {t.valor}
+              {t.unidade && <span className="lh-sup">{t.unidade}</span>}
+            </div>
+          </div>
+          <Pill tone={t.tom} icon={ICONE_DA_DIRECAO[t.direcao]}>
+            {t.variacao}
+          </Pill>
+        </div>
+        <TrendLine data={t.serie} out={t.foraDaReferencia} />
+        <div className="flex justify-between text-[11px] text-muted mt-1.5 tabular-nums">
+          <span>Primeira coleta</span>
+          <span>Última</span>
+        </div>
+        <div className="rounded-[12px] bg-subtle p-3 mt-4">
+          <p className="text-[13px] leading-relaxed">{t.nota}</p>
+        </div>
+        <div className="mt-3 -mb-1">
+          <Btn variant="ghost" size="sm" iconRight="arrow-right" onClick={onVerExame} style={{ paddingLeft: 0 }}>
+            Ver exame
+          </Btn>
+        </div>
+      </section>
+    </Panel>
+  )
 }
 
-export function TrendsPage({ dark }: TrendsPageProps) {
+function Carregando() {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-5" role="status" aria-busy="true" aria-label="Carregando">
+      {[0, 1].map((i) => (
+        <Panel key={i}>
+          <Skel className="h-3.5 w-1/3" />
+          <Skel className="h-9 w-1/4 mt-3" />
+          <Skel className="h-12 w-full mt-4" />
+        </Panel>
+      ))}
+    </div>
+  )
+}
+
+export function TrendsPage({ onOpenExam, onVerResultados }: TrendsPageProps) {
+  const idResumo = useId()
+  const { exams, loading, error } = useResultados()
+  const tendencias = useMemo(() => tendenciasDosExames(exams), [exams])
+
+  let corpo: React.ReactNode
+  if (loading && exams.length === 0) {
+    corpo = <Carregando />
+  } else if (error !== null && exams.length === 0) {
+    corpo = (
+      <Panel pad={0}>
+        <FalhaAoCarregar
+          titulo="Não foi possível carregar seus resultados"
+          erro={error}
+          onTentar={() => void atualizaResultados()}
+        />
+      </Panel>
+    )
+  } else if (tendencias.length === 0) {
+    corpo = (
+      <Panel pad={0}>
+        <EmptyState
+          icon="activity"
+          title="Ainda não há histórico suficiente"
+          text="As tendências aparecem a partir de duas coletas do mesmo marcador."
+          action={
+            <Btn variant="secondary" onClick={onVerResultados}>
+              Ver resultados
+            </Btn>
+          }
+        />
+      </Panel>
+    )
+  } else {
+    const verExame = (id: string) => {
+      const exame = exams.find((e) => e.id === id)
+      if (exame) onOpenExam(exame)
+    }
+    corpo = (
+      <>
+        <div className="mb-5">
+          <Panel>
+            <section aria-labelledby={idResumo}>
+              <h2 id={idResumo} className="lh-ov mb-2">
+                Em resumo
+              </h2>
+              <p className="text-[15px] leading-relaxed max-w-3xl">{resumoDasTendencias(tendencias)}</p>
+            </section>
+          </Panel>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {tendencias.map((t) => (
+            <CartaoDoMarcador key={t.marcador + t.unidade} tendencia={t} onVerExame={() => verExame(t.exameId)} />
+          ))}
+        </div>
+      </>
+    )
+  }
+
   return (
     <div>
-      <div className="mb-5">
-        <h1
-          className={`text-3xl font-bold ${dark ? 'text-white' : 'text-slate-900'}`}
-          style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
-        >
-          Como você está evoluindo
-        </h1>
-        <p className={`text-sm mt-1 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-          Comparação dos seus principais marcadores ao longo do tempo, em linguagem simples.
-        </p>
-      </div>
-
-      {/* Summary narrative card */}
-      <div className={`rounded-2xl p-5 mb-5 ${dark ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100'}`}>
-        <div className="flex items-start gap-3">
-          <div className="h-10 w-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/25">
-            <WIcon name="sparkles" className="w-5 h-5" strokeWidth={2.2} />
-          </div>
-          <div>
-            <div className={`text-sm font-bold mb-0.5 ${dark ? 'text-blue-100' : 'text-blue-900'}`}>Em resumo</div>
-            <p className={`text-sm leading-relaxed ${dark ? 'text-blue-100/80' : 'text-blue-900/80'}`}>
-              De 4 marcadores acompanhados, <b>3 estão na faixa ideal</b> e <b>1 precisa de atenção</b> (LDL).
-              Sua vitamina D respondeu muito bem à suplementação. Considere agendar retorno com a Dra. Renata.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Marker grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {STORIES.map((s) => {
-          const t = TONE_CLASSES[s.tone]
-          return (
-            <div key={s.marker} className={`rounded-2xl border ${dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'} p-5 shadow-sm`}>
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <div className={`text-xs font-medium ${dark ? 'text-gray-400' : 'text-gray-500'}`}>{s.marker}</div>
-                  <div
-                    className={`text-2xl font-bold mt-0.5 tabular-nums ${dark ? 'text-white' : 'text-slate-900'}`}
-                    style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
-                  >
-                    {s.value}
-                  </div>
-                </div>
-                <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-md ${t.chip}`}>
-                  <WIcon name={DIR_ICON[s.direction]} className="w-3 h-3" strokeWidth={2.6} />
-                  {s.delta}
-                </span>
-              </div>
-              <svg viewBox="0 0 100 32" className="w-full h-12 mb-3" preserveAspectRatio="none">
-                <path
-                  d={sparkPath(s.spark)}
-                  className={t.line}
-                  fill="none"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-              <div className={`rounded-xl p-3 ${t.bg(dark)}`}>
-                <p className={`text-xs leading-relaxed ${dark ? 'text-gray-200' : 'text-slate-700'}`}>{s.note}</p>
-              </div>
-            </div>
-          )
-        })}
-      </div>
+      <PageHeader
+        title="Como você está evoluindo"
+        sub="Comparação dos seus principais marcadores ao longo do tempo, em linguagem simples."
+      />
+      {corpo}
     </div>
   )
 }

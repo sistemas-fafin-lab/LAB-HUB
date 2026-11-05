@@ -1,149 +1,189 @@
-import { useState } from "react";
-import type { Agendamento } from "@lab-hub/shared";
-import { WTabs } from "../components/primitives/WTabs";
-import { WIcon } from "../components/primitives/WIcon";
-import { BookingPanel } from "../components/schedule/BookingPanel";
-import { ColetasList } from "../components/schedule/ColetasList";
-import { ColetaTimeline } from "../components/schedule/ColetaTimeline";
-import { useAgendamentos } from "../lib/useAgendamentos";
-import { api } from "../lib/api";
-import { track } from "../lib/analytics";
+import { useState } from 'react'
+import type { Agendamento } from '@lab-hub/shared'
+import { BackLink, Btn, EmptyState, FalhaAoCarregar, Modal, Node, PageHeader, Panel } from '../components/portal'
+import { BookingPanel } from '../components/schedule/BookingPanel'
+import { ColetasList } from '../components/schedule/ColetasList'
+import { ColetaTimeline } from '../components/schedule/ColetaTimeline'
+import { api } from '../lib/api'
+import { track } from '../lib/analytics'
+import { avisar } from '../lib/avisos'
+import { formatDataHora } from '../lib/datetime'
+import type { AbaColetas } from '../lib/rotas'
+import { useAgendamentos } from '../lib/useAgendamentos'
 
 interface SchedulePageProps {
-  dark: boolean;
-  // Quando vem da Home ("Detalhes" da próxima coleta): abre já na linha do
-  // tempo desse agendamento, na aba "Minhas coletas".
-  initialSelectedId?: string | null;
+  // Aba e coleta aberta vêm da URL (/agendar, /coletas, /coleta/:id): recarregar
+  // a página ou usar voltar/avançar mantém o paciente onde estava. A página só
+  // pede a troca; quem muda a URL é o App.
+  aba: AbaColetas
+  selectedId: string | null
+  onAba: (aba: AbaColetas) => void
+  onAbrirColeta: (id: string) => void
+  onFecharColeta: () => void
 }
 
-type ColetaTab = "agendar" | "minhas";
+const mensagemDe = (e: unknown, padrao: string) => (e instanceof Error ? e.message : padrao)
 
-export function SchedulePage({
-  dark,
-  initialSelectedId = null,
-}: SchedulePageProps) {
-  const [tab, setTab] = useState<ColetaTab>(
-    initialSelectedId ? "minhas" : "agendar",
-  );
-  const [selectedId, setSelectedId] = useState<string | null>(
-    initialSelectedId,
-  );
-  const [resyncingId, setResyncingId] = useState<string | null>(null);
-  const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const { agendamentos, loading, error, reload, setStatus } = useAgendamentos();
+export function SchedulePage({ aba, selectedId, onAba, onAbrirColeta, onFecharColeta }: SchedulePageProps) {
+  const [resyncingId, setResyncingId] = useState<string | null>(null)
+  const [aCancelar, setACancelar] = useState<Agendamento | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+  // A coleta recém-agendada abre antes de a lista recarregar: sem ela, o paciente
+  // veria "não encontrada" entre confirmar e a resposta do GET.
+  const [recemCriada, setRecemCriada] = useState<Agendamento | null>(null)
+  const { agendamentos, loading, error, reload, setStatus } = useAgendamentos()
 
   // Reenvia ao FlowLab um agendamento que ficou 'pendente' (POST .../sync).
   const handleResync = async (id: string) => {
-    track("agendamento_resync");
-    setResyncingId(id);
+    track('agendamento_resync')
+    setResyncingId(id)
     try {
-      await api.post<Agendamento>(`/agendamentos/${id}/sync`, {});
+      await api.post<Agendamento>(`/agendamentos/${id}/sync`, {})
+    } catch (e: unknown) {
+      avisar({ tone: 'alert', title: 'Não foi possível reenviar', message: mensagemDe(e, 'Tente novamente em instantes.') })
     } finally {
-      setResyncingId(null);
-      reload();
+      setResyncingId(null)
+      reload()
     }
-  };
-
-  // Marca o agendamento como 'cancelado' — mantém o histórico (POST .../cancelar).
-  // Optimistic UI: o item permanece na lista e já exibe o status 'cancelado'; em
-  // caso de falha, recarrega do servidor p/ voltar ao estado correto.
-  const handleCancel = async (id: string) => {
-    track("agendamento_cancelado");
-    setCancellingId(id);
-    setStatus(id, "cancelado");
-    try {
-      await api.post<Agendamento>(`/agendamentos/${id}/cancelar`, {});
-    } catch {
-      reload();
-    } finally {
-      setCancellingId(null);
-    }
-  };
-
-  // Badge da aba: coletas em andamento (agendada/check-in/bloqueada); ignora
-  // as concluídas (realizada) e as canceladas.
-  const emAndamento = agendamentos.filter(
-    (a) => a.status !== "realizado" && a.status !== "cancelado",
-  ).length;
-
-  const tabs = [
-    { id: "agendar" as const, label: "Agendar" },
-    { id: "minhas" as const, label: "Minhas coletas", count: emAndamento },
-  ];
-
-  // Detalhe (linha do tempo) de um agendamento — ocupa a tela inteira, com o seu
-  // próprio "Voltar". Cai fora se o item sumir da lista após um reload.
-  const selected = selectedId
-    ? (agendamentos.find((a) => a.id === selectedId) ?? null)
-    : null;
-  if (selected) {
-    return (
-      <ColetaTimeline
-        agendamento={selected}
-        dark={dark}
-        onBack={() => setSelectedId(null)}
-      />
-    );
   }
 
-  return (
-    <div className="max-w-4xl mx-auto">
-      <h1
-        className={`text-2xl font-bold mb-1 ${dark ? "text-white" : "text-slate-900"}`}
-        style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
-      >
-        Agendas/Coletas
-      </h1>
-      <p className="text-sm text-gray-500 mb-5">
-        Agende uma nova coleta ou acompanhe os seus agendamentos.
-      </p>
+  // Marca o agendamento como 'cancelado' e mantém o histórico (POST .../cancelar).
+  // Otimista: a coleta já aparece cancelada; se falhar, recarrega do servidor
+  // para voltar ao estado correto.
+  const handleCancel = async ({ id, postoNome }: Agendamento) => {
+    setACancelar(null)
+    track('agendamento_cancelado')
+    setStatus(id, 'cancelado')
+    try {
+      await api.post<Agendamento>(`/agendamentos/${id}/cancelar`, {})
+      avisar({ title: 'Coleta cancelada', message: postoNome })
+    } catch (e: unknown) {
+      avisar({ tone: 'alert', title: 'Não foi possível cancelar', message: mensagemDe(e, 'Tente novamente em instantes.') })
+      reload()
+    }
+  }
 
-      <div className="mb-6 flex items-center gap-2">
-        <WTabs items={tabs} value={tab} onChange={setTab} dark={dark} />
-        <button
-          onClick={() => {
-            setRefreshKey((k) => k + 1);
-            reload();
-          }}
-          className={`ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
-            dark
-              ? "bg-gray-900 border-gray-800 text-gray-400 hover:text-white hover:bg-gray-800"
-              : "bg-white border-gray-100 text-gray-600 hover:text-slate-900 hover:bg-gray-50"
-          }`}
-          title="Recarregar datas de coleta"
-        >
-          <WIcon name="refresh-cw" className="w-4 h-4" />
-          Recarregar
-        </button>
+  const acoes = {
+    onResync: (id: string) => void handleResync(id),
+    resyncingId,
+    onCancel: setACancelar,
+  }
+
+  const confirmaCancelamento = aCancelar && (
+    <Modal
+      open
+      title="Cancelar coleta?"
+      description={`${aCancelar.postoNome}, ${formatDataHora(aCancelar.dataHora)}.`}
+      onClose={() => setACancelar(null)}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={() => setACancelar(null)}>
+            Manter coleta
+          </Btn>
+          <Btn onClick={() => void handleCancel(aCancelar)}>Cancelar coleta</Btn>
+        </>
+      }
+    />
+  )
+
+  const recarregar = (
+    <Btn
+      variant="secondary"
+      icon="refresh-cw"
+      onClick={() => {
+        setRefreshKey((k) => k + 1)
+        reload()
+      }}
+    >
+      Recarregar
+    </Btn>
+  )
+
+  // Detalhe em /coleta/:id. Fica montado durante um recarregamento (o agendamento
+  // já está na lista), para não perder o envio de documentos em curso.
+  if (selectedId !== null) {
+    const selected = agendamentos.find((a) => a.id === selectedId) ?? (recemCriada?.id === selectedId ? recemCriada : undefined)
+    if (selected) {
+      return (
+        <>
+          <ColetaTimeline key={selected.id} agendamento={selected} onBack={onFecharColeta} {...acoes} />
+          {confirmaCancelamento}
+        </>
+      )
+    }
+    return (
+      <div className="lh-alvos max-w-6xl mx-auto">
+        <BackLink label="Minhas coletas" onClick={onFecharColeta} />
+        {loading ? (
+          <div role="status" className="py-16 flex flex-col items-center gap-3 text-[14px] text-muted">
+            <Node loading size={40} />
+            Carregando coleta…
+          </div>
+        ) : error ? (
+          <Panel>
+            <FalhaAoCarregar titulo="Não foi possível carregar a coleta" erro={error} onTentar={reload} />
+          </Panel>
+        ) : (
+          <Panel>
+            <EmptyState
+              icon="calendar"
+              title={<h1>Coleta não encontrada</h1>}
+              text="Esta coleta não está mais disponível neste endereço. Abra-a de novo pela lista de coletas."
+              action={
+                <Btn variant="secondary" onClick={onFecharColeta}>
+                  Voltar para minhas coletas
+                </Btn>
+              }
+            />
+          </Panel>
+        )}
       </div>
+    )
+  }
 
-      {tab === "agendar" ? (
+  if (aba === 'agendar') {
+    return (
+      <div className="lh-alvos max-w-6xl mx-auto">
+        <BackLink label="Minhas coletas" onClick={() => onAba('minhas')} />
+        <PageHeader title="Agendar coleta" sub="Escolha a unidade, o dia e o horário." right={recarregar} className="mb-5" />
         <BookingPanel
-          dark={dark}
           refreshKey={refreshKey}
           // Abre a coleta recém-criada: é onde o paciente anexa os documentos,
           // no momento de maior motivação ("adiante seu check-in").
           onBooked={(ag) => {
-            reload();
-            setSelectedId(ag.id);
-            setTab("minhas");
+            setRecemCriada(ag)
+            reload()
+            onAbrirColeta(ag.id)
           }}
         />
-      ) : (
-        <ColetasList
-          agendamentos={agendamentos}
-          loading={loading}
-          error={error}
-          dark={dark}
-          resyncingId={resyncingId}
-          onResync={(id) => void handleResync(id)}
-          cancellingId={cancellingId}
-          onCancel={(id) => void handleCancel(id)}
-          onAgendar={() => setTab("agendar")}
-          onOpen={setSelectedId}
-        />
-      )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="lh-alvos max-w-6xl mx-auto">
+      <PageHeader
+        title="Minhas coletas"
+        sub="Acompanhe cada etapa, do agendamento ao resultado."
+        right={
+          <>
+            {recarregar}
+            <Btn icon="calendar-plus" onClick={() => onAba('agendar')}>
+              Agendar coleta
+            </Btn>
+          </>
+        }
+      />
+      <ColetasList
+        agendamentos={agendamentos}
+        loading={loading}
+        error={error}
+        onRetry={reload}
+        onAgendar={() => onAba('agendar')}
+        onOpen={onAbrirColeta}
+        {...acoes}
+      />
+      {confirmaCancelamento}
     </div>
-  );
+  )
 }

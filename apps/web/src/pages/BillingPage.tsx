@@ -1,217 +1,207 @@
-import { WIcon } from '../components/primitives/WIcon'
+import { useId } from 'react'
+import type { ReactNode } from 'react'
+import * as DS from '../ds'
+import { IconTile, PageHeader, Panel, PanelHead, Pill } from '../components/portal'
+import type { PillTone } from '../components/portal'
 
-interface BillingPageProps {
-  dark: boolean
+// Conteúdo estático, o mesmo de hoje: a tela continua atrás de
+// MOSTRAR_FATURAMENTO. Sem backend de cobrança, a tela só mostra: trocar ou
+// gerenciar o plano, adicionar cartão e tornar cartão principal ficam de fora
+// (issue 16); exportar o histórico e baixar a NFS-e também, sem issue ainda.
+
+type SituacaoCobranca = 'paid' | 'refunded'
+
+interface Cobranca {
+  id: string
+  data: string
+  descricao: string
+  valor: string
+  situacao: SituacaoCobranca
 }
 
-type InvoiceStatus = 'paid' | 'refunded'
-
-interface Invoice {
-  id:     string
-  date:   string
-  desc:   string
-  amount: string
-  status: InvoiceStatus
+interface Cartao {
+  bandeira: string
+  final: string
+  validade: string
+  principal: boolean
 }
 
-interface CardInfo {
-  brand:   string
-  last:    string
-  exp:     string
-  primary: boolean
+const SITUACAO: Record<SituacaoCobranca, { tom: PillTone; rotulo: string }> = {
+  paid: { tom: 'brand', rotulo: 'Pago' },
+  refunded: { tom: 'neutral', rotulo: 'Estornado' },
 }
 
-const INVOICES: Invoice[] = [
-  { id: 'INV-2310', date: '15 Out 2025', desc: 'Hemograma + Perfil lipídico',     amount: 'R$ 312,00', status: 'paid'     },
-  { id: 'INV-2287', date: '02 Out 2025', desc: 'Consulta Endocrinologia',          amount: 'R$ 480,00', status: 'paid'     },
-  { id: 'INV-2241', date: '28 Set 2025', desc: 'Vitamina D · TSH · T4 livre',      amount: 'R$ 198,00', status: 'paid'     },
-  { id: 'INV-2198', date: '04 Set 2025', desc: 'Glicemia + Colesterol total',      amount: 'R$ 142,00', status: 'refunded' },
+const COBRANCAS: Cobranca[] = [
+  { id: 'INV-2310', data: '15 out 2025', descricao: 'Hemograma + Perfil lipídico', valor: 'R$ 312,00', situacao: 'paid' },
+  { id: 'INV-2287', data: '02 out 2025', descricao: 'Consulta Endocrinologia', valor: 'R$ 480,00', situacao: 'paid' },
+  { id: 'INV-2241', data: '28 set 2025', descricao: 'Vitamina D · TSH · T4 livre', valor: 'R$ 198,00', situacao: 'paid' },
+  { id: 'INV-2198', data: '04 set 2025', descricao: 'Glicemia + Colesterol total', valor: 'R$ 142,00', situacao: 'refunded' },
 ]
 
-const CARDS: CardInfo[] = [
-  { brand: 'Visa',       last: '4821', exp: '08/29', primary: true  },
-  { brand: 'Mastercard', last: '1192', exp: '11/27', primary: false },
+const CARTOES: Cartao[] = [
+  { bandeira: 'Visa', final: '4821', validade: '08/29', principal: true },
+  { bandeira: 'Mastercard', final: '1192', validade: '11/27', principal: false },
 ]
 
-export function BillingPage({ dark }: BillingPageProps) {
-  const card = `rounded-2xl border ${dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100'} p-5 shadow-sm`
+/** Cartão em região; `children` recebe o id do título que nomeia a região. */
+function Secao({ pad, children }: { pad?: number; children: (idTitulo: string) => ReactNode }) {
+  const id = useId()
+  return (
+    <Panel {...(pad !== undefined ? { pad } : {})}>
+      <section aria-labelledby={id}>{children(id)}</section>
+    </Panel>
+  )
+}
 
+/** Marca da forma de pagamento (bandeira ou PIX). Decorativa: o nome vai em texto ao lado. */
+function Marca({ texto }: { texto: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="h-9 w-12 rounded-[7px] bg-ink text-page inline-flex items-center justify-center text-[10px] font-bold tracking-wider shrink-0"
+    >
+      {texto}
+    </span>
+  )
+}
+
+function PlanoAtual() {
+  const id = useId()
+  return (
+    <DS.Card variant="brand" padding={24} radius="20px" style={{ display: 'block', background: 'var(--lh-brand)' }}>
+      <section aria-labelledby={id}>
+        <h2 id={id} className="lh-ov mb-3" style={{ color: '#fff' }}>
+          Plano atual
+        </h2>
+        <h3 className="font-display font-medium text-[32px] leading-none tracking-[-0.02em]">
+          Lab Hub Care
+          <span className="lh-dot" style={{ background: '#fff' }} />
+        </h3>
+        <p className="text-[15px] leading-relaxed mt-3 mb-6 max-w-md">
+          Coletas em domicílio ilimitadas, prioridade nas unidades, descontos em consultas e laudos compartilháveis
+          com seu time médico.
+        </p>
+        <dl className="flex items-end gap-8 flex-wrap">
+          <div>
+            <dt className="lh-ov mb-2" style={{ color: '#fff' }}>
+              Mensalidade
+            </dt>
+            <dd className="font-display font-medium text-[28px] leading-none tabular-nums">
+              R$ 89<span className="text-[16px]">,90</span>
+            </dd>
+          </div>
+          <div>
+            <dt className="lh-ov mb-2" style={{ color: '#fff' }}>
+              Próximo débito
+            </dt>
+            <dd className="text-[15px] font-semibold">15 mai 2026</dd>
+          </div>
+        </dl>
+      </section>
+    </DS.Card>
+  )
+}
+
+export function BillingPage() {
   return (
     <div>
-      <div className="mb-5">
-        <h1
-          className={`text-3xl font-bold ${dark ? 'text-white' : 'text-slate-900'}`}
-          style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
-        >
-          Faturamento
-        </h1>
-        <p className={`text-sm mt-1 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-          Plano, formas de pagamento e histórico de notas fiscais.
-        </p>
-      </div>
+      <PageHeader title="Faturamento" sub="Plano, formas de pagamento e histórico de notas fiscais." />
 
       <div className="grid grid-cols-12 gap-5">
-        {/* Left column */}
-        <div className="col-span-12 lg:col-span-7">
-          {/* Plan card */}
-          <div
-            className={`relative overflow-hidden rounded-2xl p-6 text-white shadow-lg ${dark ? '' : 'shadow-blue-500/20'}`}
-            style={{ background: 'linear-gradient(135deg, #2563eb 0%, #4f46e5 60%, #7c3aed 100%)' }}
-          >
-            <div className="absolute -top-12 -right-12 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
-            <div className="absolute -bottom-12 -left-8 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
-            <div className="relative">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-blue-100 mb-2">Plano atual</div>
-              <h2
-                className="text-3xl font-black mb-1"
-                style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif" }}
-              >
-                Lab Hub Care<span className="text-blue-200">.</span>
-              </h2>
-              <p className="text-blue-100 text-sm mb-5 max-w-md">
-                Coletas em domicílio ilimitadas, prioridade nas unidades, descontos em consultas e laudos compartilháveis com seu time médico.
-              </p>
-              <div className="flex items-end gap-6 flex-wrap">
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-blue-100">Mensalidade</div>
-                  <div className="text-2xl font-bold tabular-nums">
-                    R$ 89<span className="text-base font-medium text-blue-100">,90</span>
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-blue-100">Próximo débito</div>
-                  <div className="text-sm font-semibold">15 Mai 2026</div>
-                </div>
-                <div className="ml-auto flex items-center gap-2">
-                  <button className="bg-white/15 backdrop-blur text-white text-xs font-semibold h-9 px-3 rounded-lg hover:bg-white/25">
-                    Mudar plano
-                  </button>
-                  <button className="bg-white text-blue-700 text-xs font-bold h-9 px-3 rounded-lg shadow-md">
-                    Gerenciar
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+        <div className="col-span-12 lg:col-span-7 flex flex-col gap-5">
+          <PlanoAtual />
 
-          {/* Invoice list */}
-          <div className={`${card} mt-5`}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>
-                Histórico de cobranças
-              </h3>
-              <button className="text-xs font-semibold text-blue-600">Exportar CSV</button>
-            </div>
-            <div className="flex flex-col gap-1">
-              {INVOICES.map((inv) => (
-                <div
-                  key={inv.id}
-                  className={`grid grid-cols-[auto_1fr_auto_auto_auto] gap-3 items-center px-3 py-2.5 rounded-xl ${dark ? 'hover:bg-gray-800/50' : 'hover:bg-slate-50'} transition`}
-                >
-                  <div className="h-8 w-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                    <WIcon name="receipt" className="w-4 h-4" strokeWidth={2.2} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className={`text-sm font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>
-                      {inv.desc}
-                    </div>
-                    <div className="text-[11px] text-gray-400">{inv.id} · {inv.date}</div>
-                  </div>
-                  <div className={`text-sm font-bold tabular-nums ${dark ? 'text-white' : 'text-slate-900'}`}>
-                    {inv.amount}
-                  </div>
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded ${
-                      inv.status === 'paid' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
-                    }`}
-                  >
-                    {inv.status === 'paid' ? 'Pago' : 'Estornado'}
-                  </span>
-                  <button className="text-blue-600 text-xs font-semibold inline-flex items-center gap-1">
-                    <WIcon name="download" className="w-3.5 h-3.5" strokeWidth={2.2} />
-                    NFS-e
-                  </button>
+          <Secao pad={0}>
+            {(id) => (
+              <>
+                <div className="px-5 pt-4 pb-3">
+                  <h3 id={id} className="text-[15px] font-semibold">
+                    Histórico de cobranças
+                  </h3>
                 </div>
-              ))}
-            </div>
-          </div>
+                <ul className="divide-y divide-line border-t border-line">
+                  {COBRANCAS.map((c) => (
+                    <li
+                      key={c.id}
+                      className="lh-row grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-4 items-center px-5 py-3"
+                    >
+                      <IconTile name="receipt" size={34} />
+                      <div className="min-w-0">
+                        <div className="text-[14px] font-semibold truncate">{c.descricao}</div>
+                        <div className="text-[12px] text-muted tabular-nums">
+                          {c.id} · {c.data}
+                        </div>
+                      </div>
+                      <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-4">
+                        <span className="text-[14px] font-semibold tabular-nums text-right">{c.valor}</span>
+                        <Pill tone={SITUACAO[c.situacao].tom}>{SITUACAO[c.situacao].rotulo}</Pill>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </Secao>
         </div>
 
-        {/* Right column */}
         <div className="col-span-12 lg:col-span-5 flex flex-col gap-5">
-          {/* Payment methods */}
-          <div className={card}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>
-                Forma de pagamento
-              </h3>
-              <button className="text-xs font-semibold text-blue-600">+ Adicionar</button>
-            </div>
-            <div className="flex flex-col gap-2">
-              {CARDS.map((c) => (
-                <div
-                  key={c.last}
-                  className={`flex items-center gap-3 p-3 rounded-xl border ${
-                    c.primary
-                      ? dark ? 'border-blue-500/40 bg-blue-500/5' : 'border-blue-200 bg-blue-50/50'
-                      : dark ? 'border-gray-800' : 'border-gray-100'
-                  }`}
-                >
-                  <div className="h-9 w-12 rounded-md bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center text-white text-[10px] font-black tracking-wider">
-                    {c.brand.slice(0, 4).toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>
-                      {c.brand} ···· {c.last}
+          <Secao>
+            {(id) => (
+              <>
+                <PanelHead title={<span id={id}>Formas de pagamento</span>} />
+                <ul className="flex flex-col gap-2">
+                  {CARTOES.map((c) => (
+                    <li
+                      key={c.final}
+                      className="flex items-center gap-3 p-3 rounded-[14px] border"
+                      style={{
+                        borderColor: c.principal ? 'var(--lh-brand)' : 'var(--lh-line)',
+                        background: c.principal ? 'var(--lh-brand-soft)' : 'transparent',
+                      }}
+                    >
+                      <Marca texto={c.bandeira.slice(0, 4).toUpperCase()} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[14px] font-semibold">
+                          {c.bandeira} ···· {c.final}
+                        </div>
+                        <div className="text-[12px] text-muted">Validade {c.validade}</div>
+                      </div>
+                      {c.principal && <Pill tone="brand">Principal</Pill>}
+                    </li>
+                  ))}
+                  <li className="flex items-center gap-3 p-3 rounded-[14px] border border-line">
+                    <Marca texto="PIX" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[14px] font-semibold">PIX</div>
+                      <div className="text-[12px] text-muted">Aprovação imediata</div>
                     </div>
-                    <div className="text-[11px] text-gray-400">Validade {c.exp}</div>
-                  </div>
-                  {c.primary && (
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                      Principal
-                    </span>
-                  )}
-                </div>
-              ))}
-              {/* PIX */}
-              <div className={`flex items-center gap-3 p-3 rounded-xl border-2 border-dashed ${dark ? 'border-gray-800' : 'border-gray-200'}`}>
-                <div className="h-9 w-12 rounded-md bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-[10px] font-black">
-                  PIX
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>Pagar via PIX</div>
-                  <div className="text-[11px] text-gray-400">Aprovação imediata</div>
-                </div>
-              </div>
-            </div>
-          </div>
+                  </li>
+                </ul>
+              </>
+            )}
+          </Secao>
 
-          {/* Monthly summary */}
-          <div className={card}>
-            <h3 className={`text-sm font-semibold mb-3 ${dark ? 'text-white' : 'text-slate-800'}`}>
-              Resumo do mês
-            </h3>
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <span className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Gasto até hoje</span>
-                <span className={`text-sm font-bold tabular-nums ${dark ? 'text-white' : 'text-slate-900'}`}>
-                  R$ 312,00
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Reembolsado pelo plano</span>
-                <span className="text-sm font-bold tabular-nums text-emerald-600">− R$ 124,80</span>
-              </div>
-              <div className={`pt-3 border-t ${dark ? 'border-gray-800' : 'border-gray-100'} flex items-center justify-between`}>
-                <span className={`text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}`}>
-                  Custo líquido
-                </span>
-                <span className={`text-base font-black tabular-nums ${dark ? 'text-white' : 'text-slate-900'}`}>
-                  R$ 187,20
-                </span>
-              </div>
-            </div>
-          </div>
+          <Secao>
+            {(id) => (
+              <>
+                <PanelHead title={<span id={id}>Resumo do mês</span>} />
+                <dl className="flex flex-col gap-3 text-[14px]">
+                  <div className="flex items-center justify-between">
+                    <dt className="text-muted">Gasto até hoje</dt>
+                    <dd className="font-semibold tabular-nums">R$ 312,00</dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-muted">Reembolsado pelo plano</dt>
+                    <dd className="font-semibold tabular-nums">− R$ 124,80</dd>
+                  </div>
+                  <div className="pt-3 border-t border-line flex items-center justify-between">
+                    <dt className="font-semibold">Custo líquido</dt>
+                    <dd className="font-display font-medium text-[22px] tabular-nums">R$ 187,20</dd>
+                  </div>
+                </dl>
+              </>
+            )}
+          </Secao>
         </div>
       </div>
     </div>

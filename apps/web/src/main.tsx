@@ -1,4 +1,9 @@
+// Fontes da marca (Ranade e DM Sans variável), servidas de public/fonts. O laudo
+// mede a paginação depois de `document.fonts.ready`: as famílias precisam manter
+// os nomes 'Ranade' e 'DM Sans'.
+import './styles/fonts.css'
 import { StrictMode } from 'react'
+import './styles/index.css'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { AuthProvider } from './lib/AuthContext'

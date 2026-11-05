@@ -5,12 +5,16 @@
 // `umami.identify()`, e propriedade de evento só recebe categoria/contagem —
 // nunca nome, e-mail, CPF, id de exame ou termo digitado na busca.
 //
-// O app roteia por estado React (App.tsx), a URL nunca muda e o auto-track do
-// Umami — que escuta pushState/popstate — registraria um único pageview por
-// sessão. Por isso o script sobe com `data-auto-track="false"` e todos os
-// pageviews saem de `trackPageview()`.
+// O app roteia por URL (lib/router.ts), mas a URL real carrega ids de exame,
+// laudo e coleta (`/exame/<id>`) — dado de paciente. O auto-track do Umami
+// enviaria essa URL crua a cada pushState, então o script sobe com
+// `data-auto-track="false"` e todos os pageviews saem de `trackPageview()`,
+// chamado pelo App uma vez por mudança de URL com o nome da tela, nunca o id.
 // ---------------------------------------------------------------------------
-import type { AppRoute } from '../components/layout/Topbar'
+import type { Rota } from './rotas'
+
+/** Tela registrada no pageview: as do menu mais a página 404. */
+export type TelaPageview = Rota['tela']
 
 const SCRIPT_ID = 'umami-tracker'
 
@@ -28,7 +32,7 @@ let tituloAtual: string | null = null
  * relatório "Pages" do Umami ter rótulos estáveis e legíveis, alinhados aos do
  * menu. Sem id de exame no caminho: `/exame/123` viraria dado de paciente.
  */
-const URL_POR_ROTA: Record<AppRoute, string> = {
+const URL_POR_ROTA: Record<TelaPageview, string> = {
   home:      '/visao-geral',
   results:   '/resultados',
   exam:      '/exame',
@@ -39,9 +43,10 @@ const URL_POR_ROTA: Record<AppRoute, string> = {
   billing:   '/faturamento',
   settings:  '/configuracoes',
   profile:   '/perfil',
+  'nao-encontrada': '/404',
 }
 
-const TITULO_POR_ROTA: Record<AppRoute, string> = {
+const TITULO_POR_ROTA: Record<TelaPageview, string> = {
   home:      'Visão geral',
   results:   'Resultados',
   exam:      'Detalhe do exame',
@@ -52,6 +57,7 @@ const TITULO_POR_ROTA: Record<AppRoute, string> = {
   billing:   'Faturamento',
   settings:  'Configurações',
   profile:   'Perfil',
+  'nao-encontrada': 'Página não encontrada',
 }
 
 /**
@@ -89,7 +95,7 @@ export function initAnalytics(): void {
  * visitors, views, visits, bounce rate e visit duration ficam todos zerados
  * (eventos nomeados continuam funcionando, porque usam a forma de string).
  */
-export function trackPageview(route: AppRoute): void {
+export function trackPageview(route: TelaPageview): void {
   urlAtual = URL_POR_ROTA[route]
   tituloAtual = TITULO_POR_ROTA[route]
   window.umami?.track((payload) => ({

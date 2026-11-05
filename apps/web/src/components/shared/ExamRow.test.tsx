@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { render } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { ExamRow } from './ExamRow'
 import { laudoToExam, resultadoToExam } from '../../lib/mappers'
 import type { Laudo, Resultado } from '@lab-hub/shared'
@@ -37,7 +37,7 @@ function laudo(over: Partial<Laudo> = {}): Laudo {
 }
 
 const render1 = (exam: Parameters<typeof ExamRow>[0]['exam']) =>
-  render(<ExamRow exam={exam} onClick={() => {}} dark={false} />)
+  render(<ExamRow exam={exam} onClick={() => {}} />)
 
 // O contexto (unidade · data) aparece DUAS vezes no DOM: uma célula para o
 // layout de celular e outra para o de desktop, alternadas por CSS. Em jsdom as
@@ -113,5 +113,32 @@ describe('unidade', () => {
     const { container } = render1(laudoToExam(laudo({ unit: 'Unidade Centro' })))
 
     expect(container.textContent).toContain('Unidade Centro · Coleta 24 Jul 2026')
+  })
+})
+
+describe('situação', () => {
+  it('diz em texto que o exame está liberado', () => {
+    render1(laudoToExam(laudo()))
+
+    expect(screen.getByText('Liberado')).toBeTruthy()
+  })
+
+  // Pendente e parcial são "ainda não está pronto" para o paciente (mappers).
+  it.each(['pending', 'partial'] as const)('laudo %s aparece como em análise', (status) => {
+    render1(laudoToExam(laudo({ status })))
+
+    expect(screen.getByText('Em análise')).toBeTruthy()
+    expect(screen.queryByText('Liberado')).toBeNull()
+  })
+})
+
+describe('linha', () => {
+  it('é um botão com o nome do exame que abre o exame', () => {
+    const onClick = vi.fn()
+    render(<ExamRow exam={laudoToExam(laudo())} onClick={onClick} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Hemograma Completo/ }))
+
+    expect(onClick).toHaveBeenCalledTimes(1)
   })
 })
