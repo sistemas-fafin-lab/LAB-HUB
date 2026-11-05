@@ -6,7 +6,7 @@ import { z } from 'zod'
 // a primeira issue no corpo do 400 (ver lib/validacao.ts) e o web mostra
 // `error.message` cru. Sem `message`, o zod devolve o texto padrão em inglês.
 export const cadastroSchema = z.object({
-  email: z.string().email('E-mail inválido'),
+  email: z.email('E-mail inválido'),
   // Espelha a política do Supabase Auth (S-04): mín. 12 + minúscula, maiúscula
   // e dígito. Sem isso o zod deixa passar e o Auth recusa depois, devolvendo ao
   // paciente uma mensagem em inglês vinda da biblioteca.

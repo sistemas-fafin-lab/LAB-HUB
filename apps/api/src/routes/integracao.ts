@@ -552,7 +552,7 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
       // Documentos daquela coleta (pedido médico) + os perenes do paciente
       // (identidade, carteirinha) — exatamente o que o check-in precisa ver.
       // A interpolação no .or() é segura porque ag.id vem de uma coluna uuid e o
-      // labhubId passou pelo .uuid() do zod. Remover qualquer um dos dois abre
+      // labhubId passou pelo z.guid() do zod. Remover qualquer um dos dois abre
       // injeção de filtro no PostgREST.
       const { data, error } = await supabase
         .from('documentos')

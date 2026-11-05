@@ -4,8 +4,8 @@ import { z } from 'zod'
 // O cliente envia só o id do posto (escolhido na lista proxy do FlowLab);
 // a rota resolve o nome contra a disponibilidade e grava o snapshot.
 export const criarAgendamentoSchema = z.object({
-  postoFlowlabId: z.string().uuid(),
-  dataHora: z.string().datetime(),
+  postoFlowlabId: z.guid(),
+  dataHora: z.iso.datetime(),
 })
 
 export type CriarAgendamentoInput = z.infer<typeof criarAgendamentoSchema>

@@ -37,7 +37,7 @@ function telefoneValido(tel: string): boolean {
 // O refine garante que ao menos um modo veio completo.
 export const criarAgendamentoRecepcaoSchema = z
   .object({
-    pacienteId: z.string().uuid().optional(),
+    pacienteId: z.guid().optional(),
     nome: z.string().trim().min(1).optional(),
     cpf: cpfDigitosSchema.optional(),
     dataNascimento: z
@@ -50,8 +50,8 @@ export const criarAgendamentoRecepcaoSchema = z
       .trim()
       .refine((t) => t === '' || telefoneValido(t), 'Telefone inválido (inclua o DDD)')
       .optional(),
-    postoFlowlabId: z.string().uuid(),
-    dataHora: z.string().datetime(),
+    postoFlowlabId: z.guid(),
+    dataHora: z.iso.datetime(),
   })
   .refine((d) => Boolean(d.pacienteId) || Boolean(d.nome && d.cpf && d.dataNascimento), {
     message: 'Informe pacienteId (existente) ou nome + cpf + dataNascimento (novo)',
@@ -61,7 +61,7 @@ export type CriarAgendamentoRecepcaoInput = z.infer<typeof criarAgendamentoRecep
 
 // Param do POST /integracao/pacientes/:pacienteId/correcao-identidade.
 export const correcaoIdentidadeParamSchema = z.object({
-  pacienteId: z.string().uuid(),
+  pacienteId: z.guid(),
 })
 
 // Body da correção de identidade. Reusa as MESMAS validações do cadastro pelo
