@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import helmet from '@fastify/helmet'
 import {
   CAMPOS_REDIGIDOS,
+  confiarNoProxy,
   redigirUrl,
   resolverCorsOrigin,
   serializarErro,
@@ -200,5 +201,51 @@ describe('cabeçalhos de segurança (helmet)', () => {
     expect(res.headers['content-security-policy']).toBeUndefined()
 
     await app.close()
+  })
+})
+
+describe('confiarNoProxy', () => {
+  // IP do container do ngrok na rede do compose: o único caminho até a API.
+  const NGROK = '172.22.0.3'
+  const CLIENTE = '187.45.10.20'
+
+  async function ipResolvido(
+    saltos: number,
+    remoteAddress: string,
+    xff?: string,
+  ): Promise<string> {
+    const app = Fastify({ trustProxy: confiarNoProxy(saltos) })
+    app.get('/ip', async (req) => ({ ip: req.ip }))
+    await app.ready()
+    const res = await app.inject({
+      method: 'GET',
+      url: '/ip',
+      remoteAddress,
+      ...(xff ? { headers: { 'x-forwarded-for': xff } } : {}),
+    })
+    await app.close()
+    return (res.json() as { ip: string }).ip
+  }
+
+  it('conexão vinda da rede interna: request.ip é o cliente do X-Forwarded-For', async () => {
+    expect(await ipResolvido(1, NGROK, CLIENTE)).toBe(CLIENTE)
+  })
+
+  // GHSA-3m5p-2c4r-xxw2: contar saltos sem olhar quem conectou deixa quem fala
+  // direto com a porta escolher o próprio IP.
+  it('conexão direta de fora: ignora o X-Forwarded-For', async () => {
+    expect(await ipResolvido(1, CLIENTE, '10.9.9.9')).toBe(CLIENTE)
+  })
+
+  it('saltos = 0: usa o endereço do socket', async () => {
+    expect(await ipResolvido(0, NGROK, CLIENTE)).toBe(NGROK)
+  })
+
+  // O cliente pode mandar o próprio X-Forwarded-For; o proxy acrescenta o IP
+  // real à direita. Valem só as N entradas que os proxies escreveram.
+  it('cliente forja entradas à esquerda: valem só os N saltos', async () => {
+    const CDN = '104.16.0.1'
+    expect(await ipResolvido(1, NGROK, `6.6.6.6, ${CLIENTE}`)).toBe(CLIENTE)
+    expect(await ipResolvido(2, NGROK, `6.6.6.6, ${CLIENTE}, ${CDN}`)).toBe(CLIENTE)
   })
 })

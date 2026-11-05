@@ -8,6 +8,7 @@ import { validarCriptografia } from './lib/crypto.js'
 import { numeroEnv } from './lib/env.js'
 import {
   CAMPOS_REDIGIDOS,
+  confiarNoProxy,
   resolverCorsOrigin,
   serializarErro,
   serializarRequest,
@@ -46,13 +47,14 @@ validarCriptografia()
 // auditoria isso não seria um campo impreciso, seria um campo plantado. Com 1,
 // vale a entrada que o túnel escreveu, e o que o cliente mandou fica para trás
 // dela. A env existe para o dia em que entrar um CDN na frente (aí são 2); 0
-// desliga e volta ao endereço do socket.
+// desliga e volta ao endereço do socket. O número sozinho não basta desde o
+// Fastify 5.12: `confiarNoProxy` também exige que o socket seja da rede interna.
 const TRUST_PROXY_HOPS = numeroEnv('TRUST_PROXY_HOPS', 1, 0)
 
 // O dado que trafega aqui é de saúde: a query da busca da recepção carrega nome
 // e CPF, então o log passa por `serializarRequest`/`redact` (ver lib/http.ts).
 const server = Fastify({
-  trustProxy: TRUST_PROXY_HOPS,
+  trustProxy: confiarNoProxy(TRUST_PROXY_HOPS),
   logger: {
     level: process.env.LOG_LEVEL ?? 'info',
     redact: CAMPOS_REDIGIDOS,

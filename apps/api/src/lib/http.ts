@@ -1,3 +1,4 @@
+import { BlockList, isIPv4 } from 'node:net'
 import { stdSerializers } from 'pino'
 
 // Configuração da borda HTTP: CORS, cabeçalhos de segurança e o que o logger
@@ -130,4 +131,29 @@ export function serializarRequest(req: RequestLogavel): Record<string, unknown> 
     hostname: req.hostname,
     remoteAddress: req.ip,
   }
+}
+
+// Faixas de onde o proxy pode conectar: loopback e rede privada (a do compose
+// é uma 172.x). IPv4 mapeado em IPv6 (`::ffff:172.22.0.3`) cai nas regras IPv4.
+const REDE_INTERNA = new BlockList()
+REDE_INTERNA.addSubnet('127.0.0.0', 8, 'ipv4')
+REDE_INTERNA.addSubnet('10.0.0.0', 8, 'ipv4')
+REDE_INTERNA.addSubnet('172.16.0.0', 12, 'ipv4')
+REDE_INTERNA.addSubnet('192.168.0.0', 16, 'ipv4')
+REDE_INTERNA.addAddress('::1', 'ipv6')
+REDE_INTERNA.addSubnet('fc00::', 7, 'ipv6')
+
+/**
+ * `trustProxy` do Fastify a partir do número de saltos de proxy confiáveis.
+ *
+ * O Fastify 5.12 deixou de aceitar só a contagem (GHSA-3m5p-2c4r-xxw2): ela não
+ * olha quem abriu a conexão, então quem falasse direto com a porta escolheria o
+ * próprio IP no X-Forwarded-For. Aqui o salto 0 — o socket — só é confiado se
+ * vier da rede interna, que é de onde o ngrok fala; os seguintes seguem
+ * contados, para o dia em que entrar um CDN na frente (aí são 2).
+ */
+export function confiarNoProxy(saltos: number): (endereco: string, salto: number) => boolean {
+  return (endereco, salto) =>
+    salto < saltos &&
+    (salto > 0 || REDE_INTERNA.check(endereco, isIPv4(endereco) ? 'ipv4' : 'ipv6'))
 }
