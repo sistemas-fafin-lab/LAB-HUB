@@ -15,6 +15,7 @@ import {
   rotaOculta,
 } from '../lib/flags'
 import { primeiroNome } from '../lib/paciente'
+import { JEJUM_LABEL, preparoAplicavel } from '../lib/preparo'
 import { partesNoFuso } from '../lib/regiao'
 import { useAgendamentos } from '../lib/useAgendamentos'
 import { atualizaResultados, useResultados } from '../lib/useResultados'
@@ -87,9 +88,9 @@ export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColet
   const proxima = proximaColeta(agendamentos)
   const passoDaColeta: Passo = proxima
     ? {
-        icon: 'calendar-check',
+        icon: 'calendar-clock',
         title: 'Preparo para a próxima coleta',
-        sub: `${formatDataHora(proxima.dataHora)} · ${proxima.postoNome}`,
+        sub: `${formatDataHora(proxima.dataHora)} · ${preparoAplicavel(proxima) ? `Jejum de ${JEJUM_LABEL}` : proxima.postoNome}`,
         action: 'Ver',
         onClick: () => onOpenColeta(proxima.id),
       }
@@ -222,18 +223,28 @@ export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColet
             <div>
               {emAndamento.slice(0, 3).map((c) => {
                 const { rotulo, passo, alerta } = situacaoDaColeta(c.status)
+                const sub = `${rotulo} · ${formatDataHora(c.dataHora)}`
                 return (
                   <div key={c.id} className="flex items-center gap-4 py-3.5 border-t border-line first:border-t-0">
                     <button type="button" onClick={() => onOpenColeta(c.id)} className="flex items-center gap-4 flex-1 min-w-0 text-left">
                       <Node step={passo} alert={alerta} size={40} ring />
                       <span className="min-w-0 flex-1">
-                        <span className="block text-[14px] font-semibold">{c.postoNome}</span>
-                        <span className="block text-[12px] text-muted tabular-nums">
-                          {rotulo} · {formatDataHora(c.dataHora)}
+                        <span className="block text-[14px] font-semibold truncate" title={c.postoNome}>
+                          {c.postoNome}
+                        </span>
+                        <span className="block text-[12px] text-muted tabular-nums truncate" title={sub}>
+                          {sub}
                         </span>
                       </span>
                     </button>
-                    <span className="text-[12px] text-muted tabular-nums shrink-0">{passo} de {ETAPAS.length}</span>
+                    {/* Coleta com pendência: a ação no lugar da etapa, como no protótipo. */}
+                    {c.status === 'bloqueado' ? (
+                      <Btn size="sm" onClick={() => onOpenColeta(c.id)}>
+                        Ver
+                      </Btn>
+                    ) : (
+                      <span className="text-[12px] text-muted tabular-nums shrink-0">{passo} de {ETAPAS.length}</span>
+                    )}
                   </div>
                 )
               })}

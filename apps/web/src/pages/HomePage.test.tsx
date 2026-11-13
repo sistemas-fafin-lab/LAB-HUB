@@ -149,7 +149,8 @@ describe('próximos passos', () => {
     ]
     abrir()
     expect(passos().getByText('Preparo para a próxima coleta')).toBeTruthy()
-    expect(passos().getByText(/Unidade Antes/)).toBeTruthy()
+    // No lugar da unidade, o preparo: o passo é sobre se preparar para a coleta.
+    expect(passos().getByText(/Jejum de 8 a 12 horas/)).toBeTruthy()
     expect(passos().queryByText('Agendar nova coleta')).toBeNull()
     fireEvent.click(passos().getByRole('button', { name: 'Ver' }))
     expect(acoes.onOpenColeta).toHaveBeenCalledWith('antes')
@@ -186,12 +187,20 @@ describe('em andamento', () => {
   it.each([
     ['pendente', 'Pendente', '1 de 5'],
     ['confirmado', 'Confirmado', '1 de 5'],
-    ['bloqueado', 'Pendência', '2 de 5'],
   ] as const)('coleta %s aparece como "%s", na etapa %s', (status, rotulo, etapa) => {
     coletas.agendamentos = [coleta({ status })]
     abrir()
     expect(bloco().getByText(new RegExp(rotulo))).toBeTruthy()
     expect(bloco().getByText(etapa)).toBeTruthy()
+  })
+
+  it('coleta com pendência mostra a ação "Ver" no lugar da etapa', () => {
+    coletas.agendamentos = [coleta({ id: 'p-1', status: 'bloqueado' })]
+    abrir()
+    expect(bloco().getByText(/Pendência/)).toBeTruthy()
+    expect(bloco().queryByText('2 de 5')).toBeNull()
+    fireEvent.click(bloco().getByRole('button', { name: 'Ver' }))
+    expect(acoes.onOpenColeta).toHaveBeenCalledWith('p-1')
   })
 
   it('não conta como em andamento a coleta realizada, a cancelada nem a que passou da hora sem check-in', () => {
