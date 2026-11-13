@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { formatDataHora, formatDiaRelativo, relDia, timeFmt } from './datetime'
+import { formatDataHora, formatDataHoraCurta, formatDiaRelativo, relDia, timeFmt } from './datetime'
 import { fusoAtual, salvarFuso } from './regiao'
 
 // Os testes rodam com TZ=America/Sao_Paulo (vitest.config): o fuso escolhido
@@ -27,6 +27,10 @@ describe('datas e horas no fuso escolhido', () => {
   it('padrão é Brasília', () => {
     expect(fusoAtual()).toBe('America/Sao_Paulo')
     expect(timeFmt.format(coleta)).toBe('07:30')
+  })
+
+  it('forma curta da lista de coletas: dia da semana, dia, mês e hora', () => {
+    expect(formatDataHoraCurta(coleta.toISOString())).toBe('sex, 24 jul às 07:30')
   })
 
   it('em Manaus a mesma coleta é uma hora mais cedo; em Noronha, uma mais tarde', () => {

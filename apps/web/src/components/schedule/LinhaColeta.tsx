@@ -1,7 +1,7 @@
 import type { Agendamento } from '@lab-hub/shared'
 import { Btn, DateBlock, Ico, Node, Panel, Pill } from '../portal'
 import { podeCancelar, situacaoDaColeta } from '../../lib/coletas'
-import { formatDataHora, timeFmt } from '../../lib/datetime'
+import { formatDataHora, formatDataHoraCurta, timeFmt } from '../../lib/datetime'
 import { JEJUM_LABEL, preparoAplicavel } from '../../lib/preparo'
 import { PreparoPopover } from './PreparoColeta'
 
@@ -51,29 +51,42 @@ export function BotoesDaColeta({
   )
 }
 
-/** Uma coleta na lista. Os controles ficam fora do botão que abre o detalhe. */
+/**
+ * Uma coleta na lista. Os controles ficam fora do botão que abre o detalhe.
+ *
+ * A partir de md a linha é uma grade de colunas fixas (nó · unidade · data ·
+ * situação · seta), e o bloco de ações tem largura mínima mesmo vazio: assim a
+ * pílula e a seta ficam na mesma coluna em todas as linhas. Abaixo de md as
+ * peças se empilham.
+ */
 export function LinhaColeta({ agendamento, onOpen, ...acoes }: LinhaColetaProps) {
   const { id, postoNome, dataHora, status } = agendamento
   const { rotulo, tom, passo, alerta } = situacaoDaColeta(status)
   const exames = contagemDeExames(agendamento)
   return (
-    <div className="lh-row flex items-center gap-x-3 gap-y-2 flex-wrap px-5 py-3">
-      <button type="button" onClick={() => onOpen(id)} className="flex items-center gap-x-4 gap-y-1.5 flex-wrap flex-1 min-w-[240px] text-left py-1 rounded-[12px]">
+    <div className="lh-row flex items-center gap-x-3 gap-y-2 flex-wrap md:flex-nowrap px-5 py-3">
+      <button
+        type="button"
+        onClick={() => onOpen(id)}
+        className="flex items-center gap-x-4 gap-y-1.5 flex-wrap flex-1 min-w-[240px] md:min-w-0 md:grid md:grid-cols-[40px_minmax(0,1.4fr)_minmax(0,1.2fr)_150px_16px] text-left py-1 rounded-[12px]"
+      >
         <Node step={passo} alert={alerta} ring size={40} />
-        <span className="min-w-[160px] flex-1">
-          <span className="block text-[14px] font-semibold">{postoNome}</span>
-          <span className="block text-[12px] text-muted tabular-nums">
+        <span className="min-w-[160px] md:min-w-0 flex-1">
+          <span className="block text-[14px] font-semibold md:truncate">{postoNome}</span>
+          <span className="md:hidden block text-[12px] text-muted tabular-nums">
             {formatDataHora(dataHora)}
             {exames && ` · ${exames}`}
           </span>
+          {exames && <span className="hidden md:block text-[12px] text-muted truncate">{exames}</span>}
         </span>
+        <span className="hidden md:block text-[13px] tabular-nums truncate">{formatDataHoraCurta(dataHora)}</span>
         {/* No celular a pílula desce e alinha com o texto, sem espremer a unidade. */}
         <span className="max-md:ml-14">
           <Pill tone={tom}>{rotulo}</Pill>
         </span>
         <Ico name="chevron-right" size={16} className="hidden md:inline-flex text-faint" />
       </button>
-      <div className="flex items-center gap-1 ml-auto">
+      <div className="flex items-center gap-1 ml-auto md:min-w-[152px] md:justify-end md:shrink-0">
         <BotoesDaColeta agendamento={agendamento} {...acoes} />
         {/* Por último: o balão abre para a esquerda e precisa do espaço da linha. */}
         {preparoAplicavel(agendamento) && <PreparoPopover dataHora={dataHora} />}
