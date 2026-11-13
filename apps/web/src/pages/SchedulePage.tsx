@@ -148,6 +148,7 @@ export function SchedulePage({ aba, selectedId, onAba, onAbrirColeta, onFecharCo
         <PageHeader title="Agendar coleta" sub="Escolha a unidade, o dia e o horário." right={recarregar} className="mb-5" />
         <BookingPanel
           refreshKey={refreshKey}
+          onCancelar={() => onAba('minhas')}
           // Abre a coleta recém-criada: é onde o paciente anexa os documentos,
           // no momento de maior motivação ("adiante seu check-in").
           onBooked={(ag) => {

@@ -309,8 +309,8 @@ describe('Agendar coleta', () => {
     postos = [posto(), posto({ id: 'posto-2', nome: 'Unidade Norte', endereco: 'W3 Norte' })]
     noAgendar()
     expect(screen.getAllByRole('status', { name: 'Carregando' }).length).toBeGreaterThan(0)
-    const primeira = await screen.findByRole('button', { name: /Unidade Asa Sul/ })
-    expect(primeira.getAttribute('aria-pressed')).toBe('true')
+    const primeira = await screen.findByRole('radio', { name: /Unidade Asa Sul/ })
+    expect(primeira.getAttribute('aria-checked')).toBe('true')
     expect(screen.getByText('W3 Norte')).toBeTruthy()
     expect(get).toHaveBeenCalledWith('/postos/disponibilidade')
   })
@@ -318,7 +318,7 @@ describe('Agendar coleta', () => {
   it('trocar de unidade mostra os horários dela', async () => {
     postos = [posto({ slots: [emDias(2, 8)] }), posto({ id: 'posto-2', nome: 'Unidade Norte', slots: [emDias(2, 15)] })]
     noAgendar()
-    fireEvent.click(await screen.findByRole('button', { name: /Unidade Norte/ }))
+    fireEvent.click(await screen.findByRole('radio', { name: /Unidade Norte/ }))
     expect(horario(/^15:00$/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^08:00$/ })).toBeNull()
   })
@@ -328,6 +328,9 @@ describe('Agendar coleta', () => {
     post.mockResolvedValue(ag({ id: 'novo' }) as never)
     noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    // Escolher o horário só seleciona: a confirmação abre pelo resumo.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
     expect(post).not.toHaveBeenCalled()
 
     const caixa = screen.getByRole('dialog', { name: 'Confirmar agendamento' })
@@ -347,6 +350,7 @@ describe('Agendar coleta', () => {
     post.mockResolvedValue(ag({ id: 'novo' }) as never)
     const { rerender } = noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
     get.mockImplementation(() => new Promise(() => {}))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar coleta' }))
     await waitFor(() => expect(props.onAbrirColeta).toHaveBeenCalledWith('novo'))
@@ -358,7 +362,8 @@ describe('Agendar coleta', () => {
   it('cancelar a confirmação não agenda', async () => {
     noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancelar' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(post).not.toHaveBeenCalled()
   })
@@ -367,6 +372,7 @@ describe('Agendar coleta', () => {
     post.mockImplementation(() => new Promise(() => {}))
     noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar coleta' }))
     expect(await screen.findByRole('button', { name: 'Agendando…' })).toBeTruthy()
     fireEvent.keyDown(window, { key: 'Escape' })
@@ -377,10 +383,46 @@ describe('Agendar coleta', () => {
     post.mockRejectedValue(new Error('Horário indisponível'))
     noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar coleta' }))
     expect((await screen.findByRole('alert')).textContent).toContain('Horário indisponível')
     expect(track).toHaveBeenCalledWith('agendamento_erro', { motivo: 'Horário indisponível' })
     expect(props.onAbrirColeta).not.toHaveBeenCalled()
+  })
+
+  it('etapas: com a unidade escolhida está em 02; com o horário, em 03', async () => {
+    noAgendar()
+    await screen.findByRole('button', { name: /^08:00$/ })
+    const etapas = screen.getByRole('list', { name: 'Etapas do agendamento' })
+    const atual = () => etapas.querySelector('[aria-current="step"]')?.textContent
+    expect(atual()).toBe('02Data e horário')
+    fireEvent.click(screen.getByRole('button', { name: /^08:00$/ }))
+    expect(atual()).toBe('03Confirmação')
+  })
+
+  it('resumo: sem horário o botão de confirmar fica desligado; com horário, mostra a data', async () => {
+    noAgendar()
+    await screen.findByRole('button', { name: /^08:00$/ })
+    const confirmar = screen.getByRole('button', { name: 'Confirmar agendamento' }) as HTMLButtonElement
+    expect(confirmar.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /^08:00$/ }))
+    expect(confirmar.disabled).toBe(false)
+    expect(screen.getByText(/às 08:00$/)).toBeTruthy()
+  })
+
+  it('trocar de unidade descarta o horário escolhido', async () => {
+    postos = [posto({ slots: [emDias(2, 8)] }), posto({ id: 'posto-2', nome: 'Unidade Norte', slots: [emDias(2, 15)] })]
+    noAgendar()
+    fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /Unidade Norte/ }))
+    expect((screen.getByRole('button', { name: 'Confirmar agendamento' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('Cancelar do resumo volta para Minhas coletas', async () => {
+    noAgendar()
+    await screen.findByRole('button', { name: /^08:00$/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(props.onAba).toHaveBeenCalledWith('minhas')
   })
 
   it('horários indisponíveis ficam marcados e não abrem a confirmação', async () => {
@@ -445,7 +487,8 @@ describe('Agendar coleta', () => {
   it('preparo com os textos atuais', async () => {
     noAgendar()
     await screen.findByRole('button', { name: /^08:00$/ })
-    expect(screen.getByText(`Jejum de ${JEJUM_LABEL}`)).toBeTruthy()
+    // No resumo e no cartão de preparo.
+    expect(screen.getAllByText(`Jejum de ${JEJUM_LABEL}`)).toHaveLength(2)
     for (const regra of REGRAS_GERAIS) expect(screen.getByText(regra.texto)).toBeTruthy()
     expect(screen.getByText(RESSALVA_PREPARO)).toBeTruthy()
   })

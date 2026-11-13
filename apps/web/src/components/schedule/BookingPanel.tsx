@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Agendamento, PostoDisponivel } from '@lab-hub/shared'
-import { EmptyState, FalhaAoCarregar, Panel, PanelHead, SkeletonRows } from '../portal'
+import { Btn, EmptyState, FalhaAoCarregar, Panel, PanelHead, SkeletonRows } from '../portal'
 import { api } from '../../lib/api'
 import { track } from '../../lib/analytics'
 import { avisar } from '../../lib/avisos'
-import { formatDataHora } from '../../lib/datetime'
+import { formatDataHora, formatDataHoraCurta } from '../../lib/datetime'
+import { JEJUM_LABEL } from '../../lib/preparo'
 import { ConfirmBookingModal } from './ConfirmBookingModal'
 import { ConteudoPreparo } from './PreparoColeta'
 import { SlotPicker } from './SlotPicker'
@@ -19,18 +20,47 @@ interface BookingPanelProps {
   onBooked?: (agendamento: Agendamento) => void
   /** Força recarregamento da disponibilidade quando o valor muda. */
   refreshKey?: number
+  /** "Cancelar" do resumo: sai do agendamento sem marcar nada. */
+  onCancelar?: () => void
+}
+
+const ETAPAS_AGENDAMENTO = ['Local', 'Data e horário', 'Confirmação'] as const
+
+/** Onde o paciente está no fluxo. Só indica: o fluxo continua numa tela só. */
+function EtapasDoAgendamento({ atual }: { atual: number }) {
+  return (
+    <ol aria-label="Etapas do agendamento" className="flex items-center gap-x-6 gap-y-2 mb-5 flex-wrap">
+      {ETAPAS_AGENDAMENTO.map((rotulo, i) => {
+        const estado = i < atual ? 'feita' : i === atual ? 'atual' : 'futura'
+        return (
+          <li key={rotulo} className="flex items-center gap-2" {...(estado === 'atual' ? { 'aria-current': 'step' as const } : {})}>
+            <span
+              className={
+                'font-display font-medium text-[22px] leading-none tabular-nums ' +
+                (estado === 'atual' ? 'text-brand' : estado === 'feita' ? 'text-ink' : 'text-faint')
+              }
+            >
+              {String(i + 1).padStart(2, '0')}
+            </span>
+            <span className={'text-[13px] font-medium ' + (estado === 'futura' ? 'text-muted' : '')}>{rotulo}</span>
+          </li>
+        )
+      })}
+    </ol>
+  )
 }
 
 // Escolhe a unidade, mostra a disponibilidade e confirma a coleta. A validação
 // do horário e a janela retroativa do FlowLab ficam na API.
-export function BookingPanel({ onBooked, refreshKey }: BookingPanelProps) {
+export function BookingPanel({ onBooked, refreshKey, onCancelar }: BookingPanelProps) {
   const [postos, setPostos] = useState<PostoDisponivel[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tentativa, setTentativa] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [pending, setPending] = useState<string | null>(null) // horário aguardando confirmação
+  const [horario, setHorario] = useState<string | null>(null) // horário escolhido
+  const [confirmando, setConfirmando] = useState(false) // caixa de confirmação aberta
 
   useEffect(() => {
     let alive = true
@@ -56,6 +86,12 @@ export function BookingPanel({ onBooked, refreshKey }: BookingPanelProps) {
 
   const selected = useMemo(() => postos.find((p) => p.id === selectedId) ?? null, [postos, selectedId])
 
+  // O horário escolhido é de uma unidade: trocar de unidade o descarta.
+  const escolherUnidade = (id: string) => {
+    if (id !== selectedId) setHorario(null)
+    setSelectedId(id)
+  }
+
   const handleConfirm = async (dataHora: string) => {
     if (!selected) return
     setSubmitting(true)
@@ -75,6 +111,7 @@ export function BookingPanel({ onBooked, refreshKey }: BookingPanelProps) {
       setPostos((prev) =>
         prev.map((p) => (p.id === selected.id ? { ...p, slots: p.slots.filter((s) => s !== dataHora) } : p)),
       )
+      setHorario(null)
       onBooked?.(criado)
     } catch (e: unknown) {
       const motivo = e instanceof Error ? e.message : 'Falha ao agendar'
@@ -82,7 +119,7 @@ export function BookingPanel({ onBooked, refreshKey }: BookingPanelProps) {
       track('agendamento_erro', { motivo })
     } finally {
       setSubmitting(false)
-      setPending(null)
+      setConfirmando(false)
     }
   }
 
@@ -115,33 +152,64 @@ export function BookingPanel({ onBooked, refreshKey }: BookingPanelProps) {
     )
   }
 
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
-      <div className="flex flex-col gap-5 min-w-0">
-        {error && (
-          <div role="alert" className="rounded-[16px] bg-coral-soft p-4 text-[14px]">
-            {error}
-          </div>
-        )}
-        <UnitSelector postos={postos} selectedId={selectedId} onSelect={setSelectedId} />
-        {selected && <SlotPicker posto={selected.nome} slots={selected.slots} selecionado={pending} onPick={setPending} />}
-      </div>
-      <aside className="lg:sticky lg:top-24">
-        <Panel>
-          <PanelHead title="Preparo" />
-          <ConteudoPreparo />
-        </Panel>
-      </aside>
+  const etapaAtual = !selected ? 0 : !horario ? 1 : 2
 
-      {pending && selected && (
-        <ConfirmBookingModal
-          postoNome={selected.nome}
-          dataHora={pending}
-          submitting={submitting}
-          onConfirm={() => void handleConfirm(pending)}
-          onCancel={() => setPending(null)}
-        />
-      )}
-    </div>
+  return (
+    <>
+      <EtapasDoAgendamento atual={etapaAtual} />
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
+        <div className="flex flex-col gap-5 min-w-0">
+          <UnitSelector postos={postos} selectedId={selectedId} onSelect={escolherUnidade} />
+          {selected && <SlotPicker posto={selected.nome} slots={selected.slots} selecionado={horario} onPick={setHorario} />}
+        </div>
+        <aside className="lg:sticky lg:top-24 flex flex-col gap-5">
+          <Panel>
+            <div className="lh-ov mb-2">Resumo</div>
+            <dl className="text-[13px]">
+              {[
+                ['Local', selected?.nome ?? '—'],
+                ['Data', horario ? formatDataHoraCurta(horario) : '—'],
+                ['Preparo', `Jejum de ${JEJUM_LABEL}`],
+              ].map(([rotulo, valor]) => (
+                <div key={rotulo} className="flex justify-between gap-4 py-2 border-t border-line first:border-t-0">
+                  <dt className="text-muted">{rotulo}</dt>
+                  <dd className="font-medium text-right tabular-nums">{valor}</dd>
+                </div>
+              ))}
+            </dl>
+            {error && (
+              <p role="alert" className="flex items-start gap-2 text-[13px] mt-3">
+                <span className="lh-bl mt-1.5" style={{ background: 'var(--lh-coral)' }} />
+                {error}
+              </p>
+            )}
+            <div className="flex flex-col gap-2 mt-4">
+              <Btn fullWidth disabled={!horario} onClick={() => setConfirmando(true)}>
+                Confirmar agendamento
+              </Btn>
+              {onCancelar && (
+                <Btn variant="ghost" fullWidth onClick={onCancelar}>
+                  Cancelar
+                </Btn>
+              )}
+            </div>
+          </Panel>
+          <Panel>
+            <PanelHead title="Preparo" />
+            <ConteudoPreparo {...(horario ? { dataHora: horario } : {})} />
+          </Panel>
+        </aside>
+
+        {confirmando && horario && selected && (
+          <ConfirmBookingModal
+            postoNome={selected.nome}
+            dataHora={horario}
+            submitting={submitting}
+            onConfirm={() => void handleConfirm(horario)}
+            onCancel={() => setConfirmando(false)}
+          />
+        )}
+      </div>
+    </>
   )
 }
