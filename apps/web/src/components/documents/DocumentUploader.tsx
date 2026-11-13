@@ -53,7 +53,7 @@ export function DocumentUploader({ tipos, onEnviar, enviando }: DocumentUploader
       </div>
 
       {enviando ? (
-        <div role="status" className="rounded-[14px] border-[1.5px] border-dashed border-line-strong p-4 flex items-center gap-3 text-[14px] font-semibold">
+        <div role="status" className="rounded-[14px] border-[1.5px] border-dashed border-strong p-4 flex items-center gap-3 text-[14px] font-semibold">
           <Node loading size={26} />
           Enviando…
         </div>
