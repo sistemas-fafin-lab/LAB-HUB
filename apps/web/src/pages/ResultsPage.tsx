@@ -314,7 +314,7 @@ export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProp
       <Panel pad={0}>
         {carregando && <SkeletonRows n={5} />}
         {erroAtivo && !carregando && (
-          <FalhaAoCarregar titulo="Não foi possível carregar seus exames" erro={erroAtivo} onTentar={() => void handleAtualizar()} />
+          <FalhaAoCarregar titulo="Não foi possível carregar seus exames" erro={erroAtivo} onTentar={handleAtualizar} />
         )}
         {prontoParaListar && filtered.length === 0 && vazio}
         {prontoParaListar && filtered.length > 0 && (

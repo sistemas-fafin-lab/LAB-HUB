@@ -127,7 +127,7 @@ export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColet
     else if (erroExames)
       destaque = (
         <Panel style={{ height: '100%' }}>
-          <FalhaAoCarregar titulo="Não foi possível carregar seus exames" erro={erroExames} onTentar={() => void atualizaResultados()} />
+          <FalhaAoCarregar titulo="Não foi possível carregar seus exames" erro={erroExames} onTentar={atualizaResultados} />
         </Panel>
       )
     else
@@ -280,7 +280,7 @@ function ExamesRecentes({ exams, carregando, erro, onOpenExam, onVerResultados }
   } else if (carregando) {
     corpo = <SkeletonRows n={3} />
   } else if (erro) {
-    corpo = <FalhaAoCarregar titulo="Não foi possível carregar seus exames" erro={erro} onTentar={() => void atualizaResultados()} />
+    corpo = <FalhaAoCarregar titulo="Não foi possível carregar seus exames" erro={erro} onTentar={atualizaResultados} />
   } else {
     corpo = <SemResultados />
   }
