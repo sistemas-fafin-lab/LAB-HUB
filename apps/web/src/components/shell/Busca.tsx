@@ -4,15 +4,16 @@ import type { KeyboardEvent as KeyboardEventReact, ReactNode } from 'react'
 import { useResultados } from '../../lib/useResultados'
 import { track } from '../../lib/analytics'
 import { navegar } from '../../lib/router'
-import { Ico, Pill, useDismiss } from '../portal'
+import { Ico, useDismiss } from '../portal'
 import type { Exam } from '../../lib/exame'
+import { situacaoDoExame } from '../../lib/exibicaoExame'
 import { itensVisiveis } from './menu'
-import type { Item as Pagina } from './menu'
+import type { Item as Pagina, ItemMenu } from './menu'
 
 // ---------------------------------------------------------------------------
-// Busca do cabeçalho (Ctrl/⌘ K). Mesmo comportamento da TopbarSearch antiga:
-// exames por nome, categoria, médico ou marcador (sem acento, até 6) e páginas
-// do menu pelo rótulo (até 4; sem termo, todas). Só o visual mudou.
+// Busca do cabeçalho (Ctrl/⌘ K): exames por nome, categoria, médico ou
+// marcador (sem acento, até 4) e páginas do menu pelo rótulo (até 3). Sem
+// termo, mostra os atalhos e os exames mais recentes, como no protótipo.
 // ---------------------------------------------------------------------------
 
 const PLACEHOLDER = '—'
@@ -39,17 +40,35 @@ function buscaExames(exams: Exam[], q: string): ExamMatch[] {
       // Casou só pelo marcador → mostra qual marcador levou até aqui.
       return [panel && !inName && !inCat ? { exam, hint: panel.name } : { exam }]
     })
-    .slice(0, 6)
+    .slice(0, 4)
 }
 
-const subtituloDoExame = (m: ExamMatch) =>
-  m.hint
+// A situação vai no subtítulo, no lugar da pílula que a linha tinha.
+const subtituloDoExame = (m: ExamMatch) => {
+  const contexto = m.hint
     ? `Marcador · ${m.hint}`
     : m.exam.category !== PLACEHOLDER
       ? m.exam.category
       : m.exam.date !== PLACEHOLDER
         ? m.exam.date
         : 'Exame'
+  return `${contexto} · ${situacaoDoExame(m.exam).rotulo}`
+}
+
+const SUBTITULO_DA_PAGINA: Partial<Record<ItemMenu, string>> = {
+  home: 'Resumo dos seus exames',
+  results: 'Todos os exames',
+  coletas: 'Acompanhe cada etapa',
+  agendar: 'Escolha unidade, dia e horário',
+  trends: 'Evolução dos marcadores',
+  profile: 'Seus dados',
+  documents: 'Identidade, carteirinha e pedidos',
+  settings: 'Tema, fuso e privacidade',
+}
+
+/** Sem termo: estas páginas, nesta ordem (as ocultas por flag saem). */
+const ATALHOS: readonly ItemMenu[] = ['agendar', 'coletas', 'results']
+const EXAMES_RECENTES = 3
 
 const ehMac = () => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
@@ -96,13 +115,17 @@ export function Busca({ onOpenExam, onAtalho, onConcluir, className = '' }: Busc
 
   const q = norm(query)
   const hasQuery = q.length > 0
-  const examMatches = hasQuery ? buscaExames(exams, q) : []
   const paginas = itensVisiveis()
-  const pageMatches = hasQuery ? paginas.filter((p) => norm(p.label).includes(q)).slice(0, 4) : paginas
-  const items: Item[] = [
-    ...examMatches.map((m): Item => ({ kind: 'exam', ...m })),
-    ...pageMatches.map((page): Item => ({ kind: 'page', page })),
-  ]
+  const pageMatches = hasQuery
+    ? paginas.filter((p) => norm(p.label).includes(q)).slice(0, 3)
+    : ATALHOS.flatMap((id) => paginas.filter((p) => p.id === id))
+  const examMatches: ExamMatch[] = hasQuery ? buscaExames(exams, q) : exams.slice(0, EXAMES_RECENTES).map((exam) => ({ exam }))
+  // Com termo, exames antes das páginas; sem termo, os atalhos antes dos recentes.
+  const exameItems = examMatches.map((m): Item => ({ kind: 'exam', ...m }))
+  const paginaItems = pageMatches.map((page): Item => ({ kind: 'page', page }))
+  const items: Item[] = hasQuery ? [...exameItems, ...paginaItems] : [...paginaItems, ...exameItems]
+  const inicioExames = hasQuery ? 0 : pageMatches.length
+  const inicioPaginas = hasQuery ? examMatches.length : 0
 
   const activate = (item: Item) => {
     // Só o tipo do resultado escolhido. O termo digitado NUNCA é enviado: numa
@@ -137,7 +160,7 @@ export function Busca({ onOpenExam, onAtalho, onConcluir, className = '' }: Busc
   const mostraLista = open && (items.length > 0 || hasQuery)
   const idOpcao = (i: number) => `${idLista}-${i}`
 
-  const linha = (i: number, key: string, item: Item, icone: ReactNode, titulo: string, sub: string | null, fim?: ReactNode) => {
+  const linha = (i: number, key: string, item: Item, icone: ReactNode, titulo: string, sub: string | null) => {
     const on = activeIndex === i
     return (
       <button
@@ -158,7 +181,6 @@ export function Busca({ onOpenExam, onAtalho, onConcluir, className = '' }: Busc
           <span className="block text-[14px] font-medium text-ink truncate">{titulo}</span>
           {sub && <span className="block text-[12px] text-muted truncate">{sub}</span>}
         </span>
-        {fim}
         {on && <Ico name="corner-down-left" size={14} className="text-muted" />}
       </button>
     )
@@ -168,6 +190,17 @@ export function Busca({ onOpenExam, onAtalho, onConcluir, className = '' }: Busc
     <span className="w-8 h-8 rounded-[8px] bg-subtle text-ink inline-flex items-center justify-center shrink-0">
       <Ico name={icone} size={16} />
     </span>
+  )
+
+  const grupoPaginas = pageMatches.length > 0 && (
+    <div role="group" aria-label={hasQuery ? 'Páginas' : 'Atalhos'} className="mb-1">
+      <div className="lh-ov px-2 pt-2 pb-1.5" aria-hidden="true">
+        {hasQuery ? 'Páginas' : 'Atalhos'}
+      </div>
+      {pageMatches.map((page, j) =>
+        linha(inicioPaginas + j, page.id, { kind: 'page', page }, tile(page.icon), page.label, SUBTITULO_DA_PAGINA[page.id] ?? null),
+      )}
+    </div>
   )
 
   return (
@@ -205,35 +238,25 @@ export function Busca({ onOpenExam, onAtalho, onConcluir, className = '' }: Busc
           aria-label="Resultados da busca"
           className="absolute left-0 right-0 top-[48px] bg-card border border-line rounded-[16px] shadow-float p-2 max-h-[440px] overflow-y-auto z-50"
         >
+          {!hasQuery && grupoPaginas}
           {examMatches.length > 0 && (
-            <div role="group" aria-label="Exames" className="mb-1">
+            <div role="group" aria-label={hasQuery ? 'Exames' : 'Exames recentes'} className="mb-1">
               <div className="lh-ov px-2 pt-2 pb-1.5" aria-hidden="true">
-                Exames
+                {hasQuery ? 'Exames' : 'Exames recentes'}
               </div>
               {examMatches.map((m, i) =>
                 linha(
-                  i,
+                  inicioExames + i,
                   m.exam.id,
                   { kind: 'exam', ...m },
                   tile(m.exam.status === 'ready' ? 'file-check-2' : 'file-clock'),
                   m.exam.name,
                   subtituloDoExame(m),
-                  m.exam.status === 'ready' ? <Pill tone="brand">Liberado</Pill> : <Pill>Em análise</Pill>,
                 ),
               )}
             </div>
           )}
-
-          {pageMatches.length > 0 && (
-            <div role="group" aria-label={hasQuery ? 'Páginas' : 'Ir para'}>
-              <div className="lh-ov px-2 pt-2 pb-1.5" aria-hidden="true">
-                {hasQuery ? 'Páginas' : 'Ir para'}
-              </div>
-              {pageMatches.map((page, j) =>
-                linha(examMatches.length + j, page.id, { kind: 'page', page }, tile(page.icon), page.label, null),
-              )}
-            </div>
-          )}
+          {hasQuery && grupoPaginas}
 
           {hasQuery && items.length === 0 && (
             <p className="text-[13px] text-muted px-3 py-5 text-center">Nenhum resultado para “{query.trim()}”.</p>
