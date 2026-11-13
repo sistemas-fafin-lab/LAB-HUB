@@ -1,7 +1,5 @@
 import type { CSSProperties, KeyboardEvent } from 'react'
-import { ativarComTeclado } from './teclado'
-
-const PROXIMA: Record<string, 1 | -1> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }
+import { ativarComTeclado, navegarNoGrupoDeRadio } from './teclado'
 
 export interface OpcaoDS {
   value: string
@@ -29,15 +27,10 @@ export function Radio({ options, value, onChange, name, direction = 'column', di
   const focavel = options.some((o) => o.value === value) ? value : options[0]?.value
   // Setas: marcam a opção vizinha (com volta) e levam o foco até ela.
   const navegar = (e: KeyboardEvent<HTMLElement>, i: number) => {
-    const delta = PROXIMA[e.key]
-    if (delta === undefined || disabled || options.length === 0) return
-    e.preventDefault()
-    const alvo = (i + delta + options.length) % options.length
-    const opcao = options[alvo]
-    if (!opcao) return
-    escolher(opcao.value)
-    const radios = e.currentTarget.closest('[role=radiogroup]')?.querySelectorAll<HTMLElement>('[role=radio]')
-    radios?.[alvo]?.focus()
+    if (disabled) return
+    const alvo = navegarNoGrupoDeRadio(e, i, options.length)
+    const opcao = alvo === null ? undefined : options[alvo]
+    if (opcao) escolher(opcao.value)
   }
   return (
     <div

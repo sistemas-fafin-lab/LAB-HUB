@@ -71,23 +71,26 @@ const normaliza = (s: string) => s.trim().toLowerCase()
 const chaveDoMarcador = (contexto: string, p: ExamPanel) =>
   [normaliza(contexto), normaliza(p.name), normaliza(p.unit)].join('|')
 
-// Dia da coleta. Data sem hora ("2026-07-24") é o dia em si; um instante
-// (liberação do FlowLab) vira o dia no fuso escolhido nas Configurações.
+const MS_POR_DIA = 86_400_000
+
 // O dia da coleta já está no fuso escolhido (ver diaDaColeta): formatado em
 // UTC, não muda de dia de novo.
 const mesFmt = new Intl.DateTimeFormat('pt-BR', { month: 'short', timeZone: 'UTC' })
-const mesDoDia = (dia: number) => mesFmt.format(new Date(dia * 86_400_000)).replace('.', '')
-const anoDoDia = (dia: number) => new Date(dia * 86_400_000).getUTCFullYear()
+const mesDoDia = (dia: number) => mesFmt.format(new Date(dia * MS_POR_DIA)).replace('.', '')
+const anoDoDia = (dia: number) => new Date(dia * MS_POR_DIA).getUTCFullYear()
 
 /** Mês curto da primeira e da última coleta; com o ano quando os anos diferem. */
 function eixoDe(primeiro: number, ultimo: number): Tendencia['eixo'] {
+  if (!Number.isFinite(primeiro) || !Number.isFinite(ultimo)) return { inicio: 'Primeira coleta', fim: 'Última' }
   if (anoDoDia(primeiro) === anoDoDia(ultimo)) return { inicio: mesDoDia(primeiro), fim: mesDoDia(ultimo) }
   return { inicio: `${mesDoDia(primeiro)} ${anoDoDia(primeiro)}`, fim: `${mesDoDia(ultimo)} ${anoDoDia(ultimo)}` }
 }
 
+// Dia da coleta. Data sem hora ("2026-07-24") é o dia em si; um instante
+// (liberação do FlowLab) vira o dia no fuso escolhido nas Configurações.
 function diaDaColeta(iso: string): number {
   const soData = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
-  if (soData) return Date.UTC(Number(soData[1]), Number(soData[2]) - 1, Number(soData[3])) / 86_400_000
+  if (soData) return Date.UTC(Number(soData[1]), Number(soData[2]) - 1, Number(soData[3])) / MS_POR_DIA
   return diaNoFuso(new Date(iso))
 }
 

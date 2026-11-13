@@ -72,7 +72,7 @@ export function FalhaAoCarregar({ titulo, erro, onTentar }: { titulo: string; er
     <div className="flex flex-col items-center text-center py-12 px-6">
       <IconTile name="cloud-off" size={48} tone="coral" />
       <div className="text-[15px] font-semibold mt-4">{titulo}</div>
-      <p className="text-[13px] text-muted mt-1 max-w-sm">{erro}</p>
+      <p role="alert" className="text-[13px] text-muted mt-1 max-w-sm">{erro}</p>
       <div className="mt-4">
         <Btn variant="secondary" icon="rotate-cw" loading={tentando} onClick={() => void tentar()}>
           {tentando ? 'Tentando' : 'Tentar novamente'}

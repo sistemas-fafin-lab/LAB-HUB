@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from 'react'
 import type { PostoDisponivel } from '@lab-hub/shared'
+import { navegarNoGrupoDeRadio } from '../../ds/teclado'
 import { Panel, PanelHead } from '../portal'
 
 interface UnitSelectorProps {
@@ -8,22 +9,17 @@ interface UnitSelectorProps {
   onSelect: (id: string) => void
 }
 
-const PROXIMA: Record<string, 1 | -1> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }
-
 /** Unidades como um grupo de rádio: um cartão por unidade, só uma marcada. */
 export function UnitSelector({ postos, selectedId, onSelect }: UnitSelectorProps) {
   const titulo = 'Onde você prefere fazer a coleta?'
-  // Só a marcada (ou a primeira) entra no Tab; as setas andam entre elas.
+  // Mesmo teclado do DS.Radio: só a marcada (ou a primeira) entra no Tab e as
+  // setas andam entre elas. O DS.Radio desenha rótulos em lista; aqui cada
+  // opção é um cartão, então só o círculo segue o desenho dele.
   const focavel = postos.some((p) => p.id === selectedId) ? selectedId : postos[0]?.id
   const navegar = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
-    const delta = PROXIMA[e.key]
-    if (delta === undefined || postos.length === 0) return
-    e.preventDefault()
-    const alvo = (i + delta + postos.length) % postos.length
-    const posto = postos[alvo]
-    if (!posto) return
-    onSelect(posto.id)
-    e.currentTarget.closest('[role=radiogroup]')?.querySelectorAll<HTMLElement>('[role=radio]')[alvo]?.focus()
+    const alvo = navegarNoGrupoDeRadio(e, i, postos.length)
+    const posto = alvo === null ? undefined : postos[alvo]
+    if (posto) onSelect(posto.id)
   }
   return (
     <Panel>
