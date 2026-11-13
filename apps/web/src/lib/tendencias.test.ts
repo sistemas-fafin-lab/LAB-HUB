@@ -53,6 +53,31 @@ describe('tendenciasDosExames', () => {
     })
   })
 
+  it('eixo: mês curto da primeira e da última coleta', () => {
+    const [t] = tendenciasDosExames([
+      exame('b', '2026-10-03', [painel('Glicose', '95')]),
+      exame('a', '2026-05-20', [painel('Glicose', '88')]),
+    ])
+    expect(t?.eixo).toEqual({ inicio: 'mai', fim: 'out' })
+  })
+
+  it('eixo: com anos diferentes, o mês leva o ano', () => {
+    const [t] = tendenciasDosExames([
+      exame('b', '2026-02-03', [painel('Glicose', '95')]),
+      exame('a', '2025-11-20', [painel('Glicose', '88')]),
+    ])
+    expect(t?.eixo).toEqual({ inicio: 'nov 2025', fim: 'fev 2026' })
+  })
+
+  it('eixo: a coleta com hora cai no dia do fuso escolhido', () => {
+    salvarFuso('America/Sao_Paulo')
+    const [t] = tendenciasDosExames([
+      exame('b', '2026-07-01T01:00:00Z', [painel('Glicose', '95')]), // 30/06 em Brasília
+      exame('a', '2026-05-20', [painel('Glicose', '88')]),
+    ])
+    expect(t?.eixo.fim).toBe('jun')
+  })
+
   it('precisa de duas coletas: marcador de uma coleta só não entra', () => {
     expect(
       tendenciasDosExames([exame('a', '2026-01-10', [painel('Glicose', '88')]), exame('b', '2026-02-10', [painel('TSH', '2,1')])]),

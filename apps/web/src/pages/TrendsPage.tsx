@@ -41,8 +41,8 @@ function CartaoDoMarcador({ tendencia: t, onVerExame }: { tendencia: Tendencia; 
         </div>
         <TrendLine data={t.serie} out={t.foraDaReferencia} />
         <div className="flex justify-between text-[11px] text-muted mt-1.5 tabular-nums">
-          <span>Primeira coleta</span>
-          <span>Última</span>
+          <span>{t.eixo.inicio}</span>
+          <span>{t.eixo.fim}</span>
         </div>
         <div className="rounded-[12px] bg-subtle p-3 mt-4">
           <p className="text-[13px] leading-relaxed">{t.nota}</p>

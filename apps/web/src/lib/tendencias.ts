@@ -27,6 +27,8 @@ export interface Tendencia {
   /** Exame da última coleta, para o "Ver exame". */
   exameId: string
   foraDaReferencia: boolean
+  /** Rótulos do eixo do gráfico: mês da primeira e da última coleta ("mai", "out"). */
+  eixo: { inicio: string; fim: string }
 }
 
 interface Ponto {
@@ -71,6 +73,18 @@ const chaveDoMarcador = (contexto: string, p: ExamPanel) =>
 
 // Dia da coleta. Data sem hora ("2026-07-24") é o dia em si; um instante
 // (liberação do FlowLab) vira o dia no fuso escolhido nas Configurações.
+// O dia da coleta já está no fuso escolhido (ver diaDaColeta): formatado em
+// UTC, não muda de dia de novo.
+const mesFmt = new Intl.DateTimeFormat('pt-BR', { month: 'short', timeZone: 'UTC' })
+const mesDoDia = (dia: number) => mesFmt.format(new Date(dia * 86_400_000)).replace('.', '')
+const anoDoDia = (dia: number) => new Date(dia * 86_400_000).getUTCFullYear()
+
+/** Mês curto da primeira e da última coleta; com o ano quando os anos diferem. */
+function eixoDe(primeiro: number, ultimo: number): Tendencia['eixo'] {
+  if (anoDoDia(primeiro) === anoDoDia(ultimo)) return { inicio: mesDoDia(primeiro), fim: mesDoDia(ultimo) }
+  return { inicio: `${mesDoDia(primeiro)} ${anoDoDia(primeiro)}`, fim: `${mesDoDia(ultimo)} ${anoDoDia(ultimo)}` }
+}
+
 function diaDaColeta(iso: string): number {
   const soData = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
   if (soData) return Date.UTC(Number(soData[1]), Number(soData[2]) - 1, Number(soData[3])) / 86_400_000
@@ -158,6 +172,7 @@ export function tendenciasDosExames(exams: readonly Exam[]): Tendencia[] {
       serie: pontos.map((p) => p.numero),
       exameId: ultimo.exameId,
       foraDaReferencia: !ultimo.painel.ok,
+      eixo: eixoDe(pontos[0]!.dia, ultimo.dia),
     })
   }
 
