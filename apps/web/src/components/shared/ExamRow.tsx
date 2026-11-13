@@ -11,9 +11,9 @@ export function ExamRow({ exam, onClick }: { exam: Exam; onClick: () => void }) 
     <button
       type="button"
       onClick={onClick}
-      className="lh-row w-full grid grid-cols-[28px_minmax(0,1fr)_auto] md:grid-cols-[28px_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_110px_16px] items-center gap-x-4 px-5 py-3.5 text-left"
+      className="lh-row w-full grid grid-cols-[28px_minmax(0,1fr)_auto] md:grid-cols-[28px_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_160px_16px] items-center gap-x-4 px-5 py-3.5 text-left"
     >
-      <Node step={passo} size={26} ring />
+      <Node step={passo} size={26} />
       <span className="block min-w-0">
         <span className="flex flex-wrap items-center gap-x-2 min-w-0">
           <span className="text-[14px] font-semibold truncate max-w-full">{exam.name}</span>
@@ -30,7 +30,9 @@ export function ExamRow({ exam, onClick }: { exam: Exam; onClick: () => void }) 
       </span>
       <span className="hidden md:block text-[13px] truncate">{responsavel ?? ''}</span>
       <span className="hidden md:block text-[13px] text-muted truncate tabular-nums">{contexto}</span>
-      <span className="flex justify-end">
+      {/* Abaixo de md a pílula fecha a linha (à direita); a partir de md ela
+          abre a própria coluna, alinhada à esquerda como no protótipo. */}
+      <span className="flex justify-end md:justify-start">
         <Pill tone={tom}>{rotulo}</Pill>
       </span>
       <Ico name="chevron-right" size={16} className="hidden md:inline-flex text-faint" />
