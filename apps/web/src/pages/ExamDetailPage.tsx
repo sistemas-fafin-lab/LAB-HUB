@@ -287,7 +287,14 @@ export function ExamDetailPage({ exam, onBack, onViewLaudo }: ExamDetailPageProp
                 </span>
               }
             />
-            <Timeline passo={passo} />
+            {/* Só as datas que a fonte informou: nunca um horário inventado. */}
+            <Timeline
+              passo={passo}
+              quando={{
+                ...(exam.dataColetaCurta ? { coleta: exam.dataColetaCurta } : {}),
+                ...(exam.dataEmissao ? { liberada: exam.dataEmissao } : {}),
+              }}
+            />
           </Panel>
           <FichaDaColeta exam={exam} />
         </div>
