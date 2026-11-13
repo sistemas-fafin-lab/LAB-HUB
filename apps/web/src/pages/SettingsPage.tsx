@@ -144,7 +144,7 @@ export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
             </Secao>
           )}
 
-          <Secao titulo="Privacidade">
+          <Secao titulo="Privacidade e segurança">
             <div>
               {/* Compartilhar e duas etapas sem backend: ocultos por flag. */}
               {MOSTRAR_PRIVACIDADE_EXTRAS && (

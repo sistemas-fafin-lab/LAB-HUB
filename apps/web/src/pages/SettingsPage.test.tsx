@@ -69,9 +69,9 @@ describe('flags (desligadas)', () => {
     expect(screen.queryByRole('switch')).toBeNull()
   })
 
-  it('sem MOSTRAR_PRIVACIDADE_EXTRAS, Privacidade traz só "Excluir minha conta"', () => {
+  it('sem MOSTRAR_PRIVACIDADE_EXTRAS, Privacidade e segurança traz só "Excluir minha conta"', () => {
     renderiza()
-    const privacidade = within(painel('Privacidade'))
+    const privacidade = within(painel('Privacidade e segurança'))
     expect(privacidade.queryByText('Compartilhar com médicos')).toBeNull()
     expect(privacidade.queryByText('Verificação em duas etapas')).toBeNull()
     expect(privacidade.getByText('Excluir minha conta')).toBeTruthy()
