@@ -6,7 +6,8 @@ import { pacienteUpdateSchema } from '../schemas/pacienteUpdate.js'
 import { mensagemZod } from '../lib/validacao.js'
 import { excluirContaPaciente } from '../lib/expurgo.js'
 import { codigoOpcionalSchema } from '../schemas/doisFatores.js'
-import { conferirCodigoDaSessao } from './doisFatores.js'
+import { RECUSAS, conferirCodigoDaSessao } from '../lib/doisFatores.js'
+import { enviarRecusa } from './doisFatores.js'
 
 export async function pacientesRoutes(app: FastifyInstance): Promise<void> {
   // GET /pacientes/me — dados do paciente autenticado (derivado do JWT, D4).
@@ -73,10 +74,9 @@ export async function pacientesRoutes(app: FastifyInstance): Promise<void> {
       if (request.sessao.doisFatores) {
         const parsed = codigoOpcionalSchema.safeParse(request.body)
         const codigo = parsed.success ? parsed.data?.codigo : undefined
-        if (!codigo) {
-          return reply.code(400).send({ statusCode: 400, codigo: 'CODIGO_OBRIGATORIO', message: 'Digite os 6 dígitos do código.' })
-        }
-        if (!(await conferirCodigoDaSessao(request, reply, codigo))) return reply
+        if (!codigo) return enviarRecusa(reply, RECUSAS.obrigatorio)
+        const recusa = await conferirCodigoDaSessao(request.sessao, request.pacienteId, codigo)
+        if (recusa) return enviarRecusa(reply, recusa)
       }
       await excluirContaPaciente(request.pacienteId, request.log)
       return reply.code(204).send()

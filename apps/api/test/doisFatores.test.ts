@@ -16,17 +16,17 @@ const h = vi.hoisted(() => {
 })
 vi.mock('../src/lib/supabase.js', () => ({ supabase: h.sbProxy }))
 
-const otp = vi.hoisted(() => ({ enviar: vi.fn(), conferir: vi.fn() }))
-vi.mock('../src/lib/doisFatores.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/lib/doisFatores.js')>()),
-  enviarCodigo: (...a: unknown[]) => otp.enviar(...a),
-  conferirCodigo: (...a: unknown[]) => otp.conferir(...a),
-}))
 
 import { doisFatoresRoutes } from '../src/routes/doisFatores.js'
 import { resultadosRoutes } from '../src/routes/resultados.js'
 import { pacientesRoutes } from '../src/routes/pacientes.js'
 import { buildApp, createSupabaseMock, type SupaCall } from './helpers.js'
+import { otp as otpReal } from '../src/lib/doisFatores.js'
+
+// Envio e conferência no Supabase Auth: dublês no objeto que o módulo usa.
+const otp = { enviar: vi.fn(), conferir: vi.fn() }
+otpReal.enviar = (...a: Parameters<typeof otpReal.enviar>) => otp.enviar(...a)
+otpReal.conferir = (...a: Parameters<typeof otpReal.conferir>) => otp.conferir(...a)
 
 const PAC_ID = '11111111-1111-1111-1111-111111111111'
 const SESSAO = '33333333-3333-3333-3333-333333333333'
@@ -47,6 +47,10 @@ interface Cenario {
   linha: Record<string, unknown> | null
   /** O update condicional da tentativa não acha a linha (outra conferência chegou antes). */
   corrida?: boolean
+  /** Linha de bloqueios_dois_fatores da conta. */
+  bloqueio?: { falhas: number; desde: string } | null
+  /** A gravação que marca a sessão como verificada falha. */
+  falhaAoVerificar?: boolean
 }
 
 let app: FastifyInstance
@@ -62,8 +66,12 @@ async function montar(rotas = doisFatoresRoutes) {
       }
       if (call.table === 'sessoes_dois_fatores' && call.op === 'select') return { data: cenario.linha, error: null }
       if (call.table === 'sessoes_dois_fatores' && call.op === 'update') {
+        if (cenario.falhaAoVerificar && 'verificada_em' in (call.payload as object)) {
+          return { data: null, error: { message: 'timeout' } }
+        }
         return { data: cenario.corrida ? [] : [{ session_id: SESSAO }], error: null }
       }
+      if (call.table === 'bloqueios_dois_fatores' && call.op === 'select') return { data: cenario.bloqueio ?? null, error: null }
       if (call.table === 'resultados') return { data: [], error: null }
       return { data: null, error: null }
     },
@@ -200,6 +208,93 @@ describe('limites', () => {
     await montar()
     expect((await pedir('POST', '/auth/dois-fatores/enviar', PELA_SENHA, { finalidade: 'login' })).statusCode).toBe(403)
     expect(otp.enviar).not.toHaveBeenCalled()
+  })
+})
+
+describe('sem saída, não', () => {
+  const RECUPERACAO = jwt(['recovery'])
+
+  it('sessão pendente com a senha antiga: GET diz para entrar de novo, e o envio responde ENTRE_DE_NOVO', async () => {
+    const antiga = jwt(['password'], SESSAO, 31 * 60)
+    await montar()
+    const estado = await pedir('GET', '/auth/dois-fatores', antiga)
+    expect(estado.json()).toMatchObject({ pendente: true, entrarDeNovo: true })
+    const envio = await pedir('POST', '/auth/dois-fatores/enviar', antiga, { finalidade: 'login' })
+    expect(envio.statusCode).toBe(403)
+    expect(envio.json().codigo).toBe('ENTRE_DE_NOVO')
+  })
+
+  it('ligar a verificação numa sessão do link de recuperação pede para entrar de novo, sem gravar nada', async () => {
+    cenario.doisFatores = false
+    await montar()
+    const res = await pedir('POST', '/auth/dois-fatores/preferencia', RECUPERACAO, { ativa: true, codigo: '123456' })
+    expect(res.json().codigo).toBe('ENTRE_DE_NOVO')
+    expect(calls.some((c) => c.table === 'pacientes' && c.op === 'update')).toBe(false)
+    expect(otp.conferir).not.toHaveBeenCalled()
+  })
+
+  it('a sessão verificada em uso renova o último uso (o expurgo não a leva)', async () => {
+    const velho = new Date(Date.now() - 2 * 86_400_000).toISOString()
+    cenario.linha = { session_id: SESSAO, verificada_em: velho, enviado_em: null, tentativas: 0, usada_em: velho }
+    await montar(resultadosRoutes)
+    expect((await pedir('GET', '/resultados', PELA_SENHA)).statusCode).toBe(200)
+    expect(atualizacoes().some((c) => typeof (c.payload as { usada_em?: unknown }).usada_em === 'string')).toBe(true)
+  })
+
+  it('o expurgo conta a partir do último uso, não da criação', async () => {
+    otp.enviar.mockResolvedValue({ ok: true, limite: false })
+    await montar()
+    await pedir('POST', '/auth/dois-fatores/enviar', PELA_SENHA, { finalidade: 'login' })
+    await new Promise((r) => setTimeout(r, 0))
+    const expurgo = calls.find((c) => c.table === 'sessoes_dois_fatores' && c.op === 'delete')
+    expect(Object.keys(expurgo?.filters ?? {})).toEqual(['usada_em__lt'])
+  })
+})
+
+describe('gravações', () => {
+  it('se marcar a sessão como verificada falha, responde 500, não "verificada"', async () => {
+    otp.conferir.mockResolvedValue(true)
+    cenario.linha = { session_id: SESSAO, verificada_em: null, enviado_em: new Date().toISOString(), tentativas: 0 }
+    cenario.falhaAoVerificar = true
+    await montar()
+    const res = await pedir('POST', '/auth/dois-fatores/verificar', PELA_SENHA, { codigo: '123456' })
+    expect(res.statusCode).toBe(500)
+  })
+
+  it('consumir o código e verificar a sessão é uma gravação só', async () => {
+    otp.conferir.mockResolvedValue(true)
+    cenario.linha = { session_id: SESSAO, verificada_em: null, enviado_em: new Date().toISOString(), tentativas: 0 }
+    await montar()
+    await pedir('POST', '/auth/dois-fatores/verificar', PELA_SENHA, { codigo: '123456' })
+    const final = atualizacoes().find((c) => 'verificada_em' in (c.payload as object))
+    expect(final?.payload).toMatchObject({ enviado_em: null, tentativas: 0 })
+  })
+})
+
+describe('limite por conta', () => {
+  it('com 10 códigos errados na última hora, nem confere nem envia', async () => {
+    otp.conferir.mockResolvedValue(true)
+    otp.enviar.mockResolvedValue({ ok: true, limite: false })
+    cenario.bloqueio = { falhas: 10, desde: new Date().toISOString() }
+    cenario.linha = { session_id: SESSAO, verificada_em: null, enviado_em: new Date().toISOString(), tentativas: 0 }
+    await montar()
+    const verifica = await pedir('POST', '/auth/dois-fatores/verificar', PELA_SENHA, { codigo: '123456' })
+    expect(verifica.json().codigo).toBe('CONTA_BLOQUEADA')
+    expect(otp.conferir).not.toHaveBeenCalled()
+    cenario.linha = null
+    const envia = await pedir('POST', '/auth/dois-fatores/enviar', PELA_SENHA, { finalidade: 'login' })
+    expect(envia.json().codigo).toBe('CONTA_BLOQUEADA')
+    expect(otp.enviar).not.toHaveBeenCalled()
+  })
+
+  it('código errado soma uma falha na conta; passada a hora, a contagem recomeça', async () => {
+    otp.conferir.mockResolvedValue(false)
+    cenario.bloqueio = { falhas: 9, desde: new Date(Date.now() - 2 * 3_600_000).toISOString() }
+    cenario.linha = { session_id: SESSAO, verificada_em: null, enviado_em: new Date().toISOString(), tentativas: 0 }
+    await montar()
+    await pedir('POST', '/auth/dois-fatores/verificar', PELA_SENHA, { codigo: '000000' })
+    const bloqueio = calls.find((c) => c.table === 'bloqueios_dois_fatores' && c.op === 'upsert')
+    expect(bloqueio?.payload).toMatchObject({ paciente_id: PAC_ID, falhas: 1 })
   })
 })
 

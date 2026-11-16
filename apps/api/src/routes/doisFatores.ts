@@ -1,17 +1,21 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 import { mensagemZod } from '../lib/validacao.js'
-import { authenticateParcial, sessaoLiberada } from '../middlewares/auth.js'
+import { authenticateParcial } from '../middlewares/auth.js'
 import {
+  FalhaAoGravar,
   INTERVALO_ENTRE_ENVIOS_MS,
-  TENTATIVAS_POR_CODIGO,
-  VALIDADE_DA_LINHA_MS,
-  conferirCodigo,
-  enviarCodigo,
-  entrouPelaSenha,
-  linhaDaSessao,
+  RECUSAS,
+  conferirCodigoDaSessao,
+  contaBloqueada,
+  expurgarSessoesVencidas,
+  otp,
+  precisaEntrarDeNovo,
+  registrarEnvio,
   senhaRecente,
+  situacaoDaSessao,
 } from '../lib/doisFatores.js'
+import type { Recusa } from '../lib/doisFatores.js'
 import { enviarCodigoSchema, preferenciaSchema, verificarCodigoSchema } from '../schemas/doisFatores.js'
 
 // ---------------------------------------------------------------------------
@@ -20,9 +24,9 @@ import { enviarCodigoSchema, preferenciaSchema, verificarCodigoSchema } from '..
 // outras rotas de dados exigem que ela tenha passado (authenticate).
 // ---------------------------------------------------------------------------
 
-/** Resposta de erro com `codigo` estável, que o web usa para escolher o texto. */
-function recusa(reply: FastifyReply, status: number, codigo: string, message: string) {
-  return reply.code(status).send({ statusCode: status, codigo, message })
+/** Resposta de erro com `codigo` estável, no mesmo formato do 403 do authenticate. */
+export function enviarRecusa(reply: FastifyReply, r: Recusa) {
+  return reply.code(r.status).send({ statusCode: r.status, error: 'Recusado', codigo: r.codigo, message: r.message })
 }
 
 function sessionIdDe(request: FastifyRequest): string {
@@ -31,58 +35,31 @@ function sessionIdDe(request: FastifyRequest): string {
   return id
 }
 
-/**
- * Confere o código da sessão atual: contagem de tentativas e consumo do
- * código. Devolve true quando confere; false quando recusou (e a resposta já
- * foi enviada). Booleano de propósito: o FastifyReply é "thenable", e
- * devolvê-lo de uma função async faz o `await` resolvê-lo para undefined, o
- * que transformaria toda recusa num "confere".
- */
-export async function conferirCodigoDaSessao(request: FastifyRequest, reply: FastifyReply, codigo: string): Promise<boolean> {
-  const sessionId = sessionIdDe(request)
-  const linha = await linhaDaSessao(sessionId)
-  if (!linha?.enviado_em) {
-    void recusa(reply, 400, 'CODIGO_INVALIDO', 'Código inválido ou expirado. Confira a mensagem ou peça um novo código.')
-    return false
-  }
-  if (linha.tentativas >= TENTATIVAS_POR_CODIGO) {
-    void recusa(reply, 429, 'TENTATIVAS_ESGOTADAS', 'Muitas tentativas. Peça um novo código.')
-    return false
-  }
-  // Reserva a tentativa ANTES de conferir, com update condicional: duas
-  // conferências em paralelo não passam as duas pelo mesmo número, então o
-  // limite de 5 vale mesmo com pedidos simultâneos.
-  const { data: reservada } = await supabase
-    .from('sessoes_dois_fatores')
-    .update({ tentativas: linha.tentativas + 1 })
-    .eq('session_id', sessionId)
-    .eq('tentativas', linha.tentativas)
-    .select('session_id')
-  if (!reservada || (Array.isArray(reservada) && reservada.length === 0)) {
-    void recusa(reply, 429, 'TENTATIVAS_ESGOTADAS', 'Muitas tentativas. Peça um novo código.')
-    return false
-  }
-  const email = request.sessao.email
-  const confere = email !== null && (await conferirCodigo(email, codigo))
-  if (!confere) {
-    void recusa(reply, 400, 'CODIGO_INVALIDO', 'Código inválido ou expirado. Confira a mensagem ou peça um novo código.')
-    return false
-  }
-  // Código usado: não serve de novo (o Supabase também não aceita).
-  await supabase
-    .from('sessoes_dois_fatores')
-    .update({ enviado_em: null, tentativas: 0 })
-    .eq('session_id', sessionId)
-  return true
-}
+const agoraIso = () => new Date().toISOString()
 
 export async function doisFatoresRoutes(app: FastifyInstance): Promise<void> {
+  // Gravação que falhou vira 500, nunca um "deu certo" sem ter gravado.
+  app.setErrorHandler((erro, request, reply) => {
+    if (erro instanceof FalhaAoGravar) {
+      request.log.error({ err: erro.cause }, erro.message)
+      return reply.code(500).send({ statusCode: 500, error: 'Internal Server Error', message: 'Não foi possível concluir. Tente de novo em instantes.' })
+    }
+    // O resto segue para o tratamento padrão (o do app pai).
+    throw erro
+  })
+
   // GET /auth/dois-fatores — preferência e situação da sessão atual.
   app.get('/auth/dois-fatores', { preHandler: authenticateParcial }, async (request) => {
     const { sessao } = request
-    const linha = sessao.claims ? await linhaDaSessao(sessao.claims.sessionId) : null
-    const liberada = !sessao.doisFatores || (entrouPelaSenha(sessao.claims) && linha?.verificada_em != null)
-    return { ativa: sessao.doisFatores, pendente: !liberada, enviadoEm: linha?.enviado_em ?? null }
+    const { liberada, linha } = await situacaoDaSessao(sessao)
+    return {
+      ativa: sessao.doisFatores,
+      pendente: !liberada,
+      // A sessão pendente que não consegue fazer a etapa do código (senha
+      // antiga, link de recuperação): o web manda entrar de novo.
+      entrarDeNovo: !liberada && precisaEntrarDeNovo(sessao),
+      enviadoEm: linha?.enviado_em ?? null,
+    }
   })
 
   // POST /auth/dois-fatores/enviar — manda o código ao e-mail da conta.
@@ -93,41 +70,28 @@ export async function doisFatoresRoutes(app: FastifyInstance): Promise<void> {
       const parsed = enviarCodigoSchema.safeParse(request.body)
       if (!parsed.success) throw app.httpErrors.badRequest(mensagemZod(parsed.error))
       const { sessao } = request
-      // login: só a sessão que entrou pela senha recebe o código da segunda
-      // etapa. confirmacao: só a sessão já liberada (o código confirma uma
-      // mudança, não abre acesso).
-      // A etapa de entrada só existe para quem ligou a verificação, e só logo
-      // depois da senha.
-      const pode =
-        parsed.data.finalidade === 'login'
-          ? sessao.doisFatores && senhaRecente(sessao.claims)
-          : await sessaoLiberada(sessao)
-      if (!pode || !sessao.email) throw app.httpErrors.forbidden('Esta sessão não pode pedir o código.')
-
-      const sessionId = sessionIdDe(request)
-      const linha = await linhaDaSessao(sessionId)
+      const { liberada, linha } = await situacaoDaSessao(sessao)
+      if (parsed.data.finalidade === 'login') {
+        // A etapa de entrada só existe para quem ligou a verificação, e só
+        // logo depois da senha.
+        if (!sessao.doisFatores || liberada) throw app.httpErrors.forbidden('Esta sessão não precisa do código.')
+        if (precisaEntrarDeNovo(sessao)) return enviarRecusa(reply, RECUSAS.entreDeNovo)
+      } else if (!liberada) {
+        // O código de confirmação confirma uma mudança; não abre acesso.
+        throw app.httpErrors.forbidden('Confirme o código de entrada antes.')
+      }
+      if (!sessao.email) throw app.httpErrors.forbidden('Conta sem e-mail.')
+      if (await contaBloqueada(request.pacienteId)) return enviarRecusa(reply, RECUSAS.bloqueada)
       if (linha?.enviado_em && Date.now() - Date.parse(linha.enviado_em) < INTERVALO_ENTRE_ENVIOS_MS) {
-        return recusa(reply, 429, 'AGUARDE_REENVIO', 'Aguarde um minuto para pedir outro código.')
+        return enviarRecusa(reply, RECUSAS.aguarde)
       }
 
-      const envio = await enviarCodigo(sessao.email)
-      if (!envio.ok) {
-        return envio.limite
-          ? recusa(reply, 429, 'AGUARDE_REENVIO', 'Aguarde um minuto para pedir outro código.')
-          : recusa(reply, 502, 'ENVIO_FALHOU', 'Não foi possível enviar o código. Tente de novo em instantes.')
-      }
+      const envio = await otp.enviar(sessao.email)
+      if (!envio.ok) return enviarRecusa(reply, envio.limite ? RECUSAS.aguarde : RECUSAS.envioFalhou)
 
-      const agora = new Date().toISOString()
-      await supabase.from('sessoes_dois_fatores').upsert(
-        { session_id: sessionId, paciente_id: request.pacienteId, enviado_em: agora, tentativas: 0 },
-        { onConflict: 'session_id' },
-      )
-      // Expurgo das linhas vencidas, aproveitando o envio.
-      await supabase
-        .from('sessoes_dois_fatores')
-        .delete()
-        .lt('criada_em', new Date(Date.now() - VALIDADE_DA_LINHA_MS).toISOString())
-      return { enviadoEm: agora }
+      const enviadoEm = await registrarEnvio(sessionIdDe(request), request.pacienteId)
+      expurgarSessoesVencidas(request.log)
+      return { enviadoEm }
     },
   )
 
@@ -140,14 +104,11 @@ export async function doisFatoresRoutes(app: FastifyInstance): Promise<void> {
       if (!parsed.success) throw app.httpErrors.badRequest(mensagemZod(parsed.error))
       // A sessão aberta só pelo código nunca vira "senha + código"; e a senha
       // precisa ser recente.
-      if (!senhaRecente(request.sessao.claims)) {
-        throw app.httpErrors.forbidden('Entre com a sua senha antes do código.')
-      }
-      if (!(await conferirCodigoDaSessao(request, reply, parsed.data.codigo))) return reply
-      await supabase
-        .from('sessoes_dois_fatores')
-        .update({ verificada_em: new Date().toISOString() })
-        .eq('session_id', sessionIdDe(request))
+      if (!senhaRecente(request.sessao.claims)) return enviarRecusa(reply, RECUSAS.entreDeNovo)
+      const recusa = await conferirCodigoDaSessao(request.sessao, request.pacienteId, parsed.data.codigo, {
+        verificada_em: agoraIso(),
+      })
+      if (recusa) return enviarRecusa(reply, recusa)
       return { verificada: true }
     },
   )
@@ -159,24 +120,27 @@ export async function doisFatoresRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = preferenciaSchema.safeParse(request.body)
       if (!parsed.success) throw app.httpErrors.badRequest(mensagemZod(parsed.error))
-      if (!(await sessaoLiberada(request.sessao))) {
-        throw app.httpErrors.forbidden('Confirme o código de entrada antes.')
-      }
-      if (!(await conferirCodigoDaSessao(request, reply, parsed.data.codigo))) return reply
+      const { sessao } = request
+      if (!(await situacaoDaSessao(sessao)).liberada) throw app.httpErrors.forbidden('Confirme o código de entrada antes.')
+      // Ligar numa sessão que não entrou pela senha (link de recuperação) a
+      // deixaria pendente na hora, sem como fazer a etapa do código.
+      if (parsed.data.ativa && precisaEntrarDeNovo(sessao)) return enviarRecusa(reply, RECUSAS.entreDeNovo)
+
+      // Ao ligar, a sessão atual já provou o e-mail: fica verificada na mesma
+      // gravação que consome o código.
+      const recusa = await conferirCodigoDaSessao(
+        sessao,
+        request.pacienteId,
+        parsed.data.codigo,
+        parsed.data.ativa ? { verificada_em: agoraIso() } : {},
+      )
+      if (recusa) return enviarRecusa(reply, recusa)
 
       const { error } = await supabase
         .from('pacientes')
         .update({ dois_fatores_email: parsed.data.ativa })
         .eq('id', request.pacienteId)
-      if (error) throw app.httpErrors.internalServerError('Falha ao salvar a preferência')
-      // Ao ligar, a sessão atual já provou o e-mail: fica verificada, para o
-      // paciente não cair na tela do código logo depois de ligar.
-      if (parsed.data.ativa && entrouPelaSenha(request.sessao.claims)) {
-        await supabase
-          .from('sessoes_dois_fatores')
-          .update({ verificada_em: new Date().toISOString() })
-          .eq('session_id', sessionIdDe(request))
-      }
+      if (error) throw new FalhaAoGravar('preferência', error)
       return { ativa: parsed.data.ativa }
     },
   )

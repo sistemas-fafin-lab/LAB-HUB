@@ -27,15 +27,34 @@ create table if not exists public.sessoes_dois_fatores (
   -- (no máximo 5; zera a cada envio).
   enviado_em    timestamptz,
   tentativas    integer not null default 0 check (tentativas >= 0),
-  criada_em     timestamptz not null default now()
+  criada_em     timestamptz not null default now(),
+  -- Último uso da sessão verificada (renovado no máximo uma vez por dia). O
+  -- expurgo conta a partir daqui: uma sessão ativa nunca perde a verificação.
+  usada_em      timestamptz not null default now()
 );
 
 create index if not exists idx_sessoes_dois_fatores_paciente
   on public.sessoes_dois_fatores (paciente_id);
-create index if not exists idx_sessoes_dois_fatores_criada_em
-  on public.sessoes_dois_fatores (criada_em);
+create index if not exists idx_sessoes_dois_fatores_usada_em
+  on public.sessoes_dois_fatores (usada_em);
 
 alter table public.sessoes_dois_fatores enable row level security;
 -- Sem policy: nenhum role de cliente lê ou escreve aqui; a API usa a chave
 -- secreta, que ignora a RLS.
 revoke all on table public.sessoes_dois_fatores from anon, authenticated;
+
+-- =====================================================================
+-- 3. Códigos errados por conta. O limite de tentativas da sessão zera a cada
+--    código novo e a cada login; este, não: com a senha vazada, dá para pedir
+--    código e entrar de novo à vontade, mas não errar mais que o limite por
+--    hora na mesma conta.
+-- =====================================================================
+create table if not exists public.bloqueios_dois_fatores (
+  paciente_id uuid primary key references public.pacientes(id) on delete cascade,
+  falhas      integer not null default 0 check (falhas >= 0),
+  -- Início da janela de contagem; passada uma hora, a contagem recomeça.
+  desde       timestamptz not null default now()
+);
+
+alter table public.bloqueios_dois_fatores enable row level security;
+revoke all on table public.bloqueios_dois_fatores from anon, authenticated;

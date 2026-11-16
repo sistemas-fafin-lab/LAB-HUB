@@ -1,14 +1,9 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { supabase } from '../lib/supabase.js'
-import { claimsDoToken, entrouPelaSenha, linhaDaSessao } from '../lib/doisFatores.js'
-import type { ClaimsDaSessao } from '../lib/doisFatores.js'
+import { claimsDoToken, situacaoDaSessao } from '../lib/doisFatores.js'
+import type { SessaoDoPaciente } from '../lib/doisFatores.js'
 
-export interface SessaoDoPaciente {
-  email: string | null
-  claims: ClaimsDaSessao | null
-  /** Preferência do paciente: verificação em duas etapas por e-mail. */
-  doisFatores: boolean
-}
+export type { SessaoDoPaciente } from '../lib/doisFatores.js'
 
 // Disponibiliza request.pacienteId nas rotas autenticadas.
 declare module 'fastify' {
@@ -55,20 +50,11 @@ export async function authenticateParcial(request: FastifyRequest): Promise<void
   }
 }
 
-/** A sessão já passou pelas duas etapas (ou o paciente não usa a verificação). */
-export async function sessaoLiberada(sessao: SessaoDoPaciente): Promise<boolean> {
-  if (!sessao.doisFatores) return true
-  // Só a sessão aberta pela senha vale: a aberta só pelo código, nunca.
-  if (!entrouPelaSenha(sessao.claims)) return false
-  const linha = await linhaDaSessao(sessao.claims.sessionId)
-  return linha?.verificada_em != null
-}
-
 // preHandler das rotas de dados: o paciente da sessão, já com a segunda etapa
 // conferida quando ele a usa. Sem ela, 403 DOIS_FATORES_PENDENTE.
 export async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   await authenticateParcial(request)
-  if (await sessaoLiberada(request.sessao)) return
+  if ((await situacaoDaSessao(request.sessao)).liberada) return
   return reply.code(403).send({
     statusCode: 403,
     error: 'Forbidden',
