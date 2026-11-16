@@ -27,6 +27,10 @@ export interface Item {
   href: string
   /** Tela por trás do item: é ela que a flag de rota oculta esconde. */
   tela: AppRoute
+  /** Subtítulo na busca do topo. */
+  sub: string
+  /** Outras palavras pelas quais a busca acha a página (além do rótulo). */
+  palavras: string
 }
 
 interface Secao {
@@ -38,20 +42,20 @@ const SECOES: Secao[] = [
   {
     title: 'Saúde',
     items: [
-      { id: 'home', label: 'Visão geral', icon: 'layout-dashboard', href: CAMINHO_DA_TELA.home, tela: 'home' },
-      { id: 'results', label: 'Resultados', icon: 'file-text', href: CAMINHO_DA_TELA.results, tela: 'results' },
-      { id: 'coletas', label: 'Minhas coletas', icon: 'activity', href: caminhoDaAba('minhas'), tela: 'schedule' },
-      { id: 'agendar', label: 'Agendar coleta', icon: 'calendar-plus', href: caminhoDaAba('agendar'), tela: 'schedule' },
-      { id: 'trends', label: 'Tendências', icon: 'trending-up', href: CAMINHO_DA_TELA.trends, tela: 'trends' },
+      { id: 'home', label: 'Visão geral', icon: 'layout-dashboard', href: CAMINHO_DA_TELA.home, tela: 'home', sub: 'Resumo dos seus exames', palavras: 'início' },
+      { id: 'results', label: 'Resultados', icon: 'file-text', href: CAMINHO_DA_TELA.results, tela: 'results', sub: 'Todos os exames', palavras: 'laudos exames' },
+      { id: 'coletas', label: 'Minhas coletas', icon: 'activity', href: caminhoDaAba('minhas'), tela: 'schedule', sub: 'Acompanhe cada etapa', palavras: 'agendamentos' },
+      { id: 'agendar', label: 'Agendar coleta', icon: 'calendar-plus', href: caminhoDaAba('agendar'), tela: 'schedule', sub: 'Escolha unidade, dia e horário', palavras: 'marcar horário unidade' },
+      { id: 'trends', label: 'Tendências', icon: 'trending-up', href: CAMINHO_DA_TELA.trends, tela: 'trends', sub: 'Evolução dos marcadores', palavras: 'evolução gráfico' },
     ],
   },
   {
     title: 'Conta',
     items: [
-      { id: 'profile', label: 'Perfil', icon: 'user-round', href: CAMINHO_DA_TELA.profile, tela: 'profile' },
-      { id: 'documents', label: 'Documentos', icon: 'folder', href: CAMINHO_DA_TELA.documents, tela: 'documents' },
-      { id: 'billing', label: 'Faturamento', icon: 'receipt', href: CAMINHO_DA_TELA.billing, tela: 'billing' },
-      { id: 'settings', label: 'Configurações', icon: 'settings', href: CAMINHO_DA_TELA.settings, tela: 'settings' },
+      { id: 'profile', label: 'Perfil', icon: 'user-round', href: CAMINHO_DA_TELA.profile, tela: 'profile', sub: 'Seus dados', palavras: 'cadastro telefone convênio' },
+      { id: 'documents', label: 'Documentos', icon: 'folder', href: CAMINHO_DA_TELA.documents, tela: 'documents', sub: 'Identidade, carteirinha e pedidos', palavras: 'pedido carteirinha identidade' },
+      { id: 'billing', label: 'Faturamento', icon: 'receipt', href: CAMINHO_DA_TELA.billing, tela: 'billing', sub: 'Pagamentos e recibos', palavras: 'pagamento recibo' },
+      { id: 'settings', label: 'Configurações', icon: 'settings', href: CAMINHO_DA_TELA.settings, tela: 'settings', sub: 'Tema, fuso e privacidade', palavras: 'tema escuro fuso' },
     ],
   },
 ]
