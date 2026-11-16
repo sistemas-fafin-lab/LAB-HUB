@@ -30,7 +30,7 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
       if (!parsed.success) {
         throw app.httpErrors.badRequest(mensagemZod(parsed.error))
       }
-      const { email, password, nome, cpf, sexo, dataNascimento, telefone } = parsed.data
+      const { email, password, nome, cpf, sexo, dataNascimento, telefone, aceite } = parsed.data
 
       // 1) Procura uma linha existente com este CPF (primeira chave do claim).
       //    - com auth_user_id  → já é de uma conta: CPF em uso.
@@ -90,10 +90,22 @@ export async function cadastroRoutes(app: FastifyInstance): Promise<void> {
       // 2) Cria o usuário no Auth alinhado ao flag: em dev
       //    (REQUIRE_EMAIL_CONFIRMATION=false) já cria confirmado para o front logar
       //    direto; em produção cria não confirmado (login só após confirmar o e-mail).
+      //    O aceite dos termos vai em app_metadata, que só o servidor altera
+      //    (user_metadata o próprio usuário pode reescrever pelo Auth): é o
+      //    registro de quando e de qual versão ele aceitou.
       const { data: created, error: authError } = await supabase.auth.admin.createUser({
         email,
         password,
         email_confirm: !REQUIRE_EMAIL_CONFIRMATION,
+        ...(aceite
+          ? {
+              app_metadata: {
+                termos_versao: aceite.termosVersao,
+                termos_aceitos_em: new Date().toISOString(),
+                avisos_optin: aceite.avisos,
+              },
+            }
+          : {}),
       })
       if (authError || !created?.user) {
         // E-mail já em uso normalmente cai aqui.

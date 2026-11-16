@@ -152,6 +152,8 @@ export interface CadastroPacientePayload {
   sexo: Sexo
   dataNascimento: string // YYYY-MM-DD
   telefone?: string
+  /** Aceite dos termos (versão) e opt-in de avisos; o horário é do servidor. */
+  aceite?: { termosVersao: string; avisos: boolean }
 }
 
 // ---------------------------------------------------------------------------

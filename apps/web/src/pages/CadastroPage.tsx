@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import type { CadastroPacientePayload, Paciente, Sexo } from '@lab-hub/shared'
-import { Btn, Field, SelectField } from '../components/portal'
+import * as DS from '../ds'
+import { Btn, Field, MensagemDeErro, SelectField } from '../components/portal'
 import { AvisoErro, CampoSenha, EtapasCadastro, RegrasSenha, TituloAcesso } from '../components/acesso/pecas'
 import { api } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import { track } from '../lib/analytics'
 import { comTransicao } from '../lib/transicao'
+import { MOSTRAR_ACEITE_TERMOS } from '../lib/flags'
+import { PRIVACIDADE_URL, TERMOS_URL, TERMOS_VERSAO, termosPublicados } from '../lib/termos'
 import {
   apenasDigitos,
   dataDigitadaParaIso,
@@ -46,6 +49,7 @@ type FieldErrors = {
   cpf?: string | undefined
   dataNascimento?: string | undefined
   telefone?: string | undefined
+  termos?: string | undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +72,9 @@ export function CadastroPage({ abas, onEmailSent }: CadastroPageProps) {
   const [errors, setErrors] = useState<FieldErrors>({})
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const pedeAceite = MOSTRAR_ACEITE_TERMOS && termosPublicados()
+  const [aceitou, setAceitou] = useState(false)
+  const [avisos, setAvisos] = useState(true)
 
   // Aplica o erro (ou limpa) de um campo. Usado no onBlur de cada input.
   const setFieldError = (field: keyof FieldErrors, msg: string | null) =>
@@ -112,6 +119,7 @@ export function CadastroPage({ abas, onEmailSent }: CadastroPageProps) {
     const ok = confere({
       password: validarSenha(password) ?? undefined,
       confirmacao: validarConfirmacao(confirmacao) ?? undefined,
+      termos: pedeAceite && !aceitou ? 'Aceite os termos para continuar.' : undefined,
     })
     if (!ok) return
 
@@ -128,6 +136,7 @@ export function CadastroPage({ abas, onEmailSent }: CadastroPageProps) {
         // Validada acima: a conversão não falha aqui.
         dataNascimento: dataDigitadaParaIso(dataNascimento) ?? dataNascimento,
         ...(telDigits ? { telefone: telDigits } : {}),
+        ...(pedeAceite ? { aceite: { termosVersao: TERMOS_VERSAO, avisos } } : {}),
       }
       // A transição cobre a criação e, sem confirmação de e-mail, o login
       // automático: a tela só sai quando o próximo passo já está decidido.
@@ -263,6 +272,35 @@ export function CadastroPage({ abas, onEmailSent }: CadastroPageProps) {
           error={errors.confirmacao}
           autoComplete="new-password"
         />
+
+        {pedeAceite && (
+          <div className="flex flex-col gap-3">
+            <div>
+              <DS.Checkbox
+                checked={aceitou}
+                onChange={(v) => {
+                  setAceitou(v)
+                  if (v) setFieldError('termos', null)
+                }}
+                label={
+                  <>
+                    Li e aceito os{' '}
+                    <a href={TERMOS_URL} target="_blank" rel="noreferrer" className="text-link font-medium hover:underline">
+                      Termos de uso
+                    </a>{' '}
+                    e a{' '}
+                    <a href={PRIVACIDADE_URL} target="_blank" rel="noreferrer" className="text-link font-medium hover:underline">
+                      Política de privacidade
+                    </a>
+                    .
+                  </>
+                }
+              />
+              {errors.termos && <MensagemDeErro>{errors.termos}</MensagemDeErro>}
+            </div>
+            <DS.Checkbox checked={avisos} onChange={setAvisos} label="Quero receber avisos de resultado por e-mail e SMS." />
+          </div>
+        )}
 
         <Btn type="submit" size="lg" fullWidth loading={loading} iconRight="arrow-right">
           {loading ? 'Criando conta' : 'Criar conta'}

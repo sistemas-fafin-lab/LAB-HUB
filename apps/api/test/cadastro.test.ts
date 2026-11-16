@@ -353,3 +353,22 @@ describe('POST /cadastro — a recusa não vira oráculo', () => {
     expect(deleteUser).toHaveBeenCalledWith(USER_ID)
   })
 })
+
+describe('POST /cadastro — aceite dos termos', () => {
+  it('grava versão, hora do servidor e opt-in em app_metadata', async () => {
+    await montar(cenarioFantasma())
+    const antes = Date.now()
+    const res = await cadastrar({ ...CORPO, aceite: { termosVersao: '2026-11', avisos: false } })
+    expect(res.statusCode).toBeLessThan(300)
+    const arg = createUser.mock.calls[0]![0] as { app_metadata?: Record<string, unknown> }
+    expect(arg.app_metadata).toMatchObject({ termos_versao: '2026-11', avisos_optin: false })
+    expect(Date.parse(String(arg.app_metadata!.termos_aceitos_em))).toBeGreaterThanOrEqual(antes - 1000)
+  })
+
+  it('sem aceite no corpo, não inventa um', async () => {
+    await montar(cenarioFantasma())
+    await cadastrar()
+    const arg = createUser.mock.calls[0]![0] as { app_metadata?: unknown }
+    expect(arg.app_metadata).toBeUndefined()
+  })
+})

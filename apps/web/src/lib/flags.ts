@@ -19,6 +19,7 @@ export const MOSTRAR_DEPENDENTES = false             // Shell: seletor de depend
 export const MOSTRAR_NOVIDADES = false               // Settings: card "receber novidades" (sem backend)
 export const MOSTRAR_ENVIAR_AO_MEDICO = false        // LaudoPage: botão "Enviar ao médico" (sem backend)
 export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compartilhar/2FA (sem backend)
+export const MOSTRAR_ACEITE_TERMOS = false           // Cadastro: aceite dos termos e opt-in (falta publicar os documentos; ver lib/termos)
 // MOSTRAR_LAUDO_ASSINATURA_MOCK e MOSTRAR_LAUDO_DADOS_INSTITUICAO saíram daqui:
 // o laudo foi refeito em folhas A4 (components/laudo/) e o novo documento não
 // tem nenhum campo de mockup para esconder. Assinatura do responsável técnico,
