@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { SettingsPage } from './SettingsPage'
 import { fusoAtual, salvarFuso } from '../lib/regiao'
+import { api, ApiError } from '../lib/api'
+import { aoAvisar } from '../lib/avisos'
+import type { Aviso } from '../lib/avisos'
+
+vi.mock('../lib/api', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../lib/api')>()
+  return { ...real, api: { del: vi.fn() } }
+})
+vi.mock('../lib/analytics', () => ({ track: vi.fn() }))
 
 const UA_CHROME_WINDOWS =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
@@ -10,8 +19,9 @@ const UA_SAFARI_IPHONE =
 
 function renderiza(dark = false) {
   const onSetDark = vi.fn()
-  render(<SettingsPage dark={dark} onSetDark={onSetDark} />)
-  return { onSetDark }
+  const onContaExcluida = vi.fn()
+  render(<SettingsPage dark={dark} onSetDark={onSetDark} onContaExcluida={onContaExcluida} />)
+  return { onSetDark, onContaExcluida }
 }
 
 const painel = (titulo: string) => screen.getByRole('region', { name: titulo })
@@ -75,7 +85,7 @@ describe('flags (desligadas)', () => {
     expect(privacidade.queryByText('Compartilhar com médicos')).toBeNull()
     expect(privacidade.queryByText('Verificação em duas etapas')).toBeNull()
     expect(privacidade.getByText('Excluir minha conta')).toBeTruthy()
-    expect(privacidade.getByText('Apaga todos os seus dados após 30 dias')).toBeTruthy()
+    expect(privacidade.getByText('Encerra o acesso e apaga seus documentos e contatos')).toBeTruthy()
     expect(privacidade.getByRole('button', { name: 'Solicitar' })).toBeTruthy()
   })
 })
@@ -124,5 +134,57 @@ describe('sem controles sem backend', () => {
     vi.stubGlobal('navigator', { userAgent: UA_SAFARI_IPHONE })
     renderiza()
     expect(screen.getByText('Safari · iOS')).toBeTruthy()
+  })
+})
+
+describe('excluir a conta', () => {
+  const del = vi.mocked(api.del)
+  afterEach(() => del.mockReset())
+
+  function avisos() {
+    const recebidos: Aviso[] = []
+    const cancela = aoAvisar((a) => recebidos.push(a))
+    return { recebidos, cancela }
+  }
+
+  it('"Solicitar" abre a confirmação, que diz o que é apagado e o que fica', () => {
+    renderiza()
+    fireEvent.click(screen.getByRole('button', { name: 'Solicitar' }))
+    const caixa = within(screen.getByRole('dialog', { name: 'Excluir sua conta?' }))
+    expect(caixa.getByText(/documentos que você enviou/)).toBeTruthy()
+    expect(caixa.getByText(/Laudos, agendamentos/)).toBeTruthy()
+    fireEvent.click(caixa.getByRole('button', { name: 'Manter conta' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('confirmar chama o DELETE e sai da conta', async () => {
+    del.mockResolvedValue(undefined)
+    const { onContaExcluida } = renderiza()
+    fireEvent.click(screen.getByRole('button', { name: 'Solicitar' }))
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Excluir conta' })))
+    expect(del).toHaveBeenCalledWith('/pacientes/me')
+    expect(onContaExcluida).toHaveBeenCalledOnce()
+  })
+
+  it('erro da API avisa e mantém a caixa aberta', async () => {
+    const { recebidos, cancela } = avisos()
+    del.mockRejectedValue(new ApiError(500, 'O servidor falhou. Tente de novo em instantes.'))
+    const { onContaExcluida } = renderiza()
+    fireEvent.click(screen.getByRole('button', { name: 'Solicitar' }))
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Excluir conta' })))
+    await waitFor(() => expect(recebidos[0]).toMatchObject({ tone: 'alert', message: 'O servidor falhou. Tente de novo em instantes.' }))
+    expect(screen.getByRole('dialog', { name: 'Excluir sua conta?' })).toBeTruthy()
+    expect(onContaExcluida).not.toHaveBeenCalled()
+    cancela()
+  })
+
+  it('429 pede para esperar um minuto', async () => {
+    const { recebidos, cancela } = avisos()
+    del.mockRejectedValue(new ApiError(429, 'x'))
+    renderiza()
+    fireEvent.click(screen.getByRole('button', { name: 'Solicitar' }))
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Excluir conta' })))
+    await waitFor(() => expect(recebidos[0]?.message).toBe('Muitas tentativas. Aguarde um minuto e tente de novo.'))
+    cancela()
   })
 })

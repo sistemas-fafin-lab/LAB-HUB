@@ -6,10 +6,13 @@ import { Btn, IconTile, Ico, PageHeader, Panel, PanelHead, Pill, SelectField } f
 import type { IconTileTone } from '../components/portal'
 import { MOSTRAR_NOVIDADES, MOSTRAR_PRIVACIDADE_EXTRAS } from '../lib/flags'
 import { FUSOS, IDIOMAS, UNIDADES, salvarFuso, useFuso } from '../lib/regiao'
+import { CaixaExcluirConta, SUBTITULO_EXCLUIR_CONTA } from '../components/configuracoes/ExcluirConta'
 
 interface SettingsPageProps {
   dark: boolean
   onSetDark: (dark: boolean) => void
+  /** Conta excluída na API: sai da sessão e leva à entrada. */
+  onContaExcluida: () => void | Promise<void>
 }
 
 // Preferências sem backend: só existem nos cartões atrás de flag e não saem
@@ -106,8 +109,9 @@ const TEMAS = [
   { escuro: true, rotulo: 'Escuro', page: '#0b1a33', card: '#1c3c6b' },
 ] as const
 
-export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
+export function SettingsPage({ dark, onSetDark, onContaExcluida }: SettingsPageProps) {
   const [pref, setPref] = useState<Prefs>(PREFS_INICIAIS)
+  const [excluirAberta, setExcluirAberta] = useState(false)
   const aparelho = aparelhoAtual()
   const fuso = useFuso()
 
@@ -157,9 +161,8 @@ export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
                   </Linha>
                 </>
               )}
-              {/* Como hoje: o botão ainda não chama a exclusão (DELETE /pacientes/me). */}
-              <Linha icon="trash-2" tone="coral" title="Excluir minha conta" sub="Apaga todos os seus dados após 30 dias">
-                <Btn variant="secondary" size="sm">
+              <Linha icon="trash-2" tone="coral" title="Excluir minha conta" sub={SUBTITULO_EXCLUIR_CONTA}>
+                <Btn variant="secondary" size="sm" onClick={() => setExcluirAberta(true)}>
                   Solicitar
                 </Btn>
               </Linha>
@@ -223,6 +226,7 @@ export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
           </Secao>
         </div>
       </div>
+      <CaixaExcluirConta aberta={excluirAberta} onFechar={() => setExcluirAberta(false)} onExcluida={onContaExcluida} />
     </div>
   )
 }
