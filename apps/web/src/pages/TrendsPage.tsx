@@ -1,9 +1,8 @@
 import { useId, useMemo } from 'react'
-import type { IconName } from '../ds'
 import { Btn, EmptyState, FalhaAoCarregar, PageHeader, Panel, Pill, Skel, TrendLine } from '../components/portal'
 import type { Exam } from '../lib/exame'
-import { resumoDasTendencias, tendenciasDosExames } from '../lib/tendencias'
-import type { Direcao, Tendencia } from '../lib/tendencias'
+import { ICONE_DA_DIRECAO, resumoDasTendencias, tendenciasDosExames } from '../lib/tendencias'
+import type { Tendencia } from '../lib/tendencias'
 import { atualizaResultados, useResultados } from '../lib/useResultados'
 
 // Tendências montadas dos resultados reais do paciente (lib/tendencias): um
@@ -12,12 +11,6 @@ import { atualizaResultados, useResultados } from '../lib/useResultados'
 interface TrendsPageProps {
   onOpenExam: (exam: Exam) => void
   onVerResultados: () => void
-}
-
-const ICONE_DA_DIRECAO: Record<Direcao, IconName> = {
-  up: 'trending-up',
-  down: 'trending-down',
-  flat: 'minus',
 }
 
 function CartaoDoMarcador({ tendencia: t, onVerExame }: { tendencia: Tendencia; onVerExame: () => void }) {
@@ -41,8 +34,8 @@ function CartaoDoMarcador({ tendencia: t, onVerExame }: { tendencia: Tendencia; 
         </div>
         <TrendLine data={t.serie} out={t.foraDaReferencia} />
         <div className="flex justify-between text-[11px] text-muted mt-1.5 tabular-nums">
-          <span>Primeira coleta</span>
-          <span>Última</span>
+          <span>{t.eixo.inicio}</span>
+          <span>{t.eixo.fim}</span>
         </div>
         <div className="rounded-[12px] bg-subtle p-3 mt-4">
           <p className="text-[13px] leading-relaxed">{t.nota}</p>

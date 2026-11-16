@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { focaveis } from '../../ds/teclado'
-import { useContagemResultados } from '../../lib/useResultados'
+import { useContagemColetasAtivas } from '../../lib/useAgendamentos'
+import { useExamesNovos } from '../../lib/vistos'
 import { Ico, IconBtn } from '../portal'
 import { Logo } from './Logo'
 import { secoesVisiveis } from './menu'
@@ -11,9 +12,15 @@ import type { ItemMenu } from './menu'
  * intercepta o clique, e Ctrl/⌘+clique abre a tela noutra aba.
  */
 export function NavLista({ ativo }: { ativo: ItemMenu | null }) {
-  // Total real de exames (FlowLab + LIS), como no menu antigo; null enquanto
-  // nenhuma busca concluiu — aí o contador não aparece.
-  const contagemResultados = useContagemResultados()
+  // Resultados: exames liberados ainda não abertos. Minhas coletas: coletas em
+  // andamento. Com 0 (ou antes da primeira busca) o contador não aparece.
+  const novos = useExamesNovos().size
+  const coletasAtivas = useContagemColetasAtivas()
+  const contador = (id: ItemMenu): { n: number; leitura: string } | null => {
+    if (id === 'results' && novos > 0) return { n: novos, leitura: `${novos} ${novos === 1 ? 'novo' : 'novos'}` }
+    if (id === 'coletas' && coletasAtivas) return { n: coletasAtivas, leitura: `${coletasAtivas} em andamento` }
+    return null
+  }
   return (
     <nav className="flex flex-col gap-5" aria-label="Navegação principal">
       {secoesVisiveis().map((s) => (
@@ -22,7 +29,7 @@ export function NavLista({ ativo }: { ativo: ItemMenu | null }) {
           <div className="flex flex-col gap-0.5">
             {s.items.map((it) => {
               const on = ativo === it.id
-              const n = it.id === 'results' ? contagemResultados : null
+              const c = contador(it.id)
               return (
                 <a
                   key={it.id}
@@ -33,12 +40,12 @@ export function NavLista({ ativo }: { ativo: ItemMenu | null }) {
                   <Ico name={it.icon} size={18} />
                   <span className="flex-1 text-left">
                     {it.label}
-                    {n !== null && (
+                    {c !== null && (
                       <>
                         <span className="lh-supc" aria-hidden="true">
-                          {n}
+                          {c.n}
                         </span>
-                        <span className="sr-only">, {n} exames</span>
+                        <span className="sr-only">, {c.leitura}</span>
                       </>
                     )}
                     {on && <span className="lh-dot" />}

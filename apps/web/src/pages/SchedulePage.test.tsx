@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Exam } from '../lib/exame'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Agendamento, PostoDisponivel } from '@lab-hub/shared'
 import { SchedulePage } from './SchedulePage'
@@ -14,6 +15,9 @@ vi.mock('../lib/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), documentoUrl: vi.fn() },
 }))
 vi.mock('../lib/analytics', () => ({ track: vi.fn() }))
+// Só o "Ver resultados" do detalhe lê os exames; a tela não precisa da rede.
+const resultados = { exams: [] as Exam[], loading: false, error: null }
+vi.mock('../lib/useResultados', () => ({ useResultados: () => resultados }))
 const documentos = {
   documentos: [] as unknown[],
   loading: false,
@@ -28,6 +32,8 @@ const useDocumentos = vi.fn((_id?: string) => documentos)
 vi.mock('../lib/useDocumentos', () => ({ useDocumentos: (id?: string) => useDocumentos(id) }))
 
 const get = vi.mocked(api.get)
+const { descartarAgendamentos } = await import('../lib/useAgendamentos')
+const { descartarPostos } = await import('../lib/usePostos')
 const post = vi.mocked(api.post)
 
 const DIA = 86_400_000
@@ -60,6 +66,10 @@ let lista: Agendamento[]
 let postos: PostoDisponivel[]
 
 beforeEach(() => {
+  // Agendamentos e postos vivem em cache de módulo: cada caso começa do zero.
+  descartarAgendamentos()
+  descartarPostos()
+  resultados.exams = []
   lista = []
   postos = [posto()]
   Object.assign(documentos, { documentos: [], loading: false, error: null, enviando: false })
@@ -120,6 +130,29 @@ describe('Minhas coletas', () => {
     expect(within(proxima).getByText(`Jejum de ${JEJUM_LABEL}`)).toBeTruthy()
     fireEvent.click(within(proxima).getByRole('button', { name: 'Ver detalhes' }))
     expect(props.onAbrirColeta).toHaveBeenCalledWith('perto')
+  })
+
+  it('a próxima coleta mostra o endereço e "Como chegar" no Google Maps, em outra aba', async () => {
+    lista = [ag({ id: 'perto', dataHora: emDias(2) })]
+    naLista()
+    const proxima = await screen.findByRole('region', { name: 'Próxima coleta' })
+    expect(await within(proxima).findByText('SGAS 915')).toBeTruthy()
+    const link = within(proxima).getByRole('link', { name: /Como chegar/ })
+    expect(link.getAttribute('href')).toBe(
+      'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('Unidade Asa Sul, SGAS 915'),
+    )
+    expect(link.getAttribute('target')).toBe('_blank')
+  })
+
+  it('a disponibilidade é buscada uma vez para a lista e o detalhe', async () => {
+    lista = [ag({ id: 'perto', dataHora: emDias(2) })]
+    const { unmount } = naLista()
+    await screen.findByText('SGAS 915')
+    unmount()
+    noDetalhe('perto')
+    await screen.findAllByText('SGAS 915')
+    // A segunda montagem revalida em silêncio, sem esconder o endereço.
+    expect(get.mock.calls.filter(([url]) => url === '/postos/disponibilidade').length).toBeLessThanOrEqual(2)
   })
 
   it('separa em andamento e histórico, com a contagem de cada um', async () => {
@@ -309,8 +342,8 @@ describe('Agendar coleta', () => {
     postos = [posto(), posto({ id: 'posto-2', nome: 'Unidade Norte', endereco: 'W3 Norte' })]
     noAgendar()
     expect(screen.getAllByRole('status', { name: 'Carregando' }).length).toBeGreaterThan(0)
-    const primeira = await screen.findByRole('button', { name: /Unidade Asa Sul/ })
-    expect(primeira.getAttribute('aria-pressed')).toBe('true')
+    const primeira = await screen.findByRole('radio', { name: /Unidade Asa Sul/ })
+    expect(primeira.getAttribute('aria-checked')).toBe('true')
     expect(screen.getByText('W3 Norte')).toBeTruthy()
     expect(get).toHaveBeenCalledWith('/postos/disponibilidade')
   })
@@ -318,7 +351,7 @@ describe('Agendar coleta', () => {
   it('trocar de unidade mostra os horários dela', async () => {
     postos = [posto({ slots: [emDias(2, 8)] }), posto({ id: 'posto-2', nome: 'Unidade Norte', slots: [emDias(2, 15)] })]
     noAgendar()
-    fireEvent.click(await screen.findByRole('button', { name: /Unidade Norte/ }))
+    fireEvent.click(await screen.findByRole('radio', { name: /Unidade Norte/ }))
     expect(horario(/^15:00$/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^08:00$/ })).toBeNull()
   })
@@ -328,6 +361,9 @@ describe('Agendar coleta', () => {
     post.mockResolvedValue(ag({ id: 'novo' }) as never)
     noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    // Escolher o horário só seleciona: a confirmação abre pelo resumo.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
     expect(post).not.toHaveBeenCalled()
 
     const caixa = screen.getByRole('dialog', { name: 'Confirmar agendamento' })
@@ -347,18 +383,25 @@ describe('Agendar coleta', () => {
     post.mockResolvedValue(ag({ id: 'novo' }) as never)
     const { rerender } = noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
     get.mockImplementation(() => new Promise(() => {}))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar coleta' }))
     await waitFor(() => expect(props.onAbrirColeta).toHaveBeenCalledWith('novo'))
 
     rerender(<SchedulePage {...props} aba="minhas" selectedId="novo" />)
     expect(screen.getByRole('heading', { level: 1, name: 'Coleta agendada' })).toBeTruthy()
+    // A confirmação aparece só nesta abertura e some ao sair da coleta.
+    expect(screen.getByRole('heading', { level: 2, name: 'Agendamento confirmado' })).toBeTruthy()
+    rerender(<SchedulePage {...props} aba="minhas" selectedId={null} />)
+    rerender(<SchedulePage {...props} aba="minhas" selectedId="novo" />)
+    expect(screen.queryByRole('heading', { level: 2, name: 'Agendamento confirmado' })).toBeNull()
   })
 
   it('cancelar a confirmação não agenda', async () => {
     noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancelar' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(post).not.toHaveBeenCalled()
   })
@@ -367,6 +410,7 @@ describe('Agendar coleta', () => {
     post.mockImplementation(() => new Promise(() => {}))
     noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar coleta' }))
     expect(await screen.findByRole('button', { name: 'Agendando…' })).toBeTruthy()
     fireEvent.keyDown(window, { key: 'Escape' })
@@ -377,10 +421,53 @@ describe('Agendar coleta', () => {
     post.mockRejectedValue(new Error('Horário indisponível'))
     noAgendar()
     fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar coleta' }))
     expect((await screen.findByRole('alert')).textContent).toContain('Horário indisponível')
     expect(track).toHaveBeenCalledWith('agendamento_erro', { motivo: 'Horário indisponível' })
     expect(props.onAbrirColeta).not.toHaveBeenCalled()
+  })
+
+  it('etapas: com a unidade escolhida está em 02; com o horário, em 03', async () => {
+    noAgendar()
+    await screen.findByRole('button', { name: /^08:00$/ })
+    const etapas = screen.getByRole('list', { name: 'Etapas do agendamento' })
+    const atual = () => etapas.querySelector('[aria-current="step"]')?.textContent
+    expect(atual()).toBe('02Data e horário')
+    fireEvent.click(screen.getByRole('button', { name: /^08:00$/ }))
+    expect(atual()).toBe('03Confirmação')
+  })
+
+  it('resumo: sem horário o botão de confirmar fica desligado; com horário, mostra a data', async () => {
+    noAgendar()
+    await screen.findByRole('button', { name: /^08:00$/ })
+    const confirmar = screen.getByRole('button', { name: 'Confirmar agendamento' }) as HTMLButtonElement
+    expect(confirmar.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /^08:00$/ }))
+    expect(confirmar.disabled).toBe(false)
+    expect(screen.getByText(/às 08:00$/)).toBeTruthy()
+  })
+
+  it('?posto= pré-seleciona a unidade', async () => {
+    postos = [posto(), posto({ id: 'posto-2', nome: 'Unidade Norte' })]
+    render(<SchedulePage {...props} aba="agendar" selectedId={null} postoInicial="posto-2" />)
+    const norte = await screen.findByRole('radio', { name: /Unidade Norte/ })
+    expect(norte.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('trocar de unidade descarta o horário escolhido', async () => {
+    postos = [posto({ slots: [emDias(2, 8)] }), posto({ id: 'posto-2', nome: 'Unidade Norte', slots: [emDias(2, 15)] })]
+    noAgendar()
+    fireEvent.click(await screen.findByRole('button', { name: /^08:00$/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /Unidade Norte/ }))
+    expect((screen.getByRole('button', { name: 'Confirmar agendamento' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('Cancelar do resumo volta para Minhas coletas', async () => {
+    noAgendar()
+    await screen.findByRole('button', { name: /^08:00$/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(props.onAba).toHaveBeenCalledWith('minhas')
   })
 
   it('horários indisponíveis ficam marcados e não abrem a confirmação', async () => {
@@ -445,7 +532,8 @@ describe('Agendar coleta', () => {
   it('preparo com os textos atuais', async () => {
     noAgendar()
     await screen.findByRole('button', { name: /^08:00$/ })
-    expect(screen.getByText(`Jejum de ${JEJUM_LABEL}`)).toBeTruthy()
+    // No resumo e no cartão de preparo.
+    expect(screen.getAllByText(`Jejum de ${JEJUM_LABEL}`)).toHaveLength(2)
     for (const regra of REGRAS_GERAIS) expect(screen.getByText(regra.texto)).toBeTruthy()
     expect(screen.getByText(RESSALVA_PREPARO)).toBeTruthy()
   })
@@ -507,6 +595,44 @@ describe('detalhe da coleta', () => {
     noDetalhe()
     expect(await screen.findByText('API fora do ar')).toBeTruthy()
     expect(screen.queryByText('Coleta não encontrada')).toBeNull()
+  })
+
+  it('coleta marcada: "Adicionar ao calendário" baixa o .ics e avisa', async () => {
+    const criar = vi.fn(() => 'blob:x')
+    Object.assign(URL, { createObjectURL: criar, revokeObjectURL: vi.fn() })
+    const { recebidos, cancela } = avisos()
+    lista = [ag({ dataHora: '2026-12-02T10:30:00.000Z' })]
+    noDetalhe()
+    fireEvent.click(await screen.findByRole('button', { name: 'Adicionar ao calendário' }))
+    expect(criar).toHaveBeenCalledOnce()
+    expect(recebidos[0]).toMatchObject({ title: 'Evento criado', message: 'coleta-2026-12-02.ics' })
+    cancela()
+  })
+
+  it('coleta cancelada: "Agendar novamente" na mesma unidade, sem calendário', async () => {
+    const onAgendarNoPosto = vi.fn()
+    lista = [ag({ status: 'cancelado' })]
+    render(<SchedulePage {...props} aba="minhas" selectedId="ag-1" onAgendarNoPosto={onAgendarNoPosto} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Agendar novamente' }))
+    expect(onAgendarNoPosto).toHaveBeenCalledWith('posto-1')
+    expect(screen.queryByRole('button', { name: 'Adicionar ao calendário' })).toBeNull()
+  })
+
+  it('com o resultado liberado desta coleta: "Ver resultados" abre o exame', async () => {
+    const onAbrirExame = vi.fn()
+    resultados.exams = [{ id: 'ex-1', agendamentoId: 'ag-1', status: 'ready' } as Exam]
+    lista = [ag({ status: 'realizado', dataHora: emDias(-2) })]
+    render(<SchedulePage {...props} aba="minhas" selectedId="ag-1" onAbrirExame={onAbrirExame} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver resultados' }))
+    expect(onAbrirExame).toHaveBeenCalledWith('ex-1')
+  })
+
+  it('cartão Local: endereço e "Como chegar"; sem endereço, procura pelo nome do laboratório', async () => {
+    lista = [ag()]
+    postos = []
+    noDetalhe()
+    const link = await screen.findByRole('link', { name: /Como chegar/ })
+    expect(link.getAttribute('href')).toContain(encodeURIComponent('LAB Medicina Diagnóstica Unidade Asa Sul'))
   })
 
   it('mostra a unidade, as etapas com rótulo e volta para a lista', async () => {
@@ -667,6 +793,7 @@ describe('detalhe da coleta', () => {
     lista = [ag()]
     noDetalhe()
     await screen.findByRole('heading', { name: 'Linha do tempo' })
-    expect(screen.queryByText(/push|e-mail|SMS|Remarcar|calendário|Como chegar/i)).toBeNull()
+    // "Como chegar" e "Adicionar ao calendário" existem (PV2-13 e 14); remarcar não tem endpoint.
+    expect(screen.queryByText(/push|e-mail|SMS|Remarcar/i)).toBeNull()
   })
 })

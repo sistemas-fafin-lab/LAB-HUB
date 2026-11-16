@@ -75,6 +75,7 @@ export function resultadoToExam(r: Resultado): Exam {
     // A API manda o id da versão que substituiu esta; a tela só precisa saber
     // que ela foi substituída.
     ...(r.retificadoPor ? { retificado: true } : {}),
+    ...(r.agendamentoId ? { agendamentoId: r.agendamentoId } : {}),
     origem: 'flowlab',
   }
 }

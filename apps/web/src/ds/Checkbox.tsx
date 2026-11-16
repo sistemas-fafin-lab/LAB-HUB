@@ -1,10 +1,11 @@
-import { useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useId, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Icon } from './Icon'
 import { ativarComTeclado } from './teclado'
 
 export interface CheckboxProps {
-  label?: string
+  /** Texto ou conteúdo rico (com links). Link dentro do rótulo não marca a caixa. */
+  label?: ReactNode
   description?: string
   checked?: boolean
   defaultChecked?: boolean
@@ -14,6 +15,8 @@ export interface CheckboxProps {
 }
 
 export function Checkbox({ label, checked, defaultChecked = false, onChange, disabled = false, description, style }: CheckboxProps) {
+  const idRotulo = useId()
+  const rotuloEmTexto = typeof label === 'string'
   const [interno, setInterno] = useState(defaultChecked)
   const ligado = checked ?? interno
   const alternar = () => {
@@ -24,6 +27,8 @@ export function Checkbox({ label, checked, defaultChecked = false, onChange, dis
   return (
     <label
       onClick={(e) => {
+        // O link do rótulo abre o documento; não marca a caixa.
+        if (e.target instanceof Element && e.target.closest('a')) return
         e.preventDefault()
         alternar()
       }}
@@ -41,7 +46,7 @@ export function Checkbox({ label, checked, defaultChecked = false, onChange, dis
         role="checkbox"
         aria-checked={ligado}
         aria-disabled={disabled || undefined}
-        aria-label={label}
+        {...(rotuloEmTexto ? { 'aria-label': label } : label ? { 'aria-labelledby': idRotulo } : {})}
         tabIndex={disabled ? -1 : 0}
         onKeyDown={ativarComTeclado(alternar, [' '])}
         style={{
@@ -61,7 +66,11 @@ export function Checkbox({ label, checked, defaultChecked = false, onChange, dis
       </span>
       {(label || description) && (
         <span style={{ display: 'grid', gap: 2 }}>
-          {label && <span style={{ font: 'var(--type-body)', lineHeight: 1.4 }}>{label}</span>}
+          {label && (
+            <span id={idRotulo} style={{ font: 'var(--type-body)', lineHeight: 1.4 }}>
+              {label}
+            </span>
+          )}
           {description && <span style={{ font: 'var(--type-body-sm)', color: 'var(--text-muted)' }}>{description}</span>}
         </span>
       )}

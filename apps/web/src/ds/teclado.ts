@@ -12,6 +12,21 @@ export function ativarComTeclado(acao: () => void, teclas: readonly string[] = [
   }
 }
 
+const PROXIMA: Record<string, 1 | -1> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }
+
+/**
+ * Setas num grupo de rádio: marcam a opção vizinha (com volta) e levam o foco
+ * até ela. Devolve o índice escolhido, ou null quando a tecla não é seta.
+ */
+export function navegarNoGrupoDeRadio(e: KeyboardEvent<HTMLElement>, atual: number, total: number): number | null {
+  const delta = PROXIMA[e.key]
+  if (delta === undefined || total === 0) return null
+  e.preventDefault()
+  const alvo = (atual + delta + total) % total
+  e.currentTarget.closest('[role=radiogroup]')?.querySelectorAll<HTMLElement>('[role=radio]')[alvo]?.focus()
+  return alvo
+}
+
 const SELETOR_FOCAVEL = [
   'a[href]',
   'button:not([disabled])',

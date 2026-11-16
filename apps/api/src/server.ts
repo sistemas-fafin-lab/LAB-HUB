@@ -23,6 +23,7 @@ import { documentosRoutes } from './routes/documentos.js'
 import { integracaoRoutes } from './routes/integracao.js'
 import { webhooksRoutes } from './routes/webhooks.js'
 import { adminRoutes } from './routes/admin.js'
+import { doisFatoresRoutes } from './routes/doisFatores.js'
 
 // Chave da criptografia de coluna (S-06). Antes de abrir a porta, não na
 // primeira gravação de laudo: em produção a falta da chave derruba o boot, e é
@@ -92,6 +93,7 @@ server.register(documentosRoutes, { prefix: '/api/v1' })
 server.register(integracaoRoutes, { prefix: '/api/v1' })
 server.register(webhooksRoutes, { prefix: '/api/v1' })
 server.register(adminRoutes, { prefix: '/api/v1' })
+server.register(doisFatoresRoutes, { prefix: '/api/v1' })
 
 server.get('/ping', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 

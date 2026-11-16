@@ -32,6 +32,12 @@ vi.mock('../../lib/useResultados', () => ({
 }))
 
 const track = vi.fn()
+// A busca procura também nas coletas.
+const coletas = { agendamentos: [] as import('@lab-hub/shared').Agendamento[] }
+vi.mock('../../lib/useAgendamentos', () => ({
+  useAgendamentos: () => ({ agendamentos: coletas.agendamentos, loading: false, error: null, reload: () => {}, setStatus: () => {} }),
+  useContagemColetasAtivas: () => null,
+}))
 vi.mock('../../lib/analytics', () => ({ track: (...a: unknown[]) => track(...a) }))
 
 const { Shell } = await import('./Shell')
@@ -172,13 +178,13 @@ describe('busca', () => {
     ]
     const { onOpenExam } = monta()
     fireEvent.change(busca(), { target: { value: 'hemacias' } })
-    const lista = screen.getByRole('listbox')
-    expect(within(lista).getByRole('option', { name: /Marcador · Hemácias/ })).toBeTruthy()
+    const marcadores = within(screen.getByRole('group', { name: 'Marcadores' }))
+    expect(marcadores.getByRole('option', { name: /Hemácias.*4,8 milhões\/mm³ · Hemograma completo/ })).toBeTruthy()
 
     fireEvent.keyDown(busca(), { key: 'Enter' })
     expect(onOpenExam).toHaveBeenCalledWith(resultados.exams[0])
     // Só o tipo: o termo digitado é dado de saúde e nunca vai para o analytics.
-    expect(track).toHaveBeenCalledWith('busca_resultado_clique', { tipo: 'exam' })
+    expect(track).toHaveBeenCalledWith('busca_resultado_clique', { tipo: 'marcador' })
   })
 
   it('acha exame pelo médico', () => {
@@ -187,18 +193,62 @@ describe('busca', () => {
     expect(screen.getByRole('option', { name: /Hemograma completo/ })).toBeTruthy()
   })
 
-  it('sem termo lista as páginas do menu, sem as ocultas por flag', () => {
+  it('sem termo mostra os atalhos, com subtítulo, e os exames recentes', () => {
     monta()
     fireEvent.focus(busca())
-    const paginas = within(screen.getByRole('group', { name: 'Ir para' }))
-    expect(paginas.getByRole('option', { name: 'Documentos' })).toBeTruthy()
-    expect(paginas.queryByRole('option', { name: 'Faturamento' })).toBeNull()
+    const atalhos = within(screen.getByRole('group', { name: 'Atalhos' }))
+    expect(atalhos.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Agendar coletaEscolha unidade, dia e horário',
+      'Minhas coletasAcompanhe cada etapa',
+      'ResultadosTodos os exames',
+    ])
+    const recentes = within(screen.getByRole('group', { name: 'Exames recentes' }))
+    expect(recentes.getByRole('option', { name: /Hemograma completo/ })).toBeTruthy()
+  })
+
+  it('o exame mostra a situação no subtítulo, sem pílula', () => {
+    monta()
+    fireEvent.change(busca(), { target: { value: 'hemograma' } })
+    const opcao = screen.getByRole('option', { name: /Hemograma completo/ })
+    expect(opcao.textContent).toMatch(/· (Liberado|Em análise)$/)
+  })
+
+  it('acha a coleta pela unidade e abre o detalhe dela', () => {
+    coletas.agendamentos = [
+      {
+        id: 'ag-7',
+        pacienteId: 'p',
+        postoFlowlabId: 'posto-1',
+        postoNome: 'Unidade Asa Norte',
+        dataHora: '2026-12-02T10:30:00.000Z',
+        status: 'confirmado',
+        criadoEm: '2026-11-01T10:00:00Z',
+      } as import('@lab-hub/shared').Agendamento,
+    ]
+    monta()
+    fireEvent.change(busca(), { target: { value: 'asa norte' } })
+    const grupo = within(screen.getByRole('group', { name: 'Coletas' }))
+    fireEvent.click(grupo.getByRole('option', { name: /Unidade Asa Norte.*Confirmado/ }))
+    expect(caminho()).toBe('/coleta/ag-7')
+    coletas.agendamentos = []
+  })
+
+  it('acha a página pelas palavras-chave', () => {
+    monta()
+    fireEvent.change(busca(), { target: { value: 'carteirinha' } })
+    expect(within(screen.getByRole('group', { name: 'Páginas' })).getByRole('option', { name: /^Documentos/ })).toBeTruthy()
+  })
+
+  it('a busca de páginas não traz as ocultas por flag', () => {
+    monta()
+    fireEvent.change(busca(), { target: { value: 'fatura' } })
+    expect(screen.queryByRole('option', { name: /Faturamento/ })).toBeNull()
   })
 
   it('escolher uma página navega para ela', () => {
     monta()
     fireEvent.change(busca(), { target: { value: 'docum' } })
-    fireEvent.click(screen.getByRole('option', { name: 'Documentos' }))
+    fireEvent.click(screen.getByRole('option', { name: /^Documentos/ }))
     expect(caminho()).toBe('/documentos')
     expect(track).toHaveBeenCalledWith('busca_resultado_clique', { tipo: 'page' })
   })
@@ -208,7 +258,7 @@ describe('busca', () => {
     fireEvent.focus(busca())
     fireEvent.keyDown(busca(), { key: 'ArrowDown' })
     fireEvent.keyDown(busca(), { key: 'Enter' })
-    expect(caminho()).toBe('/resultados') // 2ª página: Visão geral → Resultados
+    expect(caminho()).toBe('/coletas') // 2º atalho: Agendar coleta → Minhas coletas
   })
 
   it('termo sem resultado avisa', () => {

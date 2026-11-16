@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
 import type { Agendamento, AgendamentoStatus } from '@lab-hub/shared'
 import { api } from './api'
+import { criarCacheDeModulo } from './cacheDeModulo'
+import { coletasEmAndamento } from './coletas'
 
 interface UseAgendamentos {
   agendamentos: Agendamento[]
@@ -11,39 +12,27 @@ interface UseAgendamentos {
   setStatus: (id: string, status: AgendamentoStatus) => void
 }
 
-// Busca os agendamentos do paciente autenticado (GET /agendamentos).
+// GET /agendamentos num cache de módulo: Visão geral, Minhas coletas, o detalhe
+// da coleta e o contador do menu dividem a mesma lista e a mesma requisição.
+const cache = criarCacheDeModulo<Agendamento[]>({
+  buscar: () => api.get<Agendamento[]>('/agendamentos'),
+  vazio: [],
+  erroPadrao: 'Erro ao carregar agendamentos',
+})
+
+const reload = () => void cache.recarregar()
+const setStatus = (id: string, status: AgendamentoStatus) =>
+  cache.alterar((lista) => lista.map((a) => (a.id === id ? { ...a, status } : a)))
+
 export function useAgendamentos(): UseAgendamentos {
-  const [agendamentos, setAgendamentos] = useState<Agendamento[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [nonce, setNonce] = useState(0)
-
-  const reload = useCallback(() => setNonce((n) => n + 1), [])
-
-  const setStatus = useCallback((id: string, status: AgendamentoStatus) => {
-    setAgendamentos((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)))
-  }, [])
-
-  useEffect(() => {
-    let alive = true
-    setLoading(true)
-    api
-      .get<Agendamento[]>('/agendamentos')
-      .then((data) => {
-        if (!alive) return
-        setAgendamentos(data)
-        setError(null)
-      })
-      .catch((e: unknown) => {
-        if (alive) setError(e instanceof Error ? e.message : 'Erro ao carregar agendamentos')
-      })
-      .finally(() => {
-        if (alive) setLoading(false)
-      })
-    return () => {
-      alive = false
-    }
-  }, [nonce])
-
-  return { agendamentos, loading, error, reload, setStatus }
+  const { dado, loading, error } = cache.useEstado()
+  return { agendamentos: dado, loading, error, reload, setStatus }
 }
+
+/** Coletas em andamento, para o menu; null antes da primeira busca. */
+export function useContagemColetasAtivas(): number | null {
+  return cache.useDerivado((e) => (e.carregado ? coletasEmAndamento(e.dado).length : null))
+}
+
+/** Só para testes: zera o cache entre um caso e outro. */
+export const descartarAgendamentos = () => cache.descartar()

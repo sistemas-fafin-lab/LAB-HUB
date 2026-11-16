@@ -6,7 +6,6 @@ import { aoExpirarSessao } from '../../lib/sessao'
 import { useOnline } from '../../lib/useConexao'
 import { Btn, Ico, Modal } from '../portal'
 import type { Exam } from '../../lib/exame'
-import { Avisos } from './Avisos'
 import { Cabecalho } from './Cabecalho'
 import { Gaveta, NavLista } from './Navegacao'
 import { Suporte } from './Suporte'
@@ -110,7 +109,6 @@ export function Shell({
       {/* Chatbot "Lia" — oculto por flag; sem backend de suporte ainda. */}
       {MOSTRAR_CHATBOT && <Suporte primeiroNome={primeiroNome(nome)} />}
       <Gaveta aberta={gaveta} onFechar={fechaGaveta} ativo={ativo} dark={dark} />
-      <Avisos />
       <Modal
         open={sessaoExpirou}
         // Fechar (Esc, fundo, X) também leva ao login: com o token recusado, ficar

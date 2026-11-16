@@ -5,11 +5,11 @@
 // PRESERVADO no lugar; aqui apenas controlamos a exibição. Troque para `true`
 // quando o backend correspondente existir para reexibir a parte.
 //
-// (Hero e Exames recentes usam dado real da API e estão ligados; as demais
-//  flags da HomePage escondem mocks.)
+// (Hero, Acompanhamento e Exames recentes usam dado real da API e estão
+//  ligados; as demais flags da HomePage escondem mocks.)
 // ---------------------------------------------------------------------------
 
-export const MOSTRAR_ACOMPANHAMENTO = false          // HomePage: card de marcadores
+export const MOSTRAR_ACOMPANHAMENTO = true           // HomePage: marcadores a acompanhar (lib/tendencias + último exame liberado; ver lib/acompanhamento)
 export const MOSTRAR_PROXIMOS_PASSOS_EXTRAS = false  // HomePage: compartilhar/baixar laudos
 export const MOSTRAR_RESULTADO_HERO = true           // HomePage: card "Seu último exame"
 export const MOSTRAR_EXAMES_RECENTES = true          // HomePage: lista "Exames recentes"
@@ -19,6 +19,7 @@ export const MOSTRAR_DEPENDENTES = false             // Shell: seletor de depend
 export const MOSTRAR_NOVIDADES = false               // Settings: card "receber novidades" (sem backend)
 export const MOSTRAR_ENVIAR_AO_MEDICO = false        // LaudoPage: botão "Enviar ao médico" (sem backend)
 export const MOSTRAR_PRIVACIDADE_EXTRAS = false      // Settings: toggles compartilhar/2FA (sem backend)
+export const MOSTRAR_ACEITE_TERMOS = false           // Cadastro: aceite dos termos e opt-in (falta publicar os documentos; ver lib/termos)
 // MOSTRAR_LAUDO_ASSINATURA_MOCK e MOSTRAR_LAUDO_DADOS_INSTITUICAO saíram daqui:
 // o laudo foi refeito em folhas A4 (components/laudo/) e o novo documento não
 // tem nenhum campo de mockup para esconder. Assinatura do responsável técnico,

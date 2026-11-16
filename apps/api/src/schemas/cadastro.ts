@@ -24,6 +24,14 @@ export const cadastroSchema = z.object({
   sexo: z.enum(['M', 'F']),
   dataNascimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida (use YYYY-MM-DD)'),
   telefone: z.string().optional(),
+  // Aceite dos Termos de uso e da Política de privacidade, e o opt-in de avisos
+  // de resultado. A data e a hora do aceite são do servidor, não do aparelho.
+  aceite: z
+    .object({
+      termosVersao: z.string().min(1).max(40),
+      avisos: z.boolean(),
+    })
+    .optional(),
 })
 
 export type CadastroInput = z.infer<typeof cadastroSchema>

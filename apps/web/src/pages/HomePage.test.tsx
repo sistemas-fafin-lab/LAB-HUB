@@ -59,6 +59,8 @@ const acoes = {
   onAgendar: vi.fn(),
   onVerColetas: vi.fn(),
   onVerResultados: vi.fn(),
+  onGuardarDocumento: vi.fn(),
+  onVerTendencias: vi.fn(),
 }
 
 function exame(over: Partial<Exam> = {}): Exam {
@@ -149,10 +151,32 @@ describe('próximos passos', () => {
     ]
     abrir()
     expect(passos().getByText('Preparo para a próxima coleta')).toBeTruthy()
-    expect(passos().getByText(/Unidade Antes/)).toBeTruthy()
+    // No lugar da unidade, o preparo: o passo é sobre se preparar para a coleta.
+    expect(passos().getByText(/Jejum de 8 a 12 horas/)).toBeTruthy()
     expect(passos().queryByText('Agendar nova coleta')).toBeNull()
     fireEvent.click(passos().getByRole('button', { name: 'Ver' }))
     expect(acoes.onOpenColeta).toHaveBeenCalledWith('antes')
+  })
+
+  it('ordem: pendência, coleta e documento, no máximo 3', () => {
+    coletas.agendamentos = [coleta({ id: 'pend', status: 'bloqueado', postoNome: 'Unidade Pendência' })]
+    abrir()
+    const titulos = passos()
+      .getAllByText(/^(Resolver pendência na recepção|Preparo para a próxima coleta|Agendar nova coleta|Guardar um documento)$/)
+      .map((el) => el.textContent)
+    expect(titulos[0]).toBe('Resolver pendência na recepção')
+    expect(titulos[titulos.length - 1]).toBe('Guardar um documento')
+    expect(titulos.length).toBeLessThanOrEqual(3)
+    expect(passos().getByText('Unidade Pendência · verifique identidade, guia e pedido médico')).toBeTruthy()
+  })
+
+  it('"Resolver pendência" abre a coleta; "Enviar" abre o envio de documentos', () => {
+    coletas.agendamentos = [coleta({ id: 'pend', status: 'bloqueado' })]
+    abrir()
+    fireEvent.click(passos().getAllByRole('button', { name: 'Ver' })[0]!)
+    expect(acoes.onOpenColeta).toHaveBeenCalledWith('pend')
+    fireEvent.click(passos().getByRole('button', { name: 'Enviar' }))
+    expect(acoes.onGuardarDocumento).toHaveBeenCalledOnce()
   })
 
   it('não diz para agendar enquanto as coletas carregam', () => {
@@ -186,12 +210,20 @@ describe('em andamento', () => {
   it.each([
     ['pendente', 'Pendente', '1 de 5'],
     ['confirmado', 'Confirmado', '1 de 5'],
-    ['bloqueado', 'Pendência', '2 de 5'],
   ] as const)('coleta %s aparece como "%s", na etapa %s', (status, rotulo, etapa) => {
     coletas.agendamentos = [coleta({ status })]
     abrir()
     expect(bloco().getByText(new RegExp(rotulo))).toBeTruthy()
     expect(bloco().getByText(etapa)).toBeTruthy()
+  })
+
+  it('coleta com pendência mostra a ação "Ver" no lugar da etapa', () => {
+    coletas.agendamentos = [coleta({ id: 'p-1', status: 'bloqueado' })]
+    abrir()
+    expect(bloco().getByText(/Pendência/)).toBeTruthy()
+    expect(bloco().queryByText('2 de 5')).toBeNull()
+    fireEvent.click(bloco().getByRole('button', { name: 'Ver' }))
+    expect(acoes.onOpenColeta).toHaveBeenCalledWith('p-1')
   })
 
   it('não conta como em andamento a coleta realizada, a cancelada nem a que passou da hora sem check-in', () => {
@@ -383,16 +415,35 @@ describe('destaque do último exame (MOSTRAR_RESULTADO_HERO)', () => {
 })
 
 describe('acompanhamento (MOSTRAR_ACOMPANHAMENTO)', () => {
+  const bloco = () => within(screen.getByRole('region', { name: 'Acompanhamento' }))
+  const marcador = (name: string, value: string, ok: boolean) => ({ name, value, unit: 'mg/dL', ref: '', ok, trend: [] })
+
   it('segue a flag', () => {
     abrir()
     expect(screen.queryByRole('region', { name: 'Acompanhamento' })).toBeNull()
-    cleanup()
+  })
 
+  it('sem marcadores a acompanhar, explica o que aparece ali', () => {
     flags.acompanhamento = true
     abrir()
-    const bloco = within(screen.getByRole('region', { name: 'Acompanhamento' }))
-    expect(bloco.getByText('Colesterol LDL')).toBeTruthy()
-    expect(bloco.getByText('Ativo')).toBeTruthy()
+    expect(bloco().getByText('Marcadores fora da referência ou em mudança aparecem aqui.')).toBeTruthy()
+    expect(bloco().queryByRole('button', { name: 'Tendências' })).toBeNull()
+  })
+
+  it('com dado real: a tendência leva a Tendências e o marcador fora da referência abre o exame', () => {
+    flags.acompanhamento = true
+    resultados.exams = [
+      exame({ id: 'novo', coletadoEm: '2026-10-01', panels: [marcador('LDL', '170', false), marcador('Ferritina', '8', false)] }),
+      exame({ id: 'velho', coletadoEm: '2026-05-01', panels: [marcador('LDL', '150', false)] }),
+    ]
+    abrir()
+    expect(bloco().queryByText('Ativo')).toBeNull()
+    fireEvent.click(bloco().getByRole('button', { name: /^LDL/ }))
+    expect(acoes.onVerTendencias).toHaveBeenCalledOnce()
+    fireEvent.click(bloco().getByRole('button', { name: /^Ferritina.*Fora da referência · 8 mg\/dL/ }))
+    expect(acoes.onOpenExam).toHaveBeenCalledWith(resultados.exams[0])
+    fireEvent.click(bloco().getByRole('button', { name: 'Tendências' }))
+    expect(acoes.onVerTendencias).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -406,9 +457,11 @@ describe('passos extras (MOSTRAR_PROXIMOS_PASSOS_EXTRAS)', () => {
     flags.extras = true
     abrir()
     const titulos = within(screen.getByRole('region', { name: 'Próximos passos' }))
+    // Coleta e documento vêm antes; o limite de 3 deixa um extra só.
     expect(titulos.getByText('Agendar nova coleta')).toBeTruthy()
+    expect(titulos.getByText('Guardar um documento')).toBeTruthy()
     expect(titulos.getByText('Compartilhar com médico')).toBeTruthy()
-    expect(titulos.getByText('Baixar todos os laudos')).toBeTruthy()
+    expect(titulos.queryByText('Baixar todos os laudos')).toBeNull()
   })
 })
 

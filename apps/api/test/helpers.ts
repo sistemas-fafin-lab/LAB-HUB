@@ -47,7 +47,7 @@ export function signHmac(body: string, secret = process.env.FLOWLAB_WEBHOOK_SECR
 
 export interface SupaCall {
   table: string
-  op: 'select' | 'insert' | 'update' | 'delete'
+  op: 'select' | 'insert' | 'update' | 'upsert' | 'delete'
   payload?: unknown
   filters: Record<string, unknown>
 }
@@ -188,6 +188,7 @@ export function createSupabaseMock(opts: {
       select: () => builder,
       insert: (p: unknown) => ((state.op = 'insert'), (state.payload = p), builder),
       update: (p: unknown) => ((state.op = 'update'), (state.payload = p), builder),
+      upsert: (p: unknown) => ((state.op = 'upsert'), (state.payload = p), builder),
       delete: () => ((state.op = 'delete'), builder),
       eq: (c: string, v: unknown) => ((state.filters[c] = v), builder),
       // Guardado com sufixo próprio: o teste do typeahead da recepção precisa

@@ -21,6 +21,13 @@ export interface ButtonProps {
   onClick?: () => void
   type?: 'button' | 'submit'
   style?: CSSProperties
+  /**
+   * Com `href`, o botão é um link (<a>) com o mesmo desenho: para navegar,
+   * abrir em outra aba ou baixar, sem pôr um <button> dentro de um <a>.
+   */
+  href?: string
+  /** Abre em outra aba (target=_blank, rel=noreferrer). */
+  externo?: boolean
 }
 
 interface Paleta {
@@ -62,46 +69,64 @@ export function Button({
   onClick,
   type = 'button',
   style,
+  href,
+  externo = false,
 }: ButtonProps) {
   const [estado, setEstado] = useState<EstadoPonteiro>('idle')
   const p = PALETAS[variant]
   const fundo = disabled ? p.bg : estado === 'active' ? p.active : estado === 'hover' ? p.hover : p.bg
   const tamanhoIcone = size === 'sm' ? 16 : 18
-  return (
-    <button
-      type={type}
-      disabled={disabled}
-      onClick={onClick}
-      onMouseEnter={() => setEstado('hover')}
-      onMouseLeave={() => setEstado('idle')}
-      onMouseDown={() => setEstado('active')}
-      onMouseUp={() => setEstado('hover')}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        height: ALTURA[size],
-        padding: '0 ' + RECUO[size],
-        fontFamily: 'var(--font-body)',
-        fontWeight: 500,
-        fontSize: FONTE[size],
-        lineHeight: 1,
-        color: p.fg,
-        background: fundo,
-        border: '1.5px solid ' + p.border,
-        borderRadius: pill ? 'var(--radius-pill)' : 'var(--radius-md)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 'var(--opacity-disabled)' : 1,
-        width: fullWidth ? '100%' : undefined,
-        transition: 'background var(--duration-fast) var(--ease-standard)',
-        whiteSpace: 'nowrap',
-        ...style,
-      }}
-    >
+  const ponteiro = {
+    onMouseEnter: () => setEstado('hover'),
+    onMouseLeave: () => setEstado('idle'),
+    onMouseDown: () => setEstado('active'),
+    onMouseUp: () => setEstado('hover'),
+  }
+  const estilo: CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: ALTURA[size],
+    padding: '0 ' + RECUO[size],
+    fontFamily: 'var(--font-body)',
+    fontWeight: 500,
+    fontSize: FONTE[size],
+    lineHeight: 1,
+    color: p.fg,
+    background: fundo,
+    border: '1.5px solid ' + p.border,
+    borderRadius: pill ? 'var(--radius-pill)' : 'var(--radius-md)',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 'var(--opacity-disabled)' : 1,
+    width: fullWidth ? '100%' : undefined,
+    transition: 'background var(--duration-fast) var(--ease-standard)',
+    whiteSpace: 'nowrap',
+    ...style,
+  }
+  const conteudo = (
+    <>
       {icon && <Icon name={icon} size={tamanhoIcone} />}
       {children}
       {iconRight && <Icon name={iconRight} size={tamanhoIcone} />}
+    </>
+  )
+  if (href !== undefined) {
+    return (
+      <a
+        {...(disabled ? { 'aria-disabled': true } : { href })}
+        {...(externo ? { target: '_blank', rel: 'noreferrer' } : {})}
+        {...(disabled || !onClick ? {} : { onClick })}
+        {...ponteiro}
+        style={{ textDecoration: 'none', boxSizing: 'border-box', ...estilo }}
+      >
+        {conteudo}
+      </a>
+    )
+  }
+  return (
+    <button type={type} disabled={disabled} onClick={onClick} {...ponteiro} style={estilo}>
+      {conteudo}
     </button>
   )
 }

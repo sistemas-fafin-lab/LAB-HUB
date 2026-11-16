@@ -5,6 +5,9 @@ import { toPaciente } from '../lib/mappers.js'
 import { pacienteUpdateSchema } from '../schemas/pacienteUpdate.js'
 import { mensagemZod } from '../lib/validacao.js'
 import { excluirContaPaciente } from '../lib/expurgo.js'
+import { codigoOpcionalSchema } from '../schemas/doisFatores.js'
+import { RECUSAS, conferirCodigoDaSessao } from '../lib/doisFatores.js'
+import { enviarRecusa } from './doisFatores.js'
 
 export async function pacientesRoutes(app: FastifyInstance): Promise<void> {
   // GET /pacientes/me — dados do paciente autenticado (derivado do JWT, D4).
@@ -65,6 +68,16 @@ export async function pacientesRoutes(app: FastifyInstance): Promise<void> {
       config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
     },
     async (request, reply) => {
+      // Com a verificação em duas etapas ligada, a exclusão também pede o
+      // código: é irreversível, e a sessão aberta pode estar num aparelho
+      // esquecido.
+      if (request.sessao.doisFatores) {
+        const parsed = codigoOpcionalSchema.safeParse(request.body)
+        const codigo = parsed.success ? parsed.data?.codigo : undefined
+        if (!codigo) return enviarRecusa(reply, RECUSAS.obrigatorio)
+        const recusa = await conferirCodigoDaSessao(request.sessao, request.pacienteId, codigo)
+        if (recusa) return enviarRecusa(reply, recusa)
+      }
       await excluirContaPaciente(request.pacienteId, request.log)
       return reply.code(204).send()
     },

@@ -1,5 +1,5 @@
 import type { Agendamento } from '@lab-hub/shared'
-import { BackLink, EmptyState, ETAPAS, Ico, IconTile, InfoGrid, Node, Panel, PanelHead, Pill, Timeline } from '../portal'
+import { BackLink, Btn, EmptyState, ETAPAS, IconTile, InfoGrid, Node, Panel, PanelHead, Pill, Timeline } from '../portal'
 import { DocumentUploader } from '../documents/DocumentUploader'
 import { DocumentList } from '../documents/DocumentList'
 import { situacaoDaColeta } from '../../lib/coletas'
@@ -10,10 +10,23 @@ import { useDocumentos } from '../../lib/useDocumentos'
 import { BotoesDaColeta } from './LinhaColeta'
 import type { AcoesColeta } from './LinhaColeta'
 import { ConteudoPreparo } from './PreparoColeta'
+import { linkComoChegar, useLocaisDosPostos } from '../../lib/usePostos'
+import { useResultados } from '../../lib/useResultados'
+import { eventoDaColeta, nomeDoArquivoIcs } from '../../lib/calendario'
+import { baixarArquivo } from '../../lib/baixarArquivo'
+import { avisar } from '../../lib/avisos'
+import { track } from '../../lib/analytics'
 
 interface ColetaTimelineProps extends AcoesColeta {
   agendamento: Agendamento
   onBack: () => void
+  /** "Agendar novamente" (coleta cancelada): agendar já na mesma unidade. */
+  onAgendarNoPosto?: (postoFlowlabId: string) => void
+  /** "Ver resultados": o exame liberado que saiu desta coleta. */
+  onAbrirExame?: (exameId: string) => void
+  /** Acabou de ser agendada: mostra a confirmação no topo. */
+  recemAgendada?: boolean
+  onVoltarAoInicio?: () => void
 }
 
 const TITULO: Record<Agendamento['status'], string> = {
@@ -38,8 +51,27 @@ function previsaoDeLiberacao(dataHora: string): string {
 
 // Detalhe da coleta em /coleta/:id. O agendamento vem de useAgendamentos, então
 // sobrevive a recarregar a página.
-export function ColetaTimeline({ agendamento, onBack, ...acoes }: ColetaTimelineProps) {
-  const { id, postoNome, dataHora, status, criadoEm, exames } = agendamento
+export function ColetaTimeline({
+  agendamento,
+  onBack,
+  onAgendarNoPosto,
+  onAbrirExame,
+  recemAgendada = false,
+  onVoltarAoInicio,
+  ...acoes
+}: ColetaTimelineProps) {
+  const { id, postoNome, postoFlowlabId, dataHora, status, criadoEm, exames } = agendamento
+  const endereco = useLocaisDosPostos().get(postoFlowlabId)?.endereco
+  const { exams } = useResultados()
+  const resultado = exams.find((e) => e.agendamentoId === id && e.status === 'ready')
+  const vaiAcontecer = status === 'pendente' || status === 'confirmado'
+
+  const adicionarAoCalendario = () => {
+    const arquivo = nomeDoArquivoIcs(dataHora)
+    baixarArquivo(arquivo, eventoDaColeta(agendamento, endereco), 'text/calendar;charset=utf-8')
+    avisar({ title: 'Evento criado', message: arquivo })
+    track('coleta_calendario')
+  }
   const { rotulo, tom, passo, alerta } = situacaoDaColeta(status)
   const cancelada = status === 'cancelado'
   const bloqueada = status === 'bloqueado'
@@ -59,6 +91,31 @@ export function ColetaTimeline({ agendamento, onBack, ...acoes }: ColetaTimeline
     <div className="lh-alvos max-w-6xl mx-auto">
       <BackLink label="Minhas coletas" onClick={onBack} />
 
+      {recemAgendada && (
+        <Panel pad={24} className="lh-fade" style={{ marginBottom: 20 }}>
+          <div className="flex items-center gap-4 flex-wrap">
+            <Node step={1} ring size={56} />
+            <div className="flex-1 min-w-[220px]">
+              <h2 className="font-display font-medium text-[26px] leading-[30px] tracking-[-0.02em]">
+                Agendamento confirmado
+                <span className="lh-dot" />
+              </h2>
+              <p className="text-[14px] text-muted mt-1">Envie o pedido médico abaixo para adiantar o check-in.</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Btn variant="secondary" icon="calendar-plus" onClick={adicionarAoCalendario}>
+                Adicionar ao calendário
+              </Btn>
+              {onVoltarAoInicio && (
+                <Btn variant="ghost" onClick={onVoltarAoInicio}>
+                  Voltar ao início
+                </Btn>
+              )}
+            </div>
+          </div>
+        </Panel>
+      )}
+
       <Panel pad={24} style={{ marginBottom: 20 }}>
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
@@ -70,8 +127,25 @@ export function ColetaTimeline({ agendamento, onBack, ...acoes }: ColetaTimeline
               {postoNome} · {formatDataHoraDetalhe(dataHora)}
             </p>
           </div>
+          {/* Da esquerda para a direita: reenviar e cancelar, o calendário, e a
+              ação principal da etapa. */}
           <div className="flex items-center gap-2 flex-wrap">
             <BotoesDaColeta agendamento={agendamento} rotuloCancelar="Cancelar coleta" {...acoes} />
+            {vaiAcontecer && !recemAgendada && (
+              <Btn variant="secondary" icon="calendar-plus" onClick={adicionarAoCalendario}>
+                Adicionar ao calendário
+              </Btn>
+            )}
+            {cancelada && onAgendarNoPosto && (
+              <Btn icon="calendar-plus" onClick={() => onAgendarNoPosto(postoFlowlabId)}>
+                Agendar novamente
+              </Btn>
+            )}
+            {resultado && onAbrirExame && (
+              <Btn icon="file-text" onClick={() => onAbrirExame(resultado.id)}>
+                Ver resultados
+              </Btn>
+            )}
           </div>
         </div>
         <div className="mt-5 pt-5 border-t border-line">
@@ -147,11 +221,17 @@ export function ColetaTimeline({ agendamento, onBack, ...acoes }: ColetaTimeline
 
         <div className="flex flex-col gap-5 min-w-0">
           <Panel>
-            <PanelHead title="Local" className="mb-2" />
-            <div className="flex items-center gap-2.5 text-[14px] font-semibold">
-              <Ico name="map-pin" size={16} className="text-muted" />
-              {postoNome}
-            </div>
+            <PanelHead
+              title="Local"
+              className="mb-2"
+              right={
+                <Btn variant="ghost" size="sm" icon="navigation" href={linkComoChegar(postoNome, endereco)} externo>
+                  Como chegar
+                </Btn>
+              }
+            />
+            <div className="text-[14px] font-semibold">{postoNome}</div>
+            {endereco && <div className="text-[13px] text-muted mt-0.5">{endereco}</div>}
           </Panel>
 
           {comPreparo && (

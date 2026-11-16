@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as DS from '../ds'
 import type { IconName } from '../ds'
@@ -6,10 +6,17 @@ import { Btn, IconTile, Ico, PageHeader, Panel, PanelHead, Pill, SelectField } f
 import type { IconTileTone } from '../components/portal'
 import { MOSTRAR_NOVIDADES, MOSTRAR_PRIVACIDADE_EXTRAS } from '../lib/flags'
 import { FUSOS, IDIOMAS, UNIDADES, salvarFuso, useFuso } from '../lib/regiao'
+import { CaixaExcluirConta, SUBTITULO_EXCLUIR_CONTA } from '../components/configuracoes/ExcluirConta'
+import { CaixaAlterarSenha } from '../components/configuracoes/AlterarSenha'
+import { CaixaComCodigo } from '../components/acesso/CaixaComCodigo'
+import { doisFatores } from '../lib/doisFatores'
+import { avisar } from '../lib/avisos'
 
 interface SettingsPageProps {
   dark: boolean
   onSetDark: (dark: boolean) => void
+  /** Conta excluída na API: sai da sessão e leva à entrada. */
+  onContaExcluida: () => void | Promise<void>
 }
 
 // Preferências sem backend: só existem nos cartões atrás de flag e não saem
@@ -20,7 +27,6 @@ interface Prefs {
   pushResults: boolean
   marketing: boolean
   sharing: boolean
-  twoFA: boolean
 }
 
 const PREFS_INICIAIS: Prefs = {
@@ -29,7 +35,6 @@ const PREFS_INICIAIS: Prefs = {
   pushResults: true,
   marketing: false,
   sharing: true,
-  twoFA: true,
 }
 
 /** Cartão com título; a região leva o nome do cartão a quem navega por regiões. */
@@ -106,8 +111,27 @@ const TEMAS = [
   { escuro: true, rotulo: 'Escuro', page: '#0b1a33', card: '#1c3c6b' },
 ] as const
 
-export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
+export function SettingsPage({ dark, onSetDark, onContaExcluida }: SettingsPageProps) {
   const [pref, setPref] = useState<Prefs>(PREFS_INICIAIS)
+  const [excluirAberta, setExcluirAberta] = useState(false)
+  const [senhaAberta, setSenhaAberta] = useState(false)
+  // Verificação em duas etapas: null enquanto carrega (o interruptor espera).
+  const [doisFatoresAtiva, setDoisFatoresAtiva] = useState<boolean | null>(null)
+  const [mudarDoisFatores, setMudarDoisFatores] = useState<boolean | null>(null)
+  useEffect(() => {
+    let vivo = true
+    void (async () => {
+      try {
+        const { ativa } = await doisFatores.estado()
+        if (vivo) setDoisFatoresAtiva(ativa)
+      } catch {
+        // Sem a situação, o interruptor fica desligado e indisponível.
+      }
+    })()
+    return () => {
+      vivo = false
+    }
+  }, [])
   const aparelho = aparelhoAtual()
   const fuso = useFuso()
 
@@ -144,22 +168,35 @@ export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
             </Secao>
           )}
 
-          <Secao titulo="Privacidade">
+          <Secao titulo="Privacidade e segurança">
             <div>
-              {/* Compartilhar e duas etapas sem backend: ocultos por flag. */}
+              {/* Compartilhar com médicos não tem backend: oculto por flag. */}
               {MOSTRAR_PRIVACIDADE_EXTRAS && (
                 <>
                   <Linha icon="share-2" title="Compartilhar com médicos" sub="Permite que profissionais cadastrados acessem seus laudos">
                     {alternar('sharing', 'Compartilhar com médicos')}
                   </Linha>
-                  <Linha icon="shield-check" title="Verificação em duas etapas" sub="Exige código por SMS no login">
-                    {alternar('twoFA', 'Verificação em duas etapas')}
-                  </Linha>
                 </>
               )}
-              {/* Como hoje: o botão ainda não chama a exclusão (DELETE /pacientes/me). */}
-              <Linha icon="trash-2" tone="coral" title="Excluir minha conta" sub="Apaga todos os seus dados após 30 dias">
-                <Btn variant="secondary" size="sm">
+              <Linha
+                icon="shield-check"
+                title="Verificação em duas etapas"
+                sub="Pede um código enviado ao seu e-mail sempre que você entrar"
+              >
+                <DS.Switch
+                  label="Verificação em duas etapas"
+                  checked={doisFatoresAtiva === true}
+                  disabled={doisFatoresAtiva === null}
+                  onChange={(v) => setMudarDoisFatores(v)}
+                />
+              </Linha>
+              <Linha icon="key-round" title="Senha" sub="Altere a senha de acesso">
+                <Btn variant="secondary" size="sm" onClick={() => setSenhaAberta(true)}>
+                  Alterar
+                </Btn>
+              </Linha>
+              <Linha icon="trash-2" tone="coral" title="Excluir minha conta" sub={SUBTITULO_EXCLUIR_CONTA}>
+                <Btn variant="secondary" size="sm" onClick={() => setExcluirAberta(true)}>
                   Solicitar
                 </Btn>
               </Linha>
@@ -223,6 +260,27 @@ export function SettingsPage({ dark, onSetDark }: SettingsPageProps) {
           </Secao>
         </div>
       </div>
+      <CaixaAlterarSenha aberta={senhaAberta} onFechar={() => setSenhaAberta(false)} />
+      <CaixaExcluirConta
+        aberta={excluirAberta}
+        onFechar={() => setExcluirAberta(false)}
+        onExcluida={onContaExcluida}
+        pedeCodigo={doisFatoresAtiva === true}
+      />
+      {mudarDoisFatores !== null && (
+        <CaixaComCodigo
+          titulo="Confirme com o código"
+          rotuloConfirmar={mudarDoisFatores ? 'Ligar verificação' : 'Desligar verificação'}
+          rotuloConfirmando="Confirmando…"
+          onFechar={() => setMudarDoisFatores(null)}
+          onConfirmar={async (codigo) => {
+            const { ativa } = await doisFatores.preferencia(mudarDoisFatores, codigo)
+            setDoisFatoresAtiva(ativa)
+            setMudarDoisFatores(null)
+            avisar({ title: ativa ? 'Verificação em duas etapas ligada' : 'Verificação em duas etapas desligada' })
+          }}
+        />
+      )}
     </div>
   )
 }

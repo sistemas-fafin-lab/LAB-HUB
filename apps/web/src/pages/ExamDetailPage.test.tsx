@@ -275,6 +275,40 @@ describe('referência', () => {
   })
 })
 
+describe('exame ainda sem conteúdo', () => {
+  const montaCom = (over: Partial<Exam>, onAbrirColeta = vi.fn()) => {
+    render(
+      <ExamDetailPage exam={exame([], { status: 'analyzing', ...over })} onBack={() => {}} onViewLaudo={() => {}} onAbrirColeta={onAbrirColeta} />,
+    )
+    return onAbrirColeta
+  }
+
+  it('não oferece "Ver laudo"; com a coleta, oferece acompanhá-la', () => {
+    const onAbrirColeta = montaCom({ agendamentoId: 'ag-9' })
+    expect(screen.queryByRole('button', { name: 'Ver laudo' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Acompanhar coleta' }))
+    expect(onAbrirColeta).toHaveBeenCalledWith('ag-9')
+  })
+
+  it('sem a coleta (laudo do LIS), não mostra nenhum dos dois', () => {
+    montaCom({})
+    expect(screen.queryByRole('button', { name: 'Ver laudo' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Acompanhar coleta' })).toBeNull()
+  })
+
+  it('liberado continua com "Ver laudo"', () => {
+    montaCom({ status: 'ready', agendamentoId: 'ag-9' })
+    expect(screen.getByRole('button', { name: 'Ver laudo' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Acompanhar coleta' })).toBeNull()
+  })
+
+  it('o cartão Coleta leva à coleta pelo "Ver coleta"', () => {
+    const onAbrirColeta = montaCom({ status: 'ready', agendamentoId: 'ag-9' })
+    fireEvent.click(screen.getByRole('button', { name: 'Ver coleta' }))
+    expect(onAbrirColeta).toHaveBeenCalledWith('ag-9')
+  })
+})
+
 describe('etapas', () => {
   const NOMES = ['Agendamento', 'Check-in', 'Coleta', 'Análise', 'Liberação']
 
@@ -284,6 +318,18 @@ describe('etapas', () => {
     for (const nome of NOMES) expect(screen.getByText(nome)).toBeTruthy()
     expect(screen.getByText('5 de 5')).toBeTruthy()
     expect(screen.queryByText('Etapa atual')).toBeNull()
+  })
+
+  it('mostra na linha do tempo só as datas que a fonte informou', () => {
+    monta([painel()], { dataColetaCurta: '24 Jul 2026', dataEmissao: '28 de julho de 2026' })
+    expect(screen.getByText('24 Jul 2026')).toBeTruthy()
+    expect(screen.getByText('28 de julho de 2026')).toBeTruthy()
+  })
+
+  it('sem data da coleta, a etapa Coleta fica sem horário', () => {
+    monta([painel()], { dataEmissao: '28 de julho de 2026' })
+    const coleta = screen.getAllByText('Coleta').find((el) => el.closest('li'))
+    expect(coleta?.closest('li')?.textContent).toBe('ColetaAmostra coletada.')
   })
 
   it('exame em análise está na etapa de Análise', () => {

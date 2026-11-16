@@ -71,3 +71,9 @@ export function formatDiaRelativoEmFrase(iso: string): string {
   const rel = relDia(new Date(iso))
   return rel ? rel.toLowerCase() : formatDiaRelativo(iso)
 }
+
+/** Ex.: "qua, 12 nov às 07:30" — coluna de data da lista de coletas. */
+export function formatDataHoraCurta(iso: string): string {
+  const d = new Date(iso)
+  return `${formatDiaSemanaCurto(d).toLowerCase()}, ${dayNumFmt.format(d)} ${formatMesCurto(d)} às ${timeFmt.format(d)}`
+}

@@ -11,8 +11,15 @@ const supa = vi.hoisted(() => ({
   signInWithPassword: vi.fn(),
   resetPasswordForEmail: vi.fn(),
   updateUser: vi.fn(),
+  signOut: vi.fn(),
 }))
-vi.mock('../lib/supabase', () => ({ supabase: { auth: supa } }))
+const estadoDoisFatores = vi.hoisted(() => vi.fn())
+vi.mock('../lib/doisFatores', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/doisFatores')>()),
+  doisFatores: { estado: () => estadoDoisFatores() },
+}))
+const salvarManterConectado = vi.hoisted(() => vi.fn())
+vi.mock('../lib/supabase', () => ({ supabase: { auth: supa }, salvarManterConectado }))
 
 const apiPost = vi.hoisted(() => vi.fn())
 vi.mock('../lib/api', () => ({ api: { post: apiPost } }))
@@ -72,6 +79,7 @@ beforeEach(() => {
   supa.signInWithPassword.mockResolvedValue({ error: null })
   supa.resetPasswordForEmail.mockResolvedValue({ error: null })
   supa.updateUser.mockResolvedValue({ error: null })
+  estadoDoisFatores.mockResolvedValue({ ativa: false, pendente: false, enviadoEm: null })
 })
 
 describe('login', () => {
@@ -104,6 +112,38 @@ describe('login', () => {
     expect(supa.signInWithPassword).toHaveBeenCalledWith({ email: 'maria@example.com', password: 'senha-legada' })
     expect(track).toHaveBeenCalledWith('login_submit')
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('com a verificação ligada, o login já deixa a sessão marcada como pendente do código', async () => {
+    const { chaveDaSessao, useSituacaoDaSegundaEtapa } = await import('../lib/segundaEtapa')
+    const token = `h.${btoa(JSON.stringify({ session_id: 'sessao-1' }))}.a`
+    supa.signInWithPassword.mockResolvedValue({ error: null, data: { session: { access_token: token } } })
+    estadoDoisFatores.mockResolvedValueOnce({ ativa: true, pendente: true, enviadoEm: null })
+    abre('/entrar')
+    digita('E-mail', 'maria@example.com')
+    digita('Senha', 'senha-legada')
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Entrar' })))
+    function Leitor() {
+      return <span>{useSituacaoDaSegundaEtapa(chaveDaSessao({ access_token: token })).tipo}</span>
+    }
+    render(<Leitor />)
+    expect(screen.getByText('pendente')).toBeTruthy()
+  })
+
+  it('"Manter conectado" vem marcado; a escolha é gravada antes do login', async () => {
+    abre('/entrar')
+    const caixa = screen.getByRole('checkbox', { name: 'Manter conectado' })
+    expect(caixa.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(screen.getByText('Manter conectado'))
+    digita('E-mail', 'maria@example.com')
+    digita('Senha', 'senha-legada')
+    supa.signInWithPassword.mockImplementation(async () => {
+      // Já gravada quando o Supabase cria a sessão.
+      expect(salvarManterConectado).toHaveBeenCalledWith(false)
+      return { error: null }
+    })
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Entrar' })))
+    expect(supa.signInWithPassword).toHaveBeenCalled()
   })
 
   it.each([
@@ -447,6 +487,17 @@ describe('nova senha (link do e-mail)', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Senha alterada' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Continuar' }))
     expect(caminho()).toBe('/')
+  })
+
+  it('com a verificação em duas etapas, encerra a sessão do link e manda ao login', async () => {
+    estadoDoisFatores.mockResolvedValueOnce({ ativa: true, pendente: true, enviadoEm: null })
+    abre('/entrar?modo=nova-senha', { comSessao: true })
+    digita('Nova senha', 'SenhaNova12345')
+    digita('Confirmar nova senha', 'SenhaNova12345')
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Salvar nova senha' })))
+    expect(supa.signOut).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Ir para o login' }))
+    expect(caminho()).toBe('/entrar')
   })
 
   it('senha igual à anterior aparece junto ao campo', async () => {

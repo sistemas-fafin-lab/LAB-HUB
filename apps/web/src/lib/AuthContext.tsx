@@ -6,7 +6,8 @@ import { supabase } from './supabase'
 interface AuthValue {
   session: Session | null
   loading: boolean
-  signOut: () => Promise<void>
+  /** Sem escopo: encerra a conta em todos os aparelhos (padrão do Supabase). 'local': só esta sessão. */
+  signOut: (escopo?: 'local' | 'global') => Promise<void>
 }
 
 const AuthContext = createContext<AuthValue | null>(null)
@@ -47,8 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       session,
       loading,
-      signOut: async () => {
-        await supabase.auth.signOut()
+      signOut: async (escopo) => {
+        await supabase.auth.signOut(escopo ? { scope: escopo } : undefined)
       },
     }),
     [session, loading],

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import type { Agendamento, Paciente } from '@lab-hub/shared'
 import type { Exam } from './lib/exame'
@@ -58,6 +58,7 @@ vi.mock('./lib/useResultados', async (importOriginal) => {
 
 const agendamentos = { lista: [] as Agendamento[] }
 vi.mock('./lib/useAgendamentos', () => ({
+  useContagemColetasAtivas: () => agendamentos.lista.filter((a) => a.status !== 'cancelado' && a.status !== 'realizado').length,
   useAgendamentos: () => ({
     agendamentos: agendamentos.lista,
     loading: false,
@@ -120,6 +121,9 @@ vi.mock('./lib/analytics', () => ({
 const { App } = await import('./App')
 const { avisaSessaoExpirada } = await import('./lib/sessao')
 const { avisar } = await import('./lib/avisos')
+const { marcarEntrada } = await import('./lib/boasVindas')
+const { avisaDoisFatoresPendente } = await import('./lib/sessao')
+const { marcarLiberada } = await import('./lib/segundaEtapa')
 
 const SESSAO = { user: { id: 'auth-1', email: PACIENTE.email } }
 
@@ -162,6 +166,8 @@ function abre(url: string) {
 const caminho = () => window.location.pathname + window.location.search
 
 beforeEach(() => {
+  // A situação da segunda etapa vive em módulo: um caso não herda a do outro.
+  marcarLiberada(null)
   auth.loading = false
   auth.saida = null
   auth.set(SESSAO)
@@ -298,10 +304,20 @@ describe('navegação e histórico do navegador', () => {
   it('"Minhas coletas" e "Agendar coleta" levam cada um à sua aba', () => {
     abre('/')
     const menu = screen.getByRole('navigation', { name: 'Navegação principal' })
-    fireEvent.click(within(menu).getByRole('link', { name: 'Minhas coletas' }))
+    fireEvent.click(within(menu).getByRole('link', { name: /^Minhas coletas/ }))
     expect(caminho()).toBe('/coletas')
     fireEvent.click(within(menu).getByRole('link', { name: 'Agendar coleta' }))
     expect(caminho()).toBe('/agendar')
+  })
+
+  it('Minhas coletas mostra quantas estão em andamento; com 0, nada', () => {
+    abre('/')
+    const menu = () => screen.getByRole('navigation', { name: 'Navegação principal' })
+    expect(within(menu()).getByRole('link', { name: /^Minhas coletas.*1 em andamento$/ })).toBeTruthy()
+    cleanup()
+    agendamentos.lista = [agendamento({ status: 'cancelado' })]
+    abre('/')
+    expect(within(menu()).getByRole('link', { name: 'Minhas coletas' })).toBeTruthy()
   })
 
   it('exame aberto deixa Resultados marcado no menu', () => {
@@ -404,6 +420,51 @@ describe('sair', () => {
 
     act(() => auth.set(SESSAO))
     expect(caminho()).toBe('/')
+  })
+})
+
+describe('avisos de entrada e saída', () => {
+  it('depois do logout, a entrada mostra "Você saiu da sua conta"', async () => {
+    abre('/perfil')
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /Sair/ })))
+    expect(caminho()).toBe('/entrar')
+    expect(screen.getByText('Você saiu da sua conta')).toBeTruthy()
+    expect(screen.getByText('Até a próxima.')).toBeTruthy()
+  })
+
+  it('depois do login, dá boas-vindas uma vez, com o primeiro nome', () => {
+    marcarEntrada()
+    const { unmount } = abre('/')
+    expect(screen.getByText('Bem-vindo de volta, Maria')).toBeTruthy()
+    unmount()
+    // Recarregar não repete o aviso.
+    abre('/')
+    expect(screen.queryByText('Bem-vindo de volta, Maria')).toBeNull()
+  })
+
+  it('sem login nesta carga (reload), não dá boas-vindas', () => {
+    abre('/')
+    expect(screen.queryByText(/Bem-vindo de volta,/)).toBeNull()
+  })
+})
+
+describe('verificação em duas etapas', () => {
+  it('o 403 DOIS_FATORES_PENDENTE da API leva à tela do código, sem mudar a URL', () => {
+    abre('/resultados')
+    act(() => avisaDoisFatoresPendente())
+    expect(screen.getByRole('heading', { level: 1, name: 'Confirme que é você' })).toBeTruthy()
+    expect(screen.getByText('m•••@example.com')).toBeTruthy()
+    expect(caminho()).toBe('/resultados')
+    // A caixa de sessão expirada não aparece: não é sessão vencida.
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('"Voltar" encerra a sessão e volta ao login', async () => {
+    abre('/resultados')
+    act(() => avisaDoisFatoresPendente())
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Voltar' })))
+    expect(caminho()).toBe('/entrar')
+    expect(screen.getByRole('heading', { level: 1, name: 'Bem-vindo de volta' })).toBeTruthy()
   })
 })
 

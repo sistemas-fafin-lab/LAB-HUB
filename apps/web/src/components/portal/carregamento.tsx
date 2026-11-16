@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { IconName } from '../../ds'
 import { Btn } from './controles'
 import { IconTile } from './identidade'
@@ -44,18 +44,40 @@ export function EmptyState({ icon = 'inbox', title, text, action }: EmptyStatePr
   )
 }
 
+/** O botão de nova tentativa fica em "Tentando" por no mínimo este tempo, para não piscar. */
+const TENTANDO_MIN_MS = 600
+
 /** Erro de uma lista: a mensagem da API, sem fingir que a lista está vazia. */
-export function FalhaAoCarregar({ titulo, erro, onTentar }: { titulo: string; erro: string; onTentar: () => void }) {
+export function FalhaAoCarregar({ titulo, erro, onTentar }: { titulo: string; erro: string; onTentar: () => void | Promise<unknown> }) {
+  const [tentando, setTentando] = useState(false)
+  const montado = useRef(true)
+  useEffect(() => {
+    montado.current = true
+    return () => {
+      montado.current = false
+    }
+  }, [])
+
+  async function tentar() {
+    setTentando(true)
+    const minimo = new Promise((r) => setTimeout(r, TENTANDO_MIN_MS))
+    try {
+      await Promise.all([Promise.resolve(onTentar()).catch(() => undefined), minimo])
+    } finally {
+      if (montado.current) setTentando(false)
+    }
+  }
+
   return (
-    <EmptyState
-      icon="alert-triangle"
-      title={titulo}
-      text={erro}
-      action={
-        <Btn variant="secondary" size="sm" onClick={onTentar}>
-          Tentar novamente
+    <div className="flex flex-col items-center text-center py-12 px-6">
+      <IconTile name="cloud-off" size={48} tone="coral" />
+      <div className="text-[15px] font-semibold mt-4">{titulo}</div>
+      <p role="alert" className="text-[13px] text-muted mt-1 max-w-sm">{erro}</p>
+      <div className="mt-4">
+        <Btn variant="secondary" icon="rotate-cw" loading={tentando} onClick={() => void tentar()}>
+          {tentando ? 'Tentando' : 'Tentar novamente'}
         </Btn>
-      }
-    />
+      </div>
+    </div>
   )
 }

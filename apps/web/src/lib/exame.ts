@@ -76,4 +76,7 @@ export interface Exam {
   // as telas de detalhe usam esta flag para esconder esse caminho em vez de
   // imprimir um laudo com a identidade de outra pessoa.
   somenteLeituraAdmin?: boolean
+  // Coleta (agendamento do portal) que originou o resultado. Só o FlowLab
+  // informa; no laudo dos LIS fica ausente.
+  agendamentoId?: string
 }

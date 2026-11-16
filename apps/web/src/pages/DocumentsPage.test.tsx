@@ -425,3 +425,24 @@ describe('excluir', () => {
     expect(await screen.findByText('rg.pdf')).toBeTruthy()
   })
 })
+
+describe('?enviar=1', () => {
+  afterEach(() => window.history.replaceState(null, '', '/'))
+
+  it('abre a caixa de envio ao chegar e tira o parâmetro da URL', async () => {
+    get.mockResolvedValue([])
+    window.history.replaceState(null, '', '/documentos?enviar=1')
+    render(<DocumentsPage />)
+    expect(screen.getByRole('dialog', { name: 'Enviar documentos' })).toBeTruthy()
+    expect(window.location.pathname + window.location.search).toBe('/documentos')
+    await waitFor(() => expect(get).toHaveBeenCalled())
+  })
+
+  it('sem o parâmetro, a caixa começa fechada', async () => {
+    get.mockResolvedValue([])
+    window.history.replaceState(null, '', '/documentos')
+    render(<DocumentsPage />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(get).toHaveBeenCalled())
+  })
+})

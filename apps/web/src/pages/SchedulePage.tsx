@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Agendamento } from '@lab-hub/shared'
 import { BackLink, Btn, EmptyState, FalhaAoCarregar, Modal, Node, PageHeader, Panel } from '../components/portal'
 import { BookingPanel } from '../components/schedule/BookingPanel'
@@ -20,11 +20,29 @@ interface SchedulePageProps {
   onAba: (aba: AbaColetas) => void
   onAbrirColeta: (id: string) => void
   onFecharColeta: () => void
+  /** Unidade pré-escolhida no agendamento (?posto=, vindo de "Agendar novamente"). */
+  postoInicial?: string | null
+  /** Agendar de novo na unidade de uma coleta cancelada. */
+  onAgendarNoPosto?: (postoFlowlabId: string) => void
+  /** Abrir o exame liberado de uma coleta. */
+  onAbrirExame?: (exameId: string) => void
+  /** "Voltar ao início" da confirmação de agendamento. */
+  onVoltarAoInicio?: () => void
 }
 
 const mensagemDe = (e: unknown, padrao: string) => (e instanceof Error ? e.message : padrao)
 
-export function SchedulePage({ aba, selectedId, onAba, onAbrirColeta, onFecharColeta }: SchedulePageProps) {
+export function SchedulePage({
+  aba,
+  selectedId,
+  onAba,
+  onAbrirColeta,
+  onFecharColeta,
+  postoInicial = null,
+  onAgendarNoPosto,
+  onAbrirExame,
+  onVoltarAoInicio,
+}: SchedulePageProps) {
   const [resyncingId, setResyncingId] = useState<string | null>(null)
   const [aCancelar, setACancelar] = useState<Agendamento | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -32,6 +50,14 @@ export function SchedulePage({ aba, selectedId, onAba, onAbrirColeta, onFecharCo
   // veria "não encontrada" entre confirmar e a resposta do GET.
   const [recemCriada, setRecemCriada] = useState<Agendamento | null>(null)
   const { agendamentos, loading, error, reload, setStatus } = useAgendamentos()
+  // "Agendamento confirmado" aparece só ao abrir a coleta recém-criada; sair
+  // dela (para a lista, outra coleta ou outra tela) encerra a confirmação.
+  const [confirmadaId, setConfirmadaId] = useState<string | null>(null)
+  useEffect(() => {
+    if (selectedId !== confirmadaId) setConfirmadaId(null)
+    // Só a troca de coleta encerra; confirmadaId muda junto na criação.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId])
 
   // Reenvia ao FlowLab um agendamento que ficou 'pendente' (POST .../sync).
   const handleResync = async (id: string) => {
@@ -106,7 +132,16 @@ export function SchedulePage({ aba, selectedId, onAba, onAbrirColeta, onFecharCo
     if (selected) {
       return (
         <>
-          <ColetaTimeline key={selected.id} agendamento={selected} onBack={onFecharColeta} {...acoes} />
+          <ColetaTimeline
+            key={selected.id}
+            agendamento={selected}
+            onBack={onFecharColeta}
+            recemAgendada={confirmadaId === selected.id}
+            {...(onAgendarNoPosto ? { onAgendarNoPosto } : {})}
+            {...(onAbrirExame ? { onAbrirExame } : {})}
+            {...(onVoltarAoInicio ? { onVoltarAoInicio } : {})}
+            {...acoes}
+          />
           {confirmaCancelamento}
         </>
       )
@@ -148,10 +183,13 @@ export function SchedulePage({ aba, selectedId, onAba, onAbrirColeta, onFecharCo
         <PageHeader title="Agendar coleta" sub="Escolha a unidade, o dia e o horário." right={recarregar} className="mb-5" />
         <BookingPanel
           refreshKey={refreshKey}
+          onCancelar={() => onAba('minhas')}
+          postoInicial={postoInicial}
           // Abre a coleta recém-criada: é onde o paciente anexa os documentos,
           // no momento de maior motivação ("adiante seu check-in").
           onBooked={(ag) => {
             setRecemCriada(ag)
+            setConfirmadaId(ag.id)
             reload()
             onAbrirColeta(ag.id)
           }}

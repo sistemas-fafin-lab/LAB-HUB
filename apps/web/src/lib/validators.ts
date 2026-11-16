@@ -136,3 +136,19 @@ export function formatarTelefone(v: string): string {
   out += d.slice(2, 3) + ' ' + d.slice(3, 7) + '-' + d.slice(7, 11)
   return out
 }
+
+// Troca de senha em Configurações.
+export interface ErrosDaTrocaDeSenha {
+  atual?: string | undefined
+  nova?: string | undefined
+  confirmacao?: string | undefined
+}
+
+/** Valida os três campos; a política da nova senha é a mesma do cadastro. */
+export function errosDaTrocaDeSenha(atual: string, nova: string, confirmacao: string): ErrosDaTrocaDeSenha {
+  return {
+    atual: atual === '' ? 'Informe a senha atual.' : undefined,
+    nova: validarSenha(nova) ?? (nova === atual ? 'A nova senha precisa ser diferente da atual.' : undefined),
+    confirmacao: confirmacao !== nova ? 'As senhas não conferem.' : undefined,
+  }
+}

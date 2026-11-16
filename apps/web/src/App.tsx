@@ -39,6 +39,23 @@ import {
   resolveRota,
 } from './lib/rotas'
 import { lerTema, salvarTema } from './lib/tema'
+import { avisar } from './lib/avisos'
+import { consumirEntrada } from './lib/boasVindas'
+import { primeiroNome } from './lib/paciente'
+import { Avisos } from './components/shell/Avisos'
+import { MolduraAcesso } from './components/acesso/MolduraAcesso'
+import { TelaCodigo } from './components/acesso/TelaCodigo'
+import { marcarEntrada } from './lib/boasVindas'
+import { AVISO_ENTRE_DE_NOVO, doisFatores } from './lib/doisFatores'
+import { aoPedirDoisFatores } from './lib/sessao'
+import {
+  chaveDaSessao,
+  marcarLiberada,
+  marcarPendente,
+  registrarSituacao,
+  useSituacaoDaSegundaEtapa,
+} from './lib/segundaEtapa'
+import { tituloDaRota, useTituloDaAba } from './lib/tituloDaAba'
 import type { Exam } from './lib/exame'
 
 // Logout feito nesta aba. Enquanto vale, a entrada não guarda `next`: o
@@ -84,6 +101,10 @@ function PortalSobTransicao() {
   const transicao = useTransicao()
   return (
     <>
+      {/* Fora do shell, para os avisos de saída aparecerem já na entrada. E
+          antes do portal: os efeitos rodam em ordem, então o ouvinte já está
+          inscrito quando o portal avisa ao montar (boas-vindas). */}
+      <Avisos />
       <div inert={transicao !== null}>
         <Portal />
       </div>
@@ -102,6 +123,27 @@ function Portal() {
   const local = useLocal()
   useInterceptaLinks()
 
+  // Verificação em duas etapas: a sessão que entrou pela senha e ainda não
+  // passou pelo código vê só a tela do código (a API recusa o resto).
+  const chave = chaveDaSessao(session)
+  const segundaEtapa = useSituacaoDaSegundaEtapa(chave)
+  useEffect(() => aoPedirDoisFatores(() => marcarPendente(chave)), [chave])
+  useEffect(() => {
+    if (session === null || segundaEtapa.tipo !== 'desconhecida') return
+    let vivo = true
+    doisFatores
+      .estado()
+      .then((e) => {
+        if (vivo) registrarSituacao(chave, e)
+      })
+      .catch(() => {
+        // Sem resposta, o portal segue; a API ainda recusa com 403 se faltar o código.
+      })
+    return () => {
+      vivo = false
+    }
+  }, [session, chave, segundaEtapa.tipo])
+
   // Splash azul enquanto a sessão é restaurada: também não dá flash branco a
   // quem usa o modo escuro.
   if (loading) return <Splash />
@@ -111,10 +153,34 @@ function Portal() {
     if (naEntrada) return <AuthGate comSessao={false} />
     return <Redireciona para={entradaPara(local.pathname + local.search)} />
   }
+  // O link de recuperação do e-mail chega já com sessão (o Supabase o troca
+  // por uma): a nova senha é a única tela da entrada que se usa logado — e vale
+  // antes da segunda etapa, porque essa sessão não entrou pela senha.
+  if (naEntrada && modoDaEntrada(local.search) === 'nova-senha') return <AuthGate comSessao />
+  if (segundaEtapa.tipo === 'pendente') {
+    return (
+      <SegundaEtapa
+        email={session.user.email ?? null}
+        enviadoEm={segundaEtapa.enviadoEm}
+        onVerificado={() => {
+          marcarLiberada(chave)
+          marcarEntrada()
+        }}
+        onVoltar={async () => {
+          // Só esta sessão: as de outros aparelhos que já passaram pelo código continuam.
+          await signOut('local')
+          navegar(CAMINHO_ENTRAR, { substituir: true })
+        }}
+        entrarDeNovo={segundaEtapa.entrarDeNovo}
+        onEntrarDeNovo={async () => {
+          await signOut('local')
+          navegar(CAMINHO_ENTRAR, { substituir: true })
+          avisar({ tone: 'info', title: AVISO_ENTRE_DE_NOVO })
+        }}
+      />
+    )
+  }
   if (naEntrada) {
-    // O link de recuperação do e-mail chega já com sessão (o Supabase o troca
-    // por uma): a nova senha é a única tela da entrada que se usa logado.
-    if (modoDaEntrada(local.search) === 'nova-senha') return <AuthGate comSessao />
     const next = new URLSearchParams(local.search).get('next')
     return <Redireciona para={caminhoInterno(next) ?? CAMINHO_DA_TELA.home} />
   }
@@ -122,11 +188,15 @@ function Portal() {
 
   // Sair leva à entrada sem `next`: quem entrar em seguida (talvez outra
   // pessoa, na mesma aba) começa pela Visão geral, não no Perfil de quem saiu.
-  const handleLogout = async () => {
+  const sair = async (aviso: Parameters<typeof avisar>[0]) => {
     saiuNestaAba = true
     await comTransicao('Saindo com segurança', signOut)
     navegar(CAMINHO_ENTRAR, { substituir: true })
+    avisar(aviso)
   }
+  const handleLogout = () => sair({ title: 'Você saiu da sua conta', message: 'Até a próxima.' })
+  // A conta já foi excluída na API: a mesma saída, com o aviso dela.
+  const handleContaExcluida = () => sair({ title: 'Conta excluída' })
 
   // Sessão recusada pela API (401): sai SEM marcar `saiuNestaAba`, para o
   // login devolver o paciente à tela onde a sessão caiu.
@@ -139,7 +209,30 @@ function Portal() {
     }
   }
 
-  return <AuthedApp local={local} onLogout={handleLogout} onSessaoExpirada={handleSessaoExpirada} />
+  return (
+    <AuthedApp
+      local={local}
+      onLogout={handleLogout}
+      onContaExcluida={handleContaExcluida}
+      onSessaoExpirada={handleSessaoExpirada}
+    />
+  )
+}
+
+/** A tela do código na moldura da entrada, sem mudar a URL. */
+function SegundaEtapa(props: Parameters<typeof TelaCodigo>[0]) {
+  const [dark, setDark] = useState(lerTema)
+  return (
+    <MolduraAcesso
+      dark={dark}
+      onToggleDark={() => {
+        salvarTema(!dark)
+        setDark(!dark)
+      }}
+    >
+      <TelaCodigo {...props} />
+    </MolduraAcesso>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -150,10 +243,11 @@ function Portal() {
 interface AuthedAppProps {
   local: Local
   onLogout: () => void | Promise<void>
+  onContaExcluida: () => void | Promise<void>
   onSessaoExpirada: () => void | Promise<void>
 }
 
-function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
+function AuthedApp({ local, onLogout, onContaExcluida, onSessaoExpirada }: AuthedAppProps) {
   const { paciente, loading: carregandoPaciente, error: erroPaciente, setPaciente, recarregar: recarregarPaciente } = usePaciente()
   const { exams, loading: carregandoExames } = useResultados()
   const [dark, setDark] = useState(lerTema)
@@ -181,6 +275,13 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   }
 
   const nome = paciente?.nome ?? ''
+
+  // Boas-vindas uma vez por login (nunca num reload), já com o nome carregado.
+  useEffect(() => {
+    if (nome !== '' && consumirEntrada()) {
+      avisar({ title: `Bem-vindo de volta, ${primeiroNome(nome)}`, message: 'Seus exames estão atualizados.' })
+    }
+  }, [nome])
   const rota = resolveRota(local.pathname)
 
   // Exame da rota: a lista da conta primeiro (a versão mais nova), o aberto em
@@ -218,6 +319,7 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   useEffect(() => {
     if (telaPageview !== null) trackPageview(telaPageview)
   }, [href, telaPageview])
+  useTituloDaAba(exameInexistente ? 'Página não encontrada' : tituloDaRota(rota))
 
   // ---------------------------------------------------------------------------
   // Route → page
@@ -251,6 +353,7 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
           // Fechar um exame volta para a lista de Resultados (de onde ele foi aberto).
           onBack={() => navegar(CAMINHO_DA_TELA.results)}
           onViewLaudo={() => navegar(caminhoDoLaudo(exam.id))}
+          onAbrirColeta={(id) => navegar(caminhoDaColeta(id))}
         />
       )
     }
@@ -264,6 +367,10 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
         onAba={(aba) => navegar(caminhoDaAba(aba))}
         onAbrirColeta={(id) => navegar(caminhoDaColeta(id))}
         onFecharColeta={() => navegar(caminhoDaAba('minhas'))}
+        postoInicial={new URLSearchParams(local.search).get('posto')}
+        onAgendarNoPosto={(posto) => navegar(`${caminhoDaAba('agendar')}?posto=${encodeURIComponent(posto)}`)}
+        onAbrirExame={(id) => navegar(caminhoDoExame(id))}
+        onVoltarAoInicio={() => navegar(CAMINHO_DA_TELA.home)}
       />
     )
   } else if (rota.tela === 'trends') {
@@ -273,7 +380,7 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   } else if (rota.tela === 'billing') {
     content = <BillingPage />
   } else if (rota.tela === 'settings') {
-    content = <SettingsPage dark={dark} onSetDark={handleSetDark} />
+    content = <SettingsPage dark={dark} onSetDark={handleSetDark} onContaExcluida={onContaExcluida} />
   } else if (rota.tela === 'profile') {
     content = (
       <ProfilePage
@@ -296,6 +403,8 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
         onAgendar={() => navegar(caminhoDaAba('agendar'))}
         onVerColetas={() => navegar(caminhoDaAba('minhas'))}
         onVerResultados={() => navegar(CAMINHO_DA_TELA.results)}
+        onGuardarDocumento={() => navegar(`${CAMINHO_DA_TELA.documents}?enviar=1`)}
+        onVerTendencias={() => navegar(CAMINHO_DA_TELA.trends)}
       />
     )
   }

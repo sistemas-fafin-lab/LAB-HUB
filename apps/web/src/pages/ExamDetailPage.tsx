@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import type { IconName } from '../ds'
 import { BackLink, Btn, EmptyState, ETAPAS, Ico, Node, Panel, PanelHead, Pill, Spark, Timeline } from '../components/portal'
@@ -8,11 +9,14 @@ import type { Exam, ExamPanel } from '../lib/exame'
 import { track } from '../lib/analytics'
 import { baixarDeclaracao } from '../lib/declaracao'
 import { situacaoDoExame } from '../lib/exibicaoExame'
+import { marcarVisto } from '../lib/vistos'
 
 interface ExamDetailPageProps {
   exam: Exam
   onBack: () => void
   onViewLaudo: () => void
+  /** Abre a coleta que originou o exame (/coleta/:id), quando o exame a informa. */
+  onAbrirColeta?: (agendamentoId: string) => void
 }
 
 const PLACEHOLDER = '—'
@@ -163,7 +167,7 @@ function Resultado({ exam }: { exam: Exam }) {
 }
 
 /** Dados da coleta, só o que a fonte informou; só o laudo dos LIS traz a maioria. */
-function FichaDaColeta({ exam }: { exam: Exam }) {
+function FichaDaColeta({ exam, onAbrirColeta }: { exam: Exam; onAbrirColeta?: (agendamentoId: string) => void }) {
   const campos: readonly (readonly [string, string | undefined])[] = [
     ['Unidade', exam.unit],
     ['Data da coleta', exam.dataColeta],
@@ -171,10 +175,17 @@ function FichaDaColeta({ exam }: { exam: Exam }) {
     ['Método', exam.metodo],
   ]
   const itens = campos.filter((item): item is readonly [string, string] => preenchido(item[1]))
-  if (itens.length === 0) return null
+  const { agendamentoId } = exam
+  const verColeta =
+    agendamentoId && onAbrirColeta ? (
+      <Btn variant="ghost" size="sm" onClick={() => onAbrirColeta(agendamentoId)}>
+        Ver coleta
+      </Btn>
+    ) : null
+  if (itens.length === 0 && verColeta === null) return null
   return (
     <Panel>
-      <PanelHead title="Coleta" className="mb-2" />
+      <PanelHead title="Coleta" className="mb-2" right={verColeta} />
       <dl className="text-[13px]">
         {itens.map(([rotulo, valor]) => (
           <div key={rotulo} className="flex justify-between gap-4 py-2 border-t border-line first:border-t-0">
@@ -187,8 +198,17 @@ function FichaDaColeta({ exam }: { exam: Exam }) {
   )
 }
 
-export function ExamDetailPage({ exam, onBack, onViewLaudo }: ExamDetailPageProps) {
+export function ExamDetailPage({ exam, onBack, onViewLaudo, onAbrirColeta }: ExamDetailPageProps) {
   const { rotulo, tom, passo } = situacaoDoExame(exam)
+  // Abrir o exame o tira dos "novos". O de outro paciente (consulta admin) não conta.
+  useEffect(() => {
+    if (!exam.somenteLeituraAdmin) marcarVisto(exam.id)
+  }, [exam.id, exam.somenteLeituraAdmin])
+  // Ainda não liberado e sem nada para ler: o laudo só diria "ainda não
+  // liberado". O que serve é acompanhar a coleta.
+  const semConteudo =
+    exam.status !== 'ready' && exam.panels.length === 0 && !isLaudoEmSecoes(exam) && laudoDescritivo(exam) === null
+  const { agendamentoId } = exam
 
   const handleDownload = () => {
     // Só a origem do clique — `exam.id`/nome do exame são dados do paciente.
@@ -250,9 +270,16 @@ export function ExamDetailPage({ exam, onBack, onViewLaudo }: ExamDetailPageProp
               somenteLeituraAdmin (ver lib/exame.ts). */}
           {!exam.somenteLeituraAdmin && (
             <div className="flex items-center gap-2 flex-wrap">
-              <Btn variant="secondary" icon="file-text" onClick={onViewLaudo}>
-                Ver laudo
-              </Btn>
+              {!semConteudo && (
+                <Btn variant="secondary" icon="file-text" onClick={onViewLaudo}>
+                  Ver laudo
+                </Btn>
+              )}
+              {semConteudo && agendamentoId && onAbrirColeta && (
+                <Btn variant="secondary" icon="activity" onClick={() => onAbrirColeta(agendamentoId)}>
+                  Acompanhar coleta
+                </Btn>
+              )}
               {exam.declaracaoUrl && (
                 <Btn icon="download" onClick={handleDownload}>
                   Baixar PDF
@@ -287,9 +314,16 @@ export function ExamDetailPage({ exam, onBack, onViewLaudo }: ExamDetailPageProp
                 </span>
               }
             />
-            <Timeline passo={passo} />
+            {/* Só as datas que a fonte informou: nunca um horário inventado. */}
+            <Timeline
+              passo={passo}
+              quando={{
+                ...(exam.dataColetaCurta ? { coleta: exam.dataColetaCurta } : {}),
+                ...(exam.dataEmissao ? { liberada: exam.dataEmissao } : {}),
+              }}
+            />
           </Panel>
-          <FichaDaColeta exam={exam} />
+          <FichaDaColeta exam={exam} {...(onAbrirColeta ? { onAbrirColeta } : {})} />
         </div>
       </div>
     </div>

@@ -7,6 +7,7 @@ import { track } from '../lib/analytics'
 import { avisar } from '../lib/avisos'
 import { DOC_META, TIPOS_DOCUMENTO } from '../lib/documentos'
 import { useDocumentos } from '../lib/useDocumentos'
+import { navegar } from '../lib/router'
 
 type TabId = 'all' | TipoDocumento
 
@@ -37,6 +38,19 @@ export function DocumentsPage() {
     setEnviarAberto(false)
     if (recarregarAoFechar.current) reload()
   }
+
+  // `?enviar=1` (o passo "Guardar um documento" da Visão geral) abre a caixa ao
+  // chegar; o parâmetro sai da URL para o voltar/recarregar não abrir de novo.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('enviar') !== '1') return
+    params.delete('enviar')
+    const query = params.toString()
+    navegar(window.location.pathname + (query ? `?${query}` : ''), { substituir: true })
+    abrirModal()
+    // Só na chegada à tela.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const erroVisivel = enviarAberto ? null : error
   const falhouAoCarregar = erroVisivel !== null && documentos.length === 0 && !loading

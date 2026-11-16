@@ -1,16 +1,25 @@
-import type { FastifyRequest } from 'fastify'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 import { supabase } from '../lib/supabase.js'
+import { claimsDoToken, situacaoDaSessao } from '../lib/doisFatores.js'
+import type { SessaoDoPaciente } from '../lib/doisFatores.js'
+
+export type { SessaoDoPaciente } from '../lib/doisFatores.js'
 
 // Disponibiliza request.pacienteId nas rotas autenticadas.
 declare module 'fastify' {
   interface FastifyRequest {
     pacienteId: string
+    sessao: SessaoDoPaciente
   }
 }
 
-// preHandler: valida o JWT Supabase e resolve o pacienteId a partir do token.
-// Deriva o paciente do próprio token (D4) — evita IDOR via :pacienteId na URL.
-export async function authenticate(request: FastifyRequest): Promise<void> {
+/** Código do 403 que leva o web à tela do código. */
+export const DOIS_FATORES_PENDENTE = 'DOIS_FATORES_PENDENTE'
+
+// preHandler das rotas da própria verificação: valida o JWT Supabase e resolve
+// o paciente, SEM exigir a segunda etapa. Deriva o paciente do próprio token
+// (D4) — evita IDOR via :pacienteId na URL.
+export async function authenticateParcial(request: FastifyRequest): Promise<void> {
   const header = request.headers.authorization
   if (!header?.startsWith('Bearer ')) {
     throw request.server.httpErrors.unauthorized('Token ausente')
@@ -24,7 +33,7 @@ export async function authenticate(request: FastifyRequest): Promise<void> {
 
   const { data: paciente, error: pacienteError } = await supabase
     .from('pacientes')
-    .select('id')
+    .select('id, dois_fatores_email')
     .eq('auth_user_id', data.user.id)
     .single()
 
@@ -33,4 +42,23 @@ export async function authenticate(request: FastifyRequest): Promise<void> {
   }
 
   request.pacienteId = paciente.id as string
+  request.sessao = {
+    email: data.user.email ?? null,
+    // O token já foi aceito pelo Auth acima: decodificar o payload é seguro.
+    claims: claimsDoToken(token),
+    doisFatores: (paciente as { dois_fatores_email?: boolean }).dois_fatores_email === true,
+  }
+}
+
+// preHandler das rotas de dados: o paciente da sessão, já com a segunda etapa
+// conferida quando ele a usa. Sem ela, 403 DOIS_FATORES_PENDENTE.
+export async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  await authenticateParcial(request)
+  if ((await situacaoDaSessao(request.sessao)).liberada) return
+  return reply.code(403).send({
+    statusCode: 403,
+    error: 'Forbidden',
+    codigo: DOIS_FATORES_PENDENTE,
+    message: 'Confirme o código enviado ao seu e-mail.',
+  })
 }
