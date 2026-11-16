@@ -14,7 +14,7 @@ import type { EstadoDoisFatores } from './doisFatores'
 export type SituacaoDaSegundaEtapa =
   | { tipo: 'desconhecida' }
   | { tipo: 'liberada' }
-  | { tipo: 'pendente'; enviadoEm: string | null }
+  | { tipo: 'pendente'; enviadoEm: string | null; entrarDeNovo: boolean }
 
 let chaveAtual: string | null = null
 let situacao: SituacaoDaSegundaEtapa = { tipo: 'desconhecida' }
@@ -40,14 +40,22 @@ export function chaveDaSessao(sessao: Pick<Session, 'access_token'> | null): str
   }
 }
 
-export function registrarSituacao(chave: string | null, estado: Pick<EstadoDoisFatores, 'pendente' | 'enviadoEm'>): void {
-  definir(chave, estado.pendente ? { tipo: 'pendente', enviadoEm: estado.enviadoEm } : { tipo: 'liberada' })
+export function registrarSituacao(
+  chave: string | null,
+  estado: Pick<EstadoDoisFatores, 'pendente' | 'enviadoEm' | 'entrarDeNovo'>,
+): void {
+  definir(
+    chave,
+    estado.pendente
+      ? { tipo: 'pendente', enviadoEm: estado.enviadoEm, entrarDeNovo: estado.entrarDeNovo === true }
+      : { tipo: 'liberada' },
+  )
 }
 
 /** A API recusou com DOIS_FATORES_PENDENTE. */
 export function marcarPendente(chave: string | null): void {
   if (chave === chaveAtual && situacao.tipo === 'pendente') return
-  definir(chave, { tipo: 'pendente', enviadoEm: null })
+  definir(chave, { tipo: 'pendente', enviadoEm: null, entrarDeNovo: false })
 }
 
 export function marcarLiberada(chave: string | null): void {

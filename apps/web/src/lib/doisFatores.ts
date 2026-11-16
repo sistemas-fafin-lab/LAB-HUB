@@ -12,7 +12,13 @@ export interface EstadoDoisFatores {
   pendente: boolean
   /** Último envio de código para esta sessão (ISO), para o "Reenviar em 0:SS". */
   enviadoEm: string | null
+  /** Pendente, mas sem como fazer a etapa do código (senha antiga, link de recuperação). */
+  entrarDeNovo?: boolean
 }
+
+/** Código da API para "entre de novo com a senha". */
+export const ENTRE_DE_NOVO = 'ENTRE_DE_NOVO'
+export const AVISO_ENTRE_DE_NOVO = 'Por segurança, entre de novo com a sua senha.'
 
 export type FinalidadeDoCodigo = 'login' | 'confirmacao'
 

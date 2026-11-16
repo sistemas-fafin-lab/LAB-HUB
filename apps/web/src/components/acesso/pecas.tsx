@@ -113,8 +113,18 @@ export function RegrasSenha({ senha }: { senha: string }) {
 }
 
 const DIGITOS = 6
+/** Posição vazia no valor do código (o valor guarda cada dígito na sua casa). */
+const VAZIO = ' '
+
+/** Os 6 dígitos por posição; '' onde a casa está vazia. */
+const digitosDoCodigo = (valor: string) =>
+  Array.from({ length: DIGITOS }, (_, i) => (/\d/.test(valor[i] ?? '') ? valor[i]! : ''))
+
+/** Junta as casas de volta, mantendo as vazias no lugar (só as do fim somem). */
+const juntar = (casas: readonly string[]) => casas.map((d) => d || VAZIO).join('').trimEnd()
 
 interface CodigoVerificacaoProps {
+  /** Um caractere por casa: dígito ou espaço (casa vazia). Completo = /^\d{6}$/. */
   valor: string
   onChange: (valor: string) => void
   /** Borda coral e a mensagem abaixo dos campos. */
@@ -123,14 +133,17 @@ interface CodigoVerificacaoProps {
 }
 
 /**
- * Código de 6 dígitos em 6 campos. Colar distribui os dígitos, Backspace volta
- * ao campo anterior e as setas andam entre os campos. O foco começa no primeiro.
+ * Código de 6 dígitos em 6 campos. Cada dígito fica na sua casa: apagar um do
+ * meio não puxa os seguintes. Colar distribui os dígitos, Backspace num campo
+ * vazio volta ao anterior e as setas andam entre os campos. O apagar é lido do
+ * próprio campo (onChange), e não só da tecla: o teclado virtual do Android
+ * manda "Unidentified" no lugar de "Backspace".
  */
 export function CodigoVerificacao({ valor, onChange, erro = null, disabled = false }: CodigoVerificacaoProps) {
   const campos = useRef<(HTMLInputElement | null)[]>([])
   const idRotulo = useId()
   const idErro = useId()
-  const digitos = Array.from({ length: DIGITOS }, (_, i) => valor[i] ?? '')
+  const digitos = digitosDoCodigo(valor)
 
   useEffect(() => {
     campos.current[0]?.focus()
@@ -138,27 +151,43 @@ export function CodigoVerificacao({ valor, onChange, erro = null, disabled = fal
 
   const foca = (i: number) => campos.current[Math.max(0, Math.min(DIGITOS - 1, i))]?.focus()
 
-  const escreve = (i: number, texto: string) => {
-    const novos = texto.replace(/\D/g, '')
-    if (novos === '') return
-    const atual = [...digitos]
-    for (let j = 0; j < novos.length && i + j < DIGITOS; j++) atual[i + j] = novos[j]!
-    onChange(atual.join('').slice(0, DIGITOS))
+  const muda = (casas: string[]) => onChange(juntar(casas))
+
+  /** Escreve `novos` a partir da casa `i` (um dígito, ou vários ao colar). */
+  const escreve = (i: number, novos: string) => {
+    const casas = [...digitos]
+    for (let j = 0; j < novos.length && i + j < DIGITOS; j++) casas[i + j] = novos[j]!
+    muda(casas)
     foca(i + novos.length)
   }
 
+  const aoMudar = (i: number, bruto: string) => {
+    const novos = bruto.replace(/\D/g, '')
+    if (novos === '') {
+      // Apagou (inclusive pelo teclado do Android): só esta casa.
+      const casas = [...digitos]
+      casas[i] = ''
+      muda(casas)
+      return
+    }
+    const antigo = digitos[i]
+    // Digitou numa casa já preenchida: fica o dígito novo, onde quer que o
+    // cursor estivesse.
+    if (novos.length === 2 && antigo && novos.includes(antigo)) {
+      escreve(i, novos[0] === antigo ? novos[1]! : novos[0]!)
+      return
+    }
+    escreve(i, novos)
+  }
+
   const aoTeclar = (i: number, e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Backspace') {
+    if (e.key === 'Backspace' && !digitos[i] && i > 0) {
+      // Campo vazio: apaga o anterior e volta para ele.
       e.preventDefault()
-      const atual = [...digitos]
-      if (atual[i]) {
-        atual[i] = ''
-        onChange(atual.join(''))
-      } else if (i > 0) {
-        atual[i - 1] = ''
-        onChange(atual.join(''))
-        foca(i - 1)
-      }
+      const casas = [...digitos]
+      casas[i - 1] = ''
+      muda(casas)
+      foca(i - 1)
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault()
       foca(i - 1)
@@ -188,10 +217,10 @@ export function CodigoVerificacao({ valor, onChange, erro = null, disabled = fal
             {...(i === 0 ? { autoComplete: 'one-time-code' } : { autoComplete: 'off' })}
             aria-label={`Dígito ${i + 1}`}
             aria-invalid={erro ? true : undefined}
-            onChange={(e) => escreve(i, e.target.value.slice(d ? 1 : 0) || e.target.value)}
+            onChange={(e) => aoMudar(i, e.target.value)}
             onPaste={(e) => {
               e.preventDefault()
-              escreve(0, e.clipboardData.getData('text'))
+              escreve(0, e.clipboardData.getData('text').replace(/\D/g, ''))
             }}
             onKeyDown={(e) => aoTeclar(i, e)}
             onFocus={(e) => e.target.select()}
@@ -209,6 +238,9 @@ export function CodigoVerificacao({ valor, onChange, erro = null, disabled = fal
   )
 }
 
+/** 60 → "1:00", 9 → "0:09". */
+const minutosESegundos = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
 /** "Reenviar código em 0:SS" e, depois, o link para reenviar. */
 export function ReenviarCodigo({ enviadoEm, onReenviar }: { enviadoEm: number | null; onReenviar: () => void }) {
   // `enviadoEm` está no relógio deste aparelho (ver useFluxoDoCodigo); o tique
@@ -222,9 +254,7 @@ export function ReenviarCodigo({ enviadoEm, onReenviar }: { enviadoEm: number | 
   }, [restante])
   if (restante > 0) {
     return (
-      <p className="text-[13px] text-muted tabular-nums">
-        Reenviar código em 0:{String(Math.min(restante, ESPERA_PARA_REENVIAR_S)).padStart(2, '0')}
-      </p>
+      <p className="text-[13px] text-muted tabular-nums">Reenviar código em {minutosESegundos(Math.min(restante, ESPERA_PARA_REENVIAR_S))}</p>
     )
   }
   return (

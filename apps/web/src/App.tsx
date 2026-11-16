@@ -46,7 +46,7 @@ import { Avisos } from './components/shell/Avisos'
 import { MolduraAcesso } from './components/acesso/MolduraAcesso'
 import { TelaCodigo } from './components/acesso/TelaCodigo'
 import { marcarEntrada } from './lib/boasVindas'
-import { doisFatores } from './lib/doisFatores'
+import { AVISO_ENTRE_DE_NOVO, doisFatores } from './lib/doisFatores'
 import { aoPedirDoisFatores } from './lib/sessao'
 import {
   chaveDaSessao,
@@ -170,6 +170,12 @@ function Portal() {
           // Só esta sessão: as de outros aparelhos que já passaram pelo código continuam.
           await signOut('local')
           navegar(CAMINHO_ENTRAR, { substituir: true })
+        }}
+        entrarDeNovo={segundaEtapa.entrarDeNovo}
+        onEntrarDeNovo={async () => {
+          await signOut('local')
+          navegar(CAMINHO_ENTRAR, { substituir: true })
+          avisar({ tone: 'info', title: AVISO_ENTRE_DE_NOVO })
         }}
       />
     )

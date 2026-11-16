@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Btn } from '../portal'
 import { CodigoVerificacao, ReenviarCodigo, TituloAcesso } from './pecas'
@@ -13,11 +13,21 @@ interface TelaCodigoProps {
   onVerificado: () => void
   /** Encerra a sessão aberta pela senha e volta ao login. */
   onVoltar: () => void | Promise<void>
+  /** A sessão não consegue fazer a etapa (senha antiga, link de recuperação): sai e pede a senha de novo. */
+  onEntrarDeNovo: () => void | Promise<void>
+  /** Já se sabe, ao abrir, que esta sessão precisa entrar de novo. */
+  entrarDeNovo?: boolean
 }
 
 /** Segunda etapa do login: o código enviado ao e-mail da conta. */
-export function TelaCodigo({ email, enviadoEm, onVerificado, onVoltar }: TelaCodigoProps) {
-  const fluxo = useFluxoDoCodigo('login', email, enviadoEm)
+export function TelaCodigo({ email, enviadoEm, onVerificado, onVoltar, onEntrarDeNovo, entrarDeNovo = false }: TelaCodigoProps) {
+  const sair = useRef(onEntrarDeNovo)
+  sair.current = onEntrarDeNovo
+  // Sem como fazer a etapa: nem envia o código, volta direto ao login.
+  useEffect(() => {
+    if (entrarDeNovo) void sair.current()
+  }, [entrarDeNovo])
+  const fluxo = useFluxoDoCodigo('login', email, entrarDeNovo ? new Date().toISOString() : enviadoEm, () => void sair.current())
   const [verificando, setVerificando] = useState(false)
   const [voltando, setVoltando] = useState(false)
 

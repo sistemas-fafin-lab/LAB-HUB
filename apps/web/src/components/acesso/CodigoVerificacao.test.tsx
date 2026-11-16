@@ -60,9 +60,40 @@ describe('CodigoVerificacao', () => {
   })
 })
 
+describe('CodigoVerificacao: cada dígito na sua casa', () => {
+  const casas = () => Array.from({ length: 6 }, (_, i) => digito(i + 1).value).join(',')
+
+  it('Backspace num dígito do meio apaga só ele; os seguintes não andam', () => {
+    render(<Campo inicial="123456" />)
+    fireEvent.change(digito(3), { target: { value: '' } })
+    expect(casas()).toBe('1,2,,4,5,6')
+    fireEvent.change(digito(3), { target: { value: '3' } })
+    expect(valor()).toBe('123456')
+  })
+
+  it('apagar pelo teclado do Android (sem tecla Backspace, só o campo vazio) também apaga', () => {
+    render(<Campo inicial="12" />)
+    fireEvent.keyDown(digito(2), { key: 'Unidentified' })
+    fireEvent.change(digito(2), { target: { value: '' } })
+    expect(casas()).toBe('1,,,,,')
+  })
+
+  it('digitar numa casa preenchida, com o cursor antes do dígito, fica com o novo', () => {
+    render(<Campo inicial="5" />)
+    fireEvent.change(digito(1), { target: { value: '75' } })
+    expect(casas()).toBe('7,,,,,')
+  })
+
+  it('digitar na 5ª casa com as anteriores vazias fica na 5ª', () => {
+    render(<Campo />)
+    fireEvent.change(digito(5), { target: { value: '8' } })
+    expect(casas()).toBe(',,,,8,')
+  })
+})
+
 describe('TelaCodigo', () => {
   const monta = (onVerificado = vi.fn()) => {
-    render(<TelaCodigo email="maria@example.com" enviadoEm={null} onVerificado={onVerificado} onVoltar={vi.fn()} />)
+    render(<TelaCodigo email="maria@example.com" enviadoEm={null} onVerificado={onVerificado} onVoltar={vi.fn()} onEntrarDeNovo={vi.fn()} />)
     return onVerificado
   }
 
@@ -71,7 +102,7 @@ describe('TelaCodigo', () => {
     monta()
     expect(enviar).toHaveBeenCalledWith('login')
     expect(screen.getByText('m•••@example.com')).toBeTruthy()
-    expect(await screen.findByText(/Reenviar código em 0:\d\d/)).toBeTruthy()
+    expect(await screen.findByText(/Reenviar código em \d:\d\d/)).toBeTruthy()
   })
 
   it('sem os 6 dígitos, pede o código inteiro e nem chama a API', async () => {
@@ -104,9 +135,31 @@ describe('TelaCodigo', () => {
     expect(onVerificado).toHaveBeenCalledOnce()
   })
 
-  it('reenvio recente (recarga): não envia de novo, só mostra a contagem', () => {
-    render(<TelaCodigo email="maria@example.com" enviadoEm={new Date().toISOString()} onVerificado={vi.fn()} onVoltar={vi.fn()} />)
+  it('logo depois do envio, a contagem começa em 1:00', async () => {
+    enviar.mockResolvedValue({ enviadoEm: new Date().toISOString() })
+    monta()
+    expect(await screen.findByText(/Reenviar código em (1:00|0:59)/)).toBeTruthy()
+  })
+
+  it('ENTRE_DE_NOVO no envio: sai e pede a senha de novo', async () => {
+    enviar.mockRejectedValue(new ApiError(403, 'Por segurança, entre de novo com a sua senha.', 'ENTRE_DE_NOVO'))
+    const onEntrarDeNovo = vi.fn()
+    render(<TelaCodigo email="maria@example.com" enviadoEm={null} onVerificado={vi.fn()} onVoltar={vi.fn()} onEntrarDeNovo={onEntrarDeNovo} />)
+    await waitFor(() => expect(onEntrarDeNovo).toHaveBeenCalledOnce())
+  })
+
+  it('já sabendo que precisa entrar de novo, nem envia o código', () => {
+    const onEntrarDeNovo = vi.fn()
+    render(
+      <TelaCodigo email="maria@example.com" enviadoEm={null} entrarDeNovo onVerificado={vi.fn()} onVoltar={vi.fn()} onEntrarDeNovo={onEntrarDeNovo} />,
+    )
+    expect(onEntrarDeNovo).toHaveBeenCalledOnce()
     expect(enviar).not.toHaveBeenCalled()
-    expect(screen.getByText(/Reenviar código em 0:\d\d/)).toBeTruthy()
+  })
+
+  it('reenvio recente (recarga): não envia de novo, só mostra a contagem', () => {
+    render(<TelaCodigo email="maria@example.com" enviadoEm={new Date().toISOString()} onVerificado={vi.fn()} onVoltar={vi.fn()} onEntrarDeNovo={vi.fn()} />)
+    expect(enviar).not.toHaveBeenCalled()
+    expect(screen.getByText(/Reenviar código em \d:\d\d/)).toBeTruthy()
   })
 })

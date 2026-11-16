@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError } from '../../lib/api'
 import { avisar } from '../../lib/avisos'
-import { doisFatores, mascararEmail } from '../../lib/doisFatores'
+import { ENTRE_DE_NOVO, doisFatores, mascararEmail } from '../../lib/doisFatores'
 import type { FinalidadeDoCodigo } from '../../lib/doisFatores'
 
 const DIGITE_OS_6 = 'Digite os 6 dígitos do código.'
+const CODIGO_COMPLETO = /^\d{6}$/
 
 /**
  * Estado do código de uma tela: envio ao abrir (ou só a contagem, se já houve
  * envio há menos de um minuto), reenvio, e a validação antes de conferir.
  */
-export function useFluxoDoCodigo(finalidade: FinalidadeDoCodigo, email: string | null, enviadoAntes: string | null = null) {
+export function useFluxoDoCodigo(
+  finalidade: FinalidadeDoCodigo,
+  email: string | null,
+  enviadoAntes: string | null = null,
+  /** A API disse que esta sessão não consegue fazer a etapa: entrar de novo. */
+  onEntrarDeNovo?: () => void,
+) {
+  const entrarDeNovo = useRef(onEntrarDeNovo)
+  entrarDeNovo.current = onEntrarDeNovo
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   // No relógio deste aparelho: a hora do servidor, com o relógio local
@@ -26,6 +35,10 @@ export function useFluxoDoCodigo(finalidade: FinalidadeDoCodigo, email: string |
         setEnviadoEm(Date.now())
         if (reenvio && email) avisar({ title: 'Código reenviado', message: mascararEmail(email) })
       } catch (e: unknown) {
+        if (e instanceof ApiError && e.codigo === ENTRE_DE_NOVO && entrarDeNovo.current) {
+          entrarDeNovo.current()
+          return
+        }
         // 429: já houve envio há menos de um minuto; a contagem segue.
         if (e instanceof ApiError && e.status === 429) {
           setEnviadoEm((t) => t ?? Date.now())
@@ -46,7 +59,7 @@ export function useFluxoDoCodigo(finalidade: FinalidadeDoCodigo, email: string |
 
   /** Confere o formato; devolve o código pronto ou null (com o erro na tela). */
   const codigoPronto = (): string | null => {
-    if (!/^\d{6}$/.test(codigo)) {
+    if (!CODIGO_COMPLETO.test(codigo)) {
       setErro(DIGITE_OS_6)
       return null
     }
@@ -56,6 +69,10 @@ export function useFluxoDoCodigo(finalidade: FinalidadeDoCodigo, email: string |
 
   /** Recusa da API: mostra a mensagem dela e limpa os campos. */
   const recusado = (e: unknown) => {
+    if (e instanceof ApiError && e.codigo === ENTRE_DE_NOVO && entrarDeNovo.current) {
+      entrarDeNovo.current()
+      return
+    }
     setErro(e instanceof Error ? e.message : 'Código inválido ou expirado. Confira a mensagem ou peça um novo código.')
     setCodigo('')
   }
