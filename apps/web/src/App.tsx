@@ -294,6 +294,10 @@ function AuthedApp({ local, onLogout, onContaExcluida, onSessaoExpirada }: Authe
         onAba={(aba) => navegar(caminhoDaAba(aba))}
         onAbrirColeta={(id) => navegar(caminhoDaColeta(id))}
         onFecharColeta={() => navegar(caminhoDaAba('minhas'))}
+        postoInicial={new URLSearchParams(local.search).get('posto')}
+        onAgendarNoPosto={(posto) => navegar(`${caminhoDaAba('agendar')}?posto=${encodeURIComponent(posto)}`)}
+        onAbrirExame={(id) => navegar(caminhoDoExame(id))}
+        onVoltarAoInicio={() => navegar(CAMINHO_DA_TELA.home)}
       />
     )
   } else if (rota.tela === 'trends') {

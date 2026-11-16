@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Exam } from '../lib/exame'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Agendamento, PostoDisponivel } from '@lab-hub/shared'
 import { SchedulePage } from './SchedulePage'
@@ -14,6 +15,9 @@ vi.mock('../lib/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), documentoUrl: vi.fn() },
 }))
 vi.mock('../lib/analytics', () => ({ track: vi.fn() }))
+// Só o "Ver resultados" do detalhe lê os exames; a tela não precisa da rede.
+const resultados = { exams: [] as Exam[], loading: false, error: null }
+vi.mock('../lib/useResultados', () => ({ useResultados: () => resultados }))
 const documentos = {
   documentos: [] as unknown[],
   loading: false,
@@ -65,6 +69,7 @@ beforeEach(() => {
   // Agendamentos e postos vivem em cache de módulo: cada caso começa do zero.
   descartarAgendamentos()
   descartarPostos()
+  resultados.exams = []
   lista = []
   postos = [posto()]
   Object.assign(documentos, { documentos: [], loading: false, error: null, enviando: false })
@@ -385,6 +390,11 @@ describe('Agendar coleta', () => {
 
     rerender(<SchedulePage {...props} aba="minhas" selectedId="novo" />)
     expect(screen.getByRole('heading', { level: 1, name: 'Coleta agendada' })).toBeTruthy()
+    // A confirmação aparece só nesta abertura e some ao sair da coleta.
+    expect(screen.getByRole('heading', { level: 2, name: 'Agendamento confirmado' })).toBeTruthy()
+    rerender(<SchedulePage {...props} aba="minhas" selectedId={null} />)
+    rerender(<SchedulePage {...props} aba="minhas" selectedId="novo" />)
+    expect(screen.queryByRole('heading', { level: 2, name: 'Agendamento confirmado' })).toBeNull()
   })
 
   it('cancelar a confirmação não agenda', async () => {
@@ -436,6 +446,13 @@ describe('Agendar coleta', () => {
     fireEvent.click(screen.getByRole('button', { name: /^08:00$/ }))
     expect(confirmar.disabled).toBe(false)
     expect(screen.getByText(/às 08:00$/)).toBeTruthy()
+  })
+
+  it('?posto= pré-seleciona a unidade', async () => {
+    postos = [posto(), posto({ id: 'posto-2', nome: 'Unidade Norte' })]
+    render(<SchedulePage {...props} aba="agendar" selectedId={null} postoInicial="posto-2" />)
+    const norte = await screen.findByRole('radio', { name: /Unidade Norte/ })
+    expect(norte.getAttribute('aria-checked')).toBe('true')
   })
 
   it('trocar de unidade descarta o horário escolhido', async () => {
@@ -578,6 +595,36 @@ describe('detalhe da coleta', () => {
     noDetalhe()
     expect(await screen.findByText('API fora do ar')).toBeTruthy()
     expect(screen.queryByText('Coleta não encontrada')).toBeNull()
+  })
+
+  it('coleta marcada: "Adicionar ao calendário" baixa o .ics e avisa', async () => {
+    const criar = vi.fn(() => 'blob:x')
+    Object.assign(URL, { createObjectURL: criar, revokeObjectURL: vi.fn() })
+    const { recebidos, cancela } = avisos()
+    lista = [ag({ dataHora: '2026-12-02T10:30:00.000Z' })]
+    noDetalhe()
+    fireEvent.click(await screen.findByRole('button', { name: 'Adicionar ao calendário' }))
+    expect(criar).toHaveBeenCalledOnce()
+    expect(recebidos[0]).toMatchObject({ title: 'Evento criado', message: 'coleta-2026-12-02.ics' })
+    cancela()
+  })
+
+  it('coleta cancelada: "Agendar novamente" na mesma unidade, sem calendário', async () => {
+    const onAgendarNoPosto = vi.fn()
+    lista = [ag({ status: 'cancelado' })]
+    render(<SchedulePage {...props} aba="minhas" selectedId="ag-1" onAgendarNoPosto={onAgendarNoPosto} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Agendar novamente' }))
+    expect(onAgendarNoPosto).toHaveBeenCalledWith('posto-1')
+    expect(screen.queryByRole('button', { name: 'Adicionar ao calendário' })).toBeNull()
+  })
+
+  it('com o resultado liberado desta coleta: "Ver resultados" abre o exame', async () => {
+    const onAbrirExame = vi.fn()
+    resultados.exams = [{ id: 'ex-1', agendamentoId: 'ag-1', status: 'ready' } as Exam]
+    lista = [ag({ status: 'realizado', dataHora: emDias(-2) })]
+    render(<SchedulePage {...props} aba="minhas" selectedId="ag-1" onAbrirExame={onAbrirExame} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver resultados' }))
+    expect(onAbrirExame).toHaveBeenCalledWith('ex-1')
   })
 
   it('cartão Local: endereço e "Como chegar"; sem endereço, procura pelo nome do laboratório', async () => {

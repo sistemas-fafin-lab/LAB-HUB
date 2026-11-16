@@ -13,15 +13,3 @@ function campo(valor: string): string {
 export function gerarCsv(cabecalho: readonly string[], linhas: readonly (readonly string[])[]): string {
   return '﻿' + [cabecalho, ...linhas].map((l) => l.map(campo).join(SEPARADOR)).join('\r\n') + '\r\n'
 }
-
-/** Baixa `conteudo` como `nomeArquivo` e libera a URL temporária. */
-export function baixarArquivo(nomeArquivo: string, conteudo: string, tipo: string): void {
-  const url = URL.createObjectURL(new Blob([conteudo], { type: tipo }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = nomeArquivo
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
-}
