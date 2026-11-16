@@ -9,6 +9,7 @@ import { coletasEmAndamento, proximaColeta, situacaoDaColeta } from '../lib/cole
 import { formatDataHora } from '../lib/datetime'
 import {
   MOSTRAR_ACOMPANHAMENTO,
+  MOSTRAR_DOCUMENTOS,
   MOSTRAR_EXAMES_RECENTES,
   MOSTRAR_PROXIMOS_PASSOS_EXTRAS,
   MOSTRAR_RESULTADO_HERO,
@@ -27,6 +28,8 @@ function saudacao(agora: Date): string {
 
 interface Passo {
   icon: IconName
+  /** coral: algo que o paciente precisa resolver. */
+  tone?: 'coral'
   title: string
   sub: string
   action: string
@@ -79,9 +82,11 @@ export interface HomePageProps {
   onAgendar: () => void
   onVerColetas: () => void
   onVerResultados: () => void
+  /** Documentos com a caixa de envio aberta (/documentos?enviar=1). */
+  onGuardarDocumento: () => void
 }
 
-export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColetas, onVerResultados }: HomePageProps) {
+export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColetas, onVerResultados, onGuardarDocumento }: HomePageProps) {
   const { exams, loading: carregandoExames, error: erroExames } = useResultados()
   const { agendamentos, loading: carregandoColetas, error: erroColetas, reload: recarregarColetas } = useAgendamentos()
 
@@ -101,8 +106,34 @@ export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColet
         action: 'Agendar',
         onClick: onAgendar,
       }
-  const passos = MOSTRAR_PROXIMOS_PASSOS_EXTRAS ? [passoDaColeta, ...PASSOS_EXTRAS] : [passoDaColeta]
   const emAndamento = coletasEmAndamento(agendamentos)
+  const comPendencia = emAndamento.find((c) => c.status === 'bloqueado')
+  const passoDaPendencia: Passo | null = comPendencia
+    ? {
+        icon: 'alert-triangle',
+        tone: 'coral',
+        title: 'Resolver pendência na recepção',
+        sub: `${comPendencia.postoNome} · verifique identidade, guia e pedido médico`,
+        action: 'Ver',
+        onClick: () => onOpenColeta(comPendencia.id),
+      }
+    : null
+  const passoDoDocumento: Passo | null = MOSTRAR_DOCUMENTOS
+    ? {
+        icon: 'upload',
+        title: 'Guardar um documento',
+        sub: 'Identidade, carteirinha e pedidos médicos',
+        action: 'Enviar',
+        onClick: onGuardarDocumento,
+      }
+    : null
+  // Até 3, nesta ordem: o que precisa ser resolvido, a coleta e o documento.
+  const passos = [
+    ...(passoDaPendencia ? [passoDaPendencia] : []),
+    passoDaColeta,
+    ...(passoDoDocumento ? [passoDoDocumento] : []),
+    ...(MOSTRAR_PROXIMOS_PASSOS_EXTRAS ? PASSOS_EXTRAS : []),
+  ].slice(0, 3)
 
   const ultimoLiberado = exams.find((e) => e.status === 'ready')
   // "Primeira coleta" é uma afirmação sobre a conta: só com as duas listas
@@ -181,7 +212,7 @@ export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColet
           <div>
             {passos.map((p) => (
               <div key={p.title} className="flex items-center gap-3 py-3 border-t border-line first:border-t-0">
-                <IconTile name={p.icon} size={36} />
+                <IconTile name={p.icon} size={36} {...(p.tone ? { tone: p.tone } : {})} />
                 <div className="flex-1 min-w-0">
                   <div className="text-[14px] font-semibold">{p.title}</div>
                   <div className="text-[12px] text-muted tabular-nums">{p.sub}</div>

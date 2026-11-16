@@ -59,6 +59,7 @@ const acoes = {
   onAgendar: vi.fn(),
   onVerColetas: vi.fn(),
   onVerResultados: vi.fn(),
+  onGuardarDocumento: vi.fn(),
 }
 
 function exame(over: Partial<Exam> = {}): Exam {
@@ -154,6 +155,27 @@ describe('próximos passos', () => {
     expect(passos().queryByText('Agendar nova coleta')).toBeNull()
     fireEvent.click(passos().getByRole('button', { name: 'Ver' }))
     expect(acoes.onOpenColeta).toHaveBeenCalledWith('antes')
+  })
+
+  it('ordem: pendência, coleta e documento, no máximo 3', () => {
+    coletas.agendamentos = [coleta({ id: 'pend', status: 'bloqueado', postoNome: 'Unidade Pendência' })]
+    abrir()
+    const titulos = passos()
+      .getAllByText(/^(Resolver pendência na recepção|Preparo para a próxima coleta|Agendar nova coleta|Guardar um documento)$/)
+      .map((el) => el.textContent)
+    expect(titulos[0]).toBe('Resolver pendência na recepção')
+    expect(titulos[titulos.length - 1]).toBe('Guardar um documento')
+    expect(titulos.length).toBeLessThanOrEqual(3)
+    expect(passos().getByText('Unidade Pendência · verifique identidade, guia e pedido médico')).toBeTruthy()
+  })
+
+  it('"Resolver pendência" abre a coleta; "Enviar" abre o envio de documentos', () => {
+    coletas.agendamentos = [coleta({ id: 'pend', status: 'bloqueado' })]
+    abrir()
+    fireEvent.click(passos().getAllByRole('button', { name: 'Ver' })[0]!)
+    expect(acoes.onOpenColeta).toHaveBeenCalledWith('pend')
+    fireEvent.click(passos().getByRole('button', { name: 'Enviar' }))
+    expect(acoes.onGuardarDocumento).toHaveBeenCalledOnce()
   })
 
   it('não diz para agendar enquanto as coletas carregam', () => {
@@ -415,9 +437,11 @@ describe('passos extras (MOSTRAR_PROXIMOS_PASSOS_EXTRAS)', () => {
     flags.extras = true
     abrir()
     const titulos = within(screen.getByRole('region', { name: 'Próximos passos' }))
+    // Coleta e documento vêm antes; o limite de 3 deixa um extra só.
     expect(titulos.getByText('Agendar nova coleta')).toBeTruthy()
+    expect(titulos.getByText('Guardar um documento')).toBeTruthy()
     expect(titulos.getByText('Compartilhar com médico')).toBeTruthy()
-    expect(titulos.getByText('Baixar todos os laudos')).toBeTruthy()
+    expect(titulos.queryByText('Baixar todos os laudos')).toBeNull()
   })
 })
 
