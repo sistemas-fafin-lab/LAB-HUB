@@ -120,6 +120,7 @@ vi.mock('./lib/analytics', () => ({
 const { App } = await import('./App')
 const { avisaSessaoExpirada } = await import('./lib/sessao')
 const { avisar } = await import('./lib/avisos')
+const { marcarEntrada } = await import('./lib/boasVindas')
 
 const SESSAO = { user: { id: 'auth-1', email: PACIENTE.email } }
 
@@ -404,6 +405,31 @@ describe('sair', () => {
 
     act(() => auth.set(SESSAO))
     expect(caminho()).toBe('/')
+  })
+})
+
+describe('avisos de entrada e saída', () => {
+  it('depois do logout, a entrada mostra "Você saiu da sua conta"', async () => {
+    abre('/perfil')
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /Sair/ })))
+    expect(caminho()).toBe('/entrar')
+    expect(screen.getByText('Você saiu da sua conta')).toBeTruthy()
+    expect(screen.getByText('Até a próxima.')).toBeTruthy()
+  })
+
+  it('depois do login, dá boas-vindas uma vez, com o primeiro nome', () => {
+    marcarEntrada()
+    const { unmount } = abre('/')
+    expect(screen.getByText('Bem-vindo de volta, Maria')).toBeTruthy()
+    unmount()
+    // Recarregar não repete o aviso.
+    abre('/')
+    expect(screen.queryByText('Bem-vindo de volta, Maria')).toBeNull()
+  })
+
+  it('sem login nesta carga (reload), não dá boas-vindas', () => {
+    abre('/')
+    expect(screen.queryByText(/Bem-vindo de volta,/)).toBeNull()
   })
 })
 

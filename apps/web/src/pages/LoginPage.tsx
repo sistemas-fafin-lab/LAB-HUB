@@ -7,6 +7,7 @@ import { validarEmail } from '../lib/validators'
 import { mensagemErroLogin } from '../lib/errosAuth'
 import { track } from '../lib/analytics'
 import { comTransicao } from '../lib/transicao'
+import { marcarEntrada } from '../lib/boasVindas'
 
 type FieldErrors = {
   email?: string | undefined
@@ -58,6 +59,7 @@ export function LoginPage({ onEsqueciSenha }: LoginPageProps) {
     const { error: signInError } = await comTransicao('Preparando seus resultados', () =>
       supabase.auth.signInWithPassword({ email, password }),
     )
+    if (!signInError) marcarEntrada()
     if (signInError) {
       setError(mensagemErroLogin(signInError.message))
       // Só a mensagem do Supabase ("Invalid login credentials"), nunca o e-mail.

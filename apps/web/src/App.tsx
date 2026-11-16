@@ -39,6 +39,10 @@ import {
   resolveRota,
 } from './lib/rotas'
 import { lerTema, salvarTema } from './lib/tema'
+import { avisar } from './lib/avisos'
+import { consumirEntrada } from './lib/boasVindas'
+import { primeiroNome } from './lib/paciente'
+import { Avisos } from './components/shell/Avisos'
 import { tituloDaRota, useTituloDaAba } from './lib/tituloDaAba'
 import type { Exam } from './lib/exame'
 
@@ -85,6 +89,10 @@ function PortalSobTransicao() {
   const transicao = useTransicao()
   return (
     <>
+      {/* Fora do shell, para os avisos de saída aparecerem já na entrada. E
+          antes do portal: os efeitos rodam em ordem, então o ouvinte já está
+          inscrito quando o portal avisa ao montar (boas-vindas). */}
+      <Avisos />
       <div inert={transicao !== null}>
         <Portal />
       </div>
@@ -123,11 +131,15 @@ function Portal() {
 
   // Sair leva à entrada sem `next`: quem entrar em seguida (talvez outra
   // pessoa, na mesma aba) começa pela Visão geral, não no Perfil de quem saiu.
-  const handleLogout = async () => {
+  const sair = async (aviso: Parameters<typeof avisar>[0]) => {
     saiuNestaAba = true
     await comTransicao('Saindo com segurança', signOut)
     navegar(CAMINHO_ENTRAR, { substituir: true })
+    avisar(aviso)
   }
+  const handleLogout = () => sair({ title: 'Você saiu da sua conta', message: 'Até a próxima.' })
+  // A conta já foi excluída na API: a mesma saída, com o aviso dela.
+  const handleContaExcluida = () => sair({ title: 'Conta excluída' })
 
   // Sessão recusada pela API (401): sai SEM marcar `saiuNestaAba`, para o
   // login devolver o paciente à tela onde a sessão caiu.
@@ -140,7 +152,14 @@ function Portal() {
     }
   }
 
-  return <AuthedApp local={local} onLogout={handleLogout} onSessaoExpirada={handleSessaoExpirada} />
+  return (
+    <AuthedApp
+      local={local}
+      onLogout={handleLogout}
+      onContaExcluida={handleContaExcluida}
+      onSessaoExpirada={handleSessaoExpirada}
+    />
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +170,11 @@ function Portal() {
 interface AuthedAppProps {
   local: Local
   onLogout: () => void | Promise<void>
+  onContaExcluida: () => void | Promise<void>
   onSessaoExpirada: () => void | Promise<void>
 }
 
-function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
+function AuthedApp({ local, onLogout, onContaExcluida, onSessaoExpirada }: AuthedAppProps) {
   const { paciente, loading: carregandoPaciente, error: erroPaciente, setPaciente, recarregar: recarregarPaciente } = usePaciente()
   const { exams, loading: carregandoExames } = useResultados()
   const [dark, setDark] = useState(lerTema)
@@ -182,6 +202,13 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   }
 
   const nome = paciente?.nome ?? ''
+
+  // Boas-vindas uma vez por login (nunca num reload), já com o nome carregado.
+  useEffect(() => {
+    if (nome !== '' && consumirEntrada()) {
+      avisar({ title: `Bem-vindo de volta, ${primeiroNome(nome)}`, message: 'Seus exames estão atualizados.' })
+    }
+  }, [nome])
   const rota = resolveRota(local.pathname)
 
   // Exame da rota: a lista da conta primeiro (a versão mais nova), o aberto em
@@ -275,7 +302,7 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   } else if (rota.tela === 'billing') {
     content = <BillingPage />
   } else if (rota.tela === 'settings') {
-    content = <SettingsPage dark={dark} onSetDark={handleSetDark} />
+    content = <SettingsPage dark={dark} onSetDark={handleSetDark} onContaExcluida={onContaExcluida} />
   } else if (rota.tela === 'profile') {
     content = (
       <ProfilePage
