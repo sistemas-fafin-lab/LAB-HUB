@@ -6,7 +6,8 @@ import { supabase } from '../lib/supabase'
 import { validarSenha } from '../lib/validators'
 import { erroNovaSenha } from '../lib/errosAuth'
 import { navegar } from '../lib/router'
-import { CAMINHO_DA_TELA } from '../lib/rotas'
+import { CAMINHO_DA_TELA, CAMINHO_ENTRAR } from '../lib/rotas'
+import { doisFatores } from '../lib/doisFatores'
 
 interface NovaSenhaPageProps {
   /** Sessão de recuperação aberta pelo link do e-mail (o Supabase lê o link). */
@@ -28,6 +29,7 @@ export function NovaSenhaPage({ comSessao, onPedirNovoLink, onVoltar }: NovaSenh
   const [senha, setSenha] = useState('')
   const [confirmacao, setConfirmacao] = useState('')
   const [errors, setErrors] = useState<FieldErrors>({})
+  const [paraOLogin, setParaOLogin] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [estado, setEstado] = useState<'form' | 'concluido' | 'expirado'>('form')
@@ -47,11 +49,22 @@ export function NovaSenhaPage({ comSessao, onPedirNovoLink, onVoltar }: NovaSenh
 
     setSalvando(true)
     const { error } = await supabase.auth.updateUser({ password: senha })
-    setSalvando(false)
     if (!error) {
+      // Com a verificação em duas etapas, a sessão do link não entrou pela
+      // senha: encerra e manda ao login normal (senha e código).
+      try {
+        if ((await doisFatores.estado()).ativa) {
+          await supabase.auth.signOut()
+          setParaOLogin(true)
+        }
+      } catch {
+        // Sem a situação, segue como antes; a API ainda pede o código.
+      }
+      setSalvando(false)
       setEstado('concluido')
       return
     }
+    setSalvando(false)
     const falha = erroNovaSenha(error.message)
     if (falha.tipo === 'link-expirado') setEstado('expirado')
     else if (falha.tipo === 'campo') setErrors({ senha: falha.mensagem })
@@ -78,9 +91,15 @@ export function NovaSenhaPage({ comSessao, onPedirNovoLink, onVoltar }: NovaSenh
     return (
       <>
         <TituloAcesso titulo="Senha alterada" sub="Use a nova senha nos próximos acessos." />
-        <Btn size="lg" fullWidth iconRight="arrow-right" onClick={() => navegar(CAMINHO_DA_TELA.home, { substituir: true })}>
-          Continuar
-        </Btn>
+        {paraOLogin ? (
+          <Btn size="lg" fullWidth iconRight="arrow-right" onClick={() => navegar(CAMINHO_ENTRAR, { substituir: true })}>
+            Ir para o login
+          </Btn>
+        ) : (
+          <Btn size="lg" fullWidth iconRight="arrow-right" onClick={() => navegar(CAMINHO_DA_TELA.home, { substituir: true })}>
+            Continuar
+          </Btn>
+        )}
       </>
     )
   }

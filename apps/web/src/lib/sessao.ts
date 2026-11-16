@@ -22,3 +22,21 @@ export function aoExpirarSessao(ouvinte: Ouvinte): () => void {
     ouvintes.delete(ouvinte)
   }
 }
+
+// ---------------------------------------------------------------------------
+// Verificação em duas etapas pendente — a API respondeu 403
+// DOIS_FATORES_PENDENTE: a sessão entrou pela senha e falta o código.
+// ---------------------------------------------------------------------------
+
+const ouvintesDoisFatores = new Set<Ouvinte>()
+
+export function avisaDoisFatoresPendente(): void {
+  for (const ouvinte of ouvintesDoisFatores) ouvinte()
+}
+
+export function aoPedirDoisFatores(ouvinte: Ouvinte): () => void {
+  ouvintesDoisFatores.add(ouvinte)
+  return () => {
+    ouvintesDoisFatores.delete(ouvinte)
+  }
+}

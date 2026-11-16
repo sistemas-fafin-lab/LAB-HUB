@@ -1,6 +1,6 @@
 import type { AdminConsultaResultadosResposta, DocumentoUrl } from '@lab-hub/shared'
 import { supabase } from './supabase'
-import { avisaSessaoExpirada } from './sessao'
+import { avisaDoisFatoresPendente, avisaSessaoExpirada } from './sessao'
 
 // Cliente HTTP da API (apps/api). Anexa o JWT do Supabase em cada request.
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3333'
@@ -13,6 +13,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** Código estável da API (ex.: 'CODIGO_INVALIDO'), quando ela manda um. */
+    readonly codigo?: string,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -55,13 +57,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // administrativa por CPF), não sessão vencida.
     if (res.status === 401) avisaSessaoExpirada()
     let detail = ''
+    let codigo: string | undefined
     try {
-      const body = (await res.json()) as { message?: string }
+      const body = (await res.json()) as { message?: string; codigo?: string }
       if (body?.message) detail = body.message
+      if (typeof body?.codigo === 'string') codigo = body.codigo
     } catch {
       /* corpo não-JSON: cai no texto padrão do status */
     }
-    throw new ApiError(res.status, detail || mensagemPadrao(res.status))
+    // A sessão entrou pela senha mas falta o código da verificação em duas
+    // etapas: o App mostra a tela do código (não a caixa de sessão expirada).
+    if (res.status === 403 && codigo === 'DOIS_FATORES_PENDENTE') avisaDoisFatoresPendente()
+    throw new ApiError(res.status, detail || mensagemPadrao(res.status), codigo)
   }
 
   // 204 não tem corpo (ex.: DELETE /documentos/:id) — res.json() lançaria
@@ -77,7 +84,8 @@ export const api = {
     request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown): Promise<T> =>
     request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
-  del: <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' }),
+  del: <T>(path: string, body?: unknown): Promise<T> =>
+    request<T>(path, { method: 'DELETE', ...(body === undefined ? {} : { body: JSON.stringify(body) }) }),
   // Upload multipart (POST /documentos). O Content-Type sai do próprio FormData.
   upload: <T>(path: string, form: FormData): Promise<T> =>
     request<T>(path, { method: 'POST', body: form }),

@@ -9,6 +9,8 @@ import { mensagemErroLogin } from '../lib/errosAuth'
 import { track } from '../lib/analytics'
 import { comTransicao } from '../lib/transicao'
 import { marcarEntrada } from '../lib/boasVindas'
+import { doisFatores } from '../lib/doisFatores'
+import { chaveDaSessao, registrarSituacao } from '../lib/segundaEtapa'
 
 type FieldErrors = {
   email?: string | undefined
@@ -60,9 +62,19 @@ export function LoginPage({ onEsqueciSenha }: LoginPageProps) {
     // Antes do login: é ela que diz onde o Supabase guarda a sessão nova.
     salvarManterConectado(manter)
     // Sucesso: o onAuthStateChange do AuthProvider troca a tela automaticamente.
-    const { error: signInError } = await comTransicao('Preparando seus resultados', () =>
-      supabase.auth.signInWithPassword({ email, password }),
-    )
+    // Dentro da transição também a situação da verificação em duas etapas: o
+    // App já abre direto na tela do código, sem mostrar o portal antes.
+    const { error: signInError } = await comTransicao('Preparando seus resultados', async () => {
+      const resposta = await supabase.auth.signInWithPassword({ email, password })
+      if (!resposta.error) {
+        try {
+          registrarSituacao(chaveDaSessao(resposta.data.session), await doisFatores.estado())
+        } catch {
+          // Sem a situação, o App abre o portal e a API decide (403 → código).
+        }
+      }
+      return resposta
+    })
     if (!signInError) marcarEntrada()
     if (signInError) {
       setError(mensagemErroLogin(signInError.message))

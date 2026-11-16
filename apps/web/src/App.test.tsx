@@ -122,6 +122,8 @@ const { App } = await import('./App')
 const { avisaSessaoExpirada } = await import('./lib/sessao')
 const { avisar } = await import('./lib/avisos')
 const { marcarEntrada } = await import('./lib/boasVindas')
+const { avisaDoisFatoresPendente } = await import('./lib/sessao')
+const { marcarLiberada } = await import('./lib/segundaEtapa')
 
 const SESSAO = { user: { id: 'auth-1', email: PACIENTE.email } }
 
@@ -164,6 +166,8 @@ function abre(url: string) {
 const caminho = () => window.location.pathname + window.location.search
 
 beforeEach(() => {
+  // A situação da segunda etapa vive em módulo: um caso não herda a do outro.
+  marcarLiberada(null)
   auth.loading = false
   auth.saida = null
   auth.set(SESSAO)
@@ -441,6 +445,26 @@ describe('avisos de entrada e saída', () => {
   it('sem login nesta carga (reload), não dá boas-vindas', () => {
     abre('/')
     expect(screen.queryByText(/Bem-vindo de volta,/)).toBeNull()
+  })
+})
+
+describe('verificação em duas etapas', () => {
+  it('o 403 DOIS_FATORES_PENDENTE da API leva à tela do código, sem mudar a URL', () => {
+    abre('/resultados')
+    act(() => avisaDoisFatoresPendente())
+    expect(screen.getByRole('heading', { level: 1, name: 'Confirme que é você' })).toBeTruthy()
+    expect(screen.getByText('m•••@example.com')).toBeTruthy()
+    expect(caminho()).toBe('/resultados')
+    // A caixa de sessão expirada não aparece: não é sessão vencida.
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('"Voltar" encerra a sessão e volta ao login', async () => {
+    abre('/resultados')
+    act(() => avisaDoisFatoresPendente())
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Voltar' })))
+    expect(caminho()).toBe('/entrar')
+    expect(screen.getByRole('heading', { level: 1, name: 'Bem-vindo de volta' })).toBeTruthy()
   })
 })
 

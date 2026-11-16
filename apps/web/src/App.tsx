@@ -43,6 +43,18 @@ import { avisar } from './lib/avisos'
 import { consumirEntrada } from './lib/boasVindas'
 import { primeiroNome } from './lib/paciente'
 import { Avisos } from './components/shell/Avisos'
+import { MolduraAcesso } from './components/acesso/MolduraAcesso'
+import { TelaCodigo } from './components/acesso/TelaCodigo'
+import { marcarEntrada } from './lib/boasVindas'
+import { doisFatores } from './lib/doisFatores'
+import { aoPedirDoisFatores } from './lib/sessao'
+import {
+  chaveDaSessao,
+  marcarLiberada,
+  marcarPendente,
+  registrarSituacao,
+  useSituacaoDaSegundaEtapa,
+} from './lib/segundaEtapa'
 import { tituloDaRota, useTituloDaAba } from './lib/tituloDaAba'
 import type { Exam } from './lib/exame'
 
@@ -111,6 +123,27 @@ function Portal() {
   const local = useLocal()
   useInterceptaLinks()
 
+  // Verificação em duas etapas: a sessão que entrou pela senha e ainda não
+  // passou pelo código vê só a tela do código (a API recusa o resto).
+  const chave = chaveDaSessao(session)
+  const segundaEtapa = useSituacaoDaSegundaEtapa(chave)
+  useEffect(() => aoPedirDoisFatores(() => marcarPendente(chave)), [chave])
+  useEffect(() => {
+    if (session === null || segundaEtapa.tipo !== 'desconhecida') return
+    let vivo = true
+    doisFatores
+      .estado()
+      .then((e) => {
+        if (vivo) registrarSituacao(chave, e)
+      })
+      .catch(() => {
+        // Sem resposta, o portal segue; a API ainda recusa com 403 se faltar o código.
+      })
+    return () => {
+      vivo = false
+    }
+  }, [session, chave, segundaEtapa.tipo])
+
   // Splash azul enquanto a sessão é restaurada: também não dá flash branco a
   // quem usa o modo escuro.
   if (loading) return <Splash />
@@ -120,10 +153,27 @@ function Portal() {
     if (naEntrada) return <AuthGate comSessao={false} />
     return <Redireciona para={entradaPara(local.pathname + local.search)} />
   }
+  // O link de recuperação do e-mail chega já com sessão (o Supabase o troca
+  // por uma): a nova senha é a única tela da entrada que se usa logado — e vale
+  // antes da segunda etapa, porque essa sessão não entrou pela senha.
+  if (naEntrada && modoDaEntrada(local.search) === 'nova-senha') return <AuthGate comSessao />
+  if (segundaEtapa.tipo === 'pendente') {
+    return (
+      <SegundaEtapa
+        email={session.user.email ?? null}
+        enviadoEm={segundaEtapa.enviadoEm}
+        onVerificado={() => {
+          marcarLiberada(chave)
+          marcarEntrada()
+        }}
+        onVoltar={async () => {
+          await signOut()
+          navegar(CAMINHO_ENTRAR, { substituir: true })
+        }}
+      />
+    )
+  }
   if (naEntrada) {
-    // O link de recuperação do e-mail chega já com sessão (o Supabase o troca
-    // por uma): a nova senha é a única tela da entrada que se usa logado.
-    if (modoDaEntrada(local.search) === 'nova-senha') return <AuthGate comSessao />
     const next = new URLSearchParams(local.search).get('next')
     return <Redireciona para={caminhoInterno(next) ?? CAMINHO_DA_TELA.home} />
   }
@@ -159,6 +209,22 @@ function Portal() {
       onContaExcluida={handleContaExcluida}
       onSessaoExpirada={handleSessaoExpirada}
     />
+  )
+}
+
+/** A tela do código na moldura da entrada, sem mudar a URL. */
+function SegundaEtapa(props: Parameters<typeof TelaCodigo>[0]) {
+  const [dark, setDark] = useState(lerTema)
+  return (
+    <MolduraAcesso
+      dark={dark}
+      onToggleDark={() => {
+        salvarTema(!dark)
+        setDark(!dark)
+      }}
+    >
+      <TelaCodigo {...props} />
+    </MolduraAcesso>
   )
 }
 

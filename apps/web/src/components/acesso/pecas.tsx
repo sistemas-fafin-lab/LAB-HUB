@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import * as DS from '../../ds'
-import { Field, IconBtn } from '../portal'
+import { Field, IconBtn, MensagemDeErro } from '../portal'
+import { ESPERA_PARA_REENVIAR_S } from '../../lib/doisFatores'
 import { REGRAS_SENHA } from '../../lib/validators'
 
 /** Título da tela de acesso (o h1 da página), com o bloco azul no fim. */
@@ -108,5 +109,125 @@ export function RegrasSenha({ senha }: { senha: string }) {
         )
       })}
     </ul>
+  )
+}
+
+const DIGITOS = 6
+
+interface CodigoVerificacaoProps {
+  valor: string
+  onChange: (valor: string) => void
+  /** Borda coral e a mensagem abaixo dos campos. */
+  erro?: string | null
+  disabled?: boolean
+}
+
+/**
+ * Código de 6 dígitos em 6 campos. Colar distribui os dígitos, Backspace volta
+ * ao campo anterior e as setas andam entre os campos. O foco começa no primeiro.
+ */
+export function CodigoVerificacao({ valor, onChange, erro = null, disabled = false }: CodigoVerificacaoProps) {
+  const campos = useRef<(HTMLInputElement | null)[]>([])
+  const idRotulo = useId()
+  const idErro = useId()
+  const digitos = Array.from({ length: DIGITOS }, (_, i) => valor[i] ?? '')
+
+  useEffect(() => {
+    campos.current[0]?.focus()
+  }, [])
+
+  const foca = (i: number) => campos.current[Math.max(0, Math.min(DIGITOS - 1, i))]?.focus()
+
+  const escreve = (i: number, texto: string) => {
+    const novos = texto.replace(/\D/g, '')
+    if (novos === '') return
+    const atual = [...digitos]
+    for (let j = 0; j < novos.length && i + j < DIGITOS; j++) atual[i + j] = novos[j]!
+    onChange(atual.join('').slice(0, DIGITOS))
+    foca(i + novos.length)
+  }
+
+  const aoTeclar = (i: number, e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace') {
+      e.preventDefault()
+      const atual = [...digitos]
+      if (atual[i]) {
+        atual[i] = ''
+        onChange(atual.join(''))
+      } else if (i > 0) {
+        atual[i - 1] = ''
+        onChange(atual.join(''))
+        foca(i - 1)
+      }
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      foca(i - 1)
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      foca(i + 1)
+    }
+  }
+
+  return (
+    <div role="group" aria-labelledby={idRotulo} {...(erro ? { 'aria-describedby': idErro } : {})}>
+      <div id={idRotulo} className="text-[14px] font-medium mb-2">
+        Código de verificação
+      </div>
+      <div className="flex gap-2">
+        {digitos.map((d, i) => (
+          <input
+            key={i}
+            ref={(el) => {
+              campos.current[i] = el
+            }}
+            value={d}
+            disabled={disabled}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={DIGITOS}
+            {...(i === 0 ? { autoComplete: 'one-time-code' } : { autoComplete: 'off' })}
+            aria-label={`Dígito ${i + 1}`}
+            aria-invalid={erro ? true : undefined}
+            onChange={(e) => escreve(i, e.target.value.slice(d ? 1 : 0) || e.target.value)}
+            onPaste={(e) => {
+              e.preventDefault()
+              escreve(0, e.clipboardData.getData('text'))
+            }}
+            onKeyDown={(e) => aoTeclar(i, e)}
+            onFocus={(e) => e.target.select()}
+            className="lh-field w-12 h-14 rounded-[12px] border-[1.5px] bg-card text-center font-display font-medium text-[24px] tabular-nums outline-none"
+            style={{ borderColor: erro ? 'var(--lh-coral)' : d ? 'var(--lh-brand)' : 'var(--lh-line-strong)' }}
+          />
+        ))}
+      </div>
+      {erro && (
+        <div id={idErro} className="mt-2">
+          <MensagemDeErro>{erro}</MensagemDeErro>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** "Reenviar código em 0:SS" e, depois, o link para reenviar. */
+export function ReenviarCodigo({ enviadoEm, onReenviar }: { enviadoEm: number | null; onReenviar: () => void }) {
+  const [agora, setAgora] = useState(() => Date.now())
+  const restante = enviadoEm === null ? 0 : Math.max(0, Math.ceil((enviadoEm + ESPERA_PARA_REENVIAR_S * 1000 - agora) / 1000))
+  useEffect(() => {
+    if (restante === 0) return
+    const t = setInterval(() => setAgora(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [restante])
+  if (restante > 0) {
+    return (
+      <p className="text-[13px] text-muted tabular-nums">
+        Reenviar código em 0:{String(restante).padStart(2, '0')}
+      </p>
+    )
+  }
+  return (
+    <button type="button" onClick={onReenviar} className="min-h-[44px] inline-flex items-center text-[13px] font-medium text-link hover:underline">
+      Reenviar código
+    </button>
   )
 }

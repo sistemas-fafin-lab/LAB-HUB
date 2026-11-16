@@ -11,6 +11,11 @@ vi.mock('../lib/api', async (importOriginal) => {
   return { ...real, api: { del: vi.fn() } }
 })
 vi.mock('../lib/analytics', () => ({ track: vi.fn() }))
+const df = vi.hoisted(() => ({ estado: vi.fn(), enviar: vi.fn(), preferencia: vi.fn() }))
+vi.mock('../lib/doisFatores', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/doisFatores')>()),
+  doisFatores: df,
+}))
 
 const UA_CHROME_WINDOWS =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
@@ -36,7 +41,11 @@ function armazenamentoEmMemoria() {
   })
 }
 
-beforeEach(armazenamentoEmMemoria)
+beforeEach(() => {
+  armazenamentoEmMemoria()
+  df.estado.mockResolvedValue({ ativa: false, pendente: false, enviadoEm: null })
+  df.enviar.mockResolvedValue({ enviadoEm: new Date().toISOString() })
+})
 afterEach(() => {
   salvarFuso('America/Sao_Paulo')
   vi.unstubAllGlobals()
@@ -76,14 +85,14 @@ describe('flags (desligadas)', () => {
   it('sem MOSTRAR_NOVIDADES, não há o cartão de novidades', () => {
     renderiza()
     expect(screen.queryByText('Como você quer receber novidades')).toBeNull()
-    expect(screen.queryByRole('switch')).toBeNull()
+    // O único interruptor que sobra é o da verificação em duas etapas (real).
+    expect(screen.getAllByRole('switch').map((s) => s.getAttribute('aria-label'))).toEqual(['Verificação em duas etapas'])
   })
 
-  it('sem MOSTRAR_PRIVACIDADE_EXTRAS, Privacidade e segurança traz só "Excluir minha conta"', () => {
+  it('sem MOSTRAR_PRIVACIDADE_EXTRAS, Privacidade e segurança não traz "Compartilhar com médicos"', () => {
     renderiza()
     const privacidade = within(painel('Privacidade e segurança'))
     expect(privacidade.queryByText('Compartilhar com médicos')).toBeNull()
-    expect(privacidade.queryByText('Verificação em duas etapas')).toBeNull()
     expect(privacidade.getByText('Excluir minha conta')).toBeTruthy()
     expect(privacidade.getByText('Encerra o acesso e apaga seus documentos e contatos')).toBeTruthy()
     expect(privacidade.getByRole('button', { name: 'Solicitar' })).toBeTruthy()
@@ -186,5 +195,39 @@ describe('excluir a conta', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Excluir conta' })))
     await waitFor(() => expect(recebidos[0]?.message).toBe('Muitas tentativas. Aguarde um minuto e tente de novo.'))
     cancela()
+  })
+})
+
+describe('verificação em duas etapas', () => {
+  const interruptor = () => screen.getByRole('switch', { name: 'Verificação em duas etapas' })
+
+  it('ligar pede o código; com ele, liga e avisa', async () => {
+    const recebidos: Aviso[] = []
+    const cancela = aoAvisar((a) => recebidos.push(a))
+    df.preferencia.mockResolvedValue({ ativa: true })
+    renderiza()
+    await waitFor(() => expect(interruptor().getAttribute('aria-disabled')).toBeNull())
+    fireEvent.click(interruptor())
+    const caixa = within(screen.getByRole('dialog', { name: 'Confirme com o código' }))
+    expect(df.enviar).toHaveBeenCalledWith('confirmacao')
+    fireEvent.paste(caixa.getByLabelText('Dígito 1'), { clipboardData: { getData: () => '123456' } })
+    await act(async () => fireEvent.click(caixa.getByRole('button', { name: 'Ligar verificação' })))
+    expect(df.preferencia).toHaveBeenCalledWith(true, '123456')
+    expect(interruptor().getAttribute('aria-checked')).toBe('true')
+    expect(recebidos.some((a) => a.title === 'Verificação em duas etapas ligada')).toBe(true)
+    cancela()
+  })
+
+  it('com a verificação ligada, excluir a conta também pede o código', async () => {
+    df.estado.mockResolvedValue({ ativa: true, pendente: false, enviadoEm: null })
+    vi.mocked(api.del).mockResolvedValue(undefined)
+    const { onContaExcluida } = renderiza()
+    await waitFor(() => expect(interruptor().getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(screen.getByRole('button', { name: 'Solicitar' }))
+    const caixa = within(screen.getByRole('dialog', { name: 'Excluir sua conta?' }))
+    fireEvent.paste(caixa.getByLabelText('Dígito 1'), { clipboardData: { getData: () => '654321' } })
+    await act(async () => fireEvent.click(caixa.getByRole('button', { name: 'Excluir conta' })))
+    expect(api.del).toHaveBeenCalledWith('/pacientes/me', { codigo: '654321' })
+    expect(onContaExcluida).toHaveBeenCalledOnce()
   })
 })
