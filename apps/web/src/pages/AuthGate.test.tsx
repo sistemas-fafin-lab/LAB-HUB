@@ -12,7 +12,8 @@ const supa = vi.hoisted(() => ({
   resetPasswordForEmail: vi.fn(),
   updateUser: vi.fn(),
 }))
-vi.mock('../lib/supabase', () => ({ supabase: { auth: supa } }))
+const salvarManterConectado = vi.hoisted(() => vi.fn())
+vi.mock('../lib/supabase', () => ({ supabase: { auth: supa }, salvarManterConectado }))
 
 const apiPost = vi.hoisted(() => vi.fn())
 vi.mock('../lib/api', () => ({ api: { post: apiPost } }))
@@ -104,6 +105,22 @@ describe('login', () => {
     expect(supa.signInWithPassword).toHaveBeenCalledWith({ email: 'maria@example.com', password: 'senha-legada' })
     expect(track).toHaveBeenCalledWith('login_submit')
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('"Manter conectado" vem marcado; a escolha é gravada antes do login', async () => {
+    abre('/entrar')
+    const caixa = screen.getByRole('checkbox', { name: 'Manter conectado' })
+    expect(caixa.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(screen.getByText('Manter conectado'))
+    digita('E-mail', 'maria@example.com')
+    digita('Senha', 'senha-legada')
+    supa.signInWithPassword.mockImplementation(async () => {
+      // Já gravada quando o Supabase cria a sessão.
+      expect(salvarManterConectado).toHaveBeenCalledWith(false)
+      return { error: null }
+    })
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Entrar' })))
+    expect(supa.signInWithPassword).toHaveBeenCalled()
   })
 
   it.each([

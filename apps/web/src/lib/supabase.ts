@@ -20,9 +20,59 @@ if (!url || !chave) {
 const URL_SUPABASE: string = url
 const CHAVE_SUPABASE: string = chave
 
+// "Manter conectado" (login): marcado, a sessão fica no localStorage e
+// sobrevive a fechar o navegador; desmarcado, fica no sessionStorage e acaba
+// com a aba. A escolha é gravada antes do login; sair limpa os dois.
+const CHAVE_MANTER_CONECTADO = 'lh:manter-conectado'
+
+function manterConectado(): boolean {
+  try {
+    return localStorage.getItem(CHAVE_MANTER_CONECTADO) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function salvarManterConectado(manter: boolean): void {
+  try {
+    localStorage.setItem(CHAVE_MANTER_CONECTADO, manter ? '1' : '0')
+  } catch {
+    // Sem armazenamento: vale o padrão (manter).
+  }
+}
+
+const armazem = (): Storage => (manterConectado() ? localStorage : sessionStorage)
+
+export const armazenamentoDaSessao = {
+  getItem(chave: string): string | null {
+    try {
+      return armazem().getItem(chave)
+    } catch {
+      return null
+    }
+  },
+  setItem(chave: string, valor: string): void {
+    try {
+      armazem().setItem(chave, valor)
+    } catch {
+      // Cota ou aba anônima: a sessão vale só enquanto a página estiver aberta.
+    }
+  },
+  removeItem(chave: string): void {
+    for (const s of [() => localStorage, () => sessionStorage]) {
+      try {
+        s().removeItem(chave)
+      } catch {
+        // idem
+      }
+    }
+  },
+}
+
 // Cliente do browser: chave pública (respeita RLS) e sessão persistida.
 export const supabase = createClient(url, chave, {
   auth: {
+    storage: armazenamentoDaSessao,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
