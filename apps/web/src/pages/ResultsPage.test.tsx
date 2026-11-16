@@ -30,7 +30,12 @@ vi.mock('../lib/api', () => ({
   ApiError: ApiErrorMock,
 }))
 
-const { ResultsPage } = await import('./ResultsPage')
+vi.mock('../lib/analytics', () => ({ track: vi.fn() }))
+
+const { ResultsPage, csvDosResultados } = await import('./ResultsPage')
+const { track } = await import('../lib/analytics')
+const { aoAvisar } = await import('../lib/avisos')
+type Aviso = import('../lib/avisos').Aviso
 const { atualizaResultados } = await import('../lib/useResultados')
 
 const ADMIN_EMAIL = 'teste@gmail.com'
@@ -156,7 +161,7 @@ describe('estado vazio', () => {
   it('diz que o FILTRO não casou quando existem exames escondidos por ele', () => {
     monta([exame()])
 
-    fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), { target: { value: 'zzz' } })
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por exame/), { target: { value: 'zzz' } })
 
     // Sem o caminho de volta ao filtro, o paciente com filtro ativo concluía que
     // não tinha exames. E o convite a agendar seria falso aqui.
@@ -169,13 +174,13 @@ describe('estado vazio', () => {
   it('"Limpar filtros" desfaz busca, status e período', () => {
     monta([exame({ name: 'Glicemia' })])
 
-    fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), { target: { value: 'zzz' } })
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por exame/), { target: { value: 'zzz' } })
     fireEvent.click(screen.getByText('Em andamento'))
     fireEvent.change(screen.getByRole('combobox', { name: 'Período' }), { target: { value: '30d' } })
     fireEvent.click(screen.getByRole('button', { name: 'Limpar filtros' }))
 
     expect(screen.getByText('Glicemia')).toBeTruthy()
-    expect(screen.getByPlaceholderText(/Buscar por nome/)).toHaveProperty('value', '')
+    expect(screen.getByPlaceholderText(/Buscar por exame/)).toHaveProperty('value', '')
     expect(screen.getByRole('combobox', { name: 'Período' })).toHaveProperty('value', 'all')
   })
 })
@@ -212,7 +217,7 @@ describe('busca', () => {
     exame({ id: 'b', name: 'Hemograma Completo', category: 'Hematologia' }),
   ]
   const buscar = (texto: string) =>
-    fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), { target: { value: texto } })
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por exame/), { target: { value: texto } })
 
   it('encontra pelo nome, sem diferenciar maiúsculas', () => {
     monta(exames())
@@ -339,7 +344,7 @@ describe('lista', () => {
 
     expect(screen.getByText('2 de 2 exames')).toBeTruthy()
 
-    fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), { target: { value: 'ureia' } })
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por exame/), { target: { value: 'ureia' } })
 
     expect(screen.getByText('1 de 2 exames')).toBeTruthy()
   })
@@ -702,17 +707,17 @@ describe('consulta administrativa por CPF — filtros da visão normal ficam ocu
       paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
       resultados: [resultado({ exameNome: 'Hemograma completo' })],
     })
-    monta([], { paciente: paciente(ADMIN_EMAIL) })
+    monta([exame({ name: 'Ureia' })], { paciente: paciente(ADMIN_EMAIL) })
 
     // Fora do modo admin os filtros da visão normal estão todos lá.
-    expect(screen.getByPlaceholderText(/Buscar por nome/)).toBeTruthy()
+    expect(screen.getByPlaceholderText(/Buscar por exame/)).toBeTruthy()
     expect(screen.getByText('Liberados')).toBeTruthy()
     expect(screen.getByRole('combobox', { name: 'Período' })).toBeTruthy()
 
     buscar(CPF_VALIDO)
     await waitFor(() => expect(screen.getByText('Maria Alvo')).toBeTruthy())
 
-    expect(screen.queryByPlaceholderText(/Buscar por nome/)).toBeNull()
+    expect(screen.queryByPlaceholderText(/Buscar por exame/)).toBeNull()
     expect(screen.queryByText('Liberados')).toBeNull()
     expect(screen.queryByRole('combobox', { name: 'Período' })).toBeNull()
   })
@@ -723,12 +728,12 @@ describe('consulta administrativa por CPF — filtros da visão normal ficam ocu
       paciente: { id: 'alvo-1', nome: 'Maria Alvo', cpf: CPF_VALIDO },
       resultados: [resultado({ exameNome: 'Hemograma completo', status: 'analyzing' })],
     })
-    monta([], { paciente: paciente(ADMIN_EMAIL) })
+    monta([exame({ name: 'Ureia' })], { paciente: paciente(ADMIN_EMAIL) })
 
     // Filtra por "Liberados" e digita um texto que não bate com o exame do
     // paciente consultado — se o bypass do modo admin falhar, o exame some.
     fireEvent.click(screen.getByText('Liberados'))
-    fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), { target: { value: 'zzz' } })
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por exame/), { target: { value: 'zzz' } })
 
     buscar(CPF_VALIDO)
 
@@ -748,7 +753,7 @@ describe('consulta administrativa por CPF — trocar de paciente sem sair da aba
       paciente: { id: 'alvo-1', nome: 'Paciente A', cpf: CPF_VALIDO },
       resultados: [resultado({ exameNome: 'Exame de A' })],
     })
-    monta([], { paciente: paciente(ADMIN_EMAIL) })
+    monta([exame({ name: 'Ureia' })], { paciente: paciente(ADMIN_EMAIL) })
 
     buscar(CPF_VALIDO)
     await waitFor(() => expect(screen.getByText('Exame de A')).toBeTruthy())
@@ -772,7 +777,7 @@ describe('consulta administrativa por CPF — trocar de paciente sem sair da aba
       paciente: { id: 'alvo-1', nome: 'Paciente A', cpf: CPF_VALIDO },
       resultados: [resultado({ exameNome: 'Exame de A' })],
     })
-    monta([], { paciente: paciente(ADMIN_EMAIL) })
+    monta([exame({ name: 'Ureia' })], { paciente: paciente(ADMIN_EMAIL) })
 
     buscar(CPF_VALIDO)
     await waitFor(() => expect(screen.getByText('Exame de A')).toBeTruthy())
@@ -799,7 +804,7 @@ describe('consulta administrativa por CPF — trocar de paciente sem sair da aba
 
   it('uma resposta atrasada de uma consulta anterior não sobrescreve o CPF submetido por último', async () => {
     vi.stubEnv('VITE_ADMIN_EMAIL', ADMIN_EMAIL)
-    monta([], { paciente: paciente(ADMIN_EMAIL) })
+    monta([exame({ name: 'Ureia' })], { paciente: paciente(ADMIN_EMAIL) })
 
     // O botão "Buscar" fica desabilitado durante uma busca em voo (proteção de
     // primeira linha), mas o campo de texto continua ativo — duas teclas Enter
@@ -892,7 +897,7 @@ describe('consulta administrativa por CPF — trocar de aba encerra o modo admin
       paciente: { id: 'alvo-1', nome: 'Paciente A', cpf: CPF_VALIDO },
       resultados: [resultado({ exameNome: 'Exame de A' })],
     })
-    const { unmount } = monta([], { paciente: paciente(ADMIN_EMAIL) })
+    const { unmount } = monta([exame({ name: 'Ureia' })], { paciente: paciente(ADMIN_EMAIL) })
 
     fireEvent.change(screen.getByPlaceholderText(/Consultar por CPF/), { target: { value: CPF_VALIDO } })
     fireEvent.click(screen.getByText('Buscar'))
@@ -905,5 +910,69 @@ describe('consulta administrativa por CPF — trocar de aba encerra o modo admin
     expect(screen.queryByText('Paciente A')).toBeNull()
     expect(screen.getByText('Exame da sessão')).toBeTruthy()
     expect(screen.getByPlaceholderText(/Consultar por CPF/)).toHaveProperty('value', '')
+  })
+})
+
+describe('busca e filtro pela URL', () => {
+  afterEach(() => window.history.replaceState(null, '', '/'))
+
+  it('acha pelo médico e pelo marcador, sem diferenciar acentos', () => {
+    monta([
+      exame({ id: 'a', name: 'Hemograma', doctor: 'Dra. Larissa Mendes', panels: [{ name: 'Hemácias', value: '4,8', unit: '', ref: '', ok: true, trend: [] }] }),
+      exame({ id: 'b', name: 'Glicose', doctor: '—' }),
+    ])
+    const campo = screen.getByPlaceholderText(/Buscar por exame/)
+    fireEvent.change(campo, { target: { value: 'larissa' } })
+    expect(screen.getByText('Hemograma')).toBeTruthy()
+    expect(screen.queryByText('Glicose')).toBeNull()
+    fireEvent.change(campo, { target: { value: 'hemacias' } })
+    expect(screen.getByText('Hemograma')).toBeTruthy()
+    expect(screen.queryByText('Glicose')).toBeNull()
+  })
+
+  it('?filtro=andamento abre com "Em andamento" marcado', () => {
+    window.history.replaceState(null, '', '/resultados?filtro=andamento')
+    monta([exame({ id: 'a', name: 'Pronto', status: 'ready' }), exame({ id: 'b', name: 'Pendente', status: 'analyzing' })])
+    expect(screen.queryByText('Pronto')).toBeNull()
+    expect(screen.getByText('Pendente')).toBeTruthy()
+  })
+
+  it('conta sem nenhum exame: só o estado vazio, sem a barra de busca', () => {
+    monta([])
+    expect(screen.getByText('Nenhum resultado ainda')).toBeTruthy()
+    expect(screen.queryByPlaceholderText(/Buscar por exame/)).toBeNull()
+  })
+})
+
+describe('exportar CSV', () => {
+  it('gera o arquivo das linhas filtradas, com acento e ponto e vírgula', () => {
+    const csv = csvDosResultados([
+      exame({ id: 'a', name: 'Hemácias; contagem', category: 'Hematologia', unit: 'Asa Sul', doctor: '—', dataColetaCurta: '24 Jul 2026', status: 'ready' }),
+      exame({ id: 'b', name: 'Glicose', category: 'Bioquímica', unit: 'Asa Norte', doctor: 'Dr. João', status: 'analyzing' }),
+    ])
+    expect(csv).toBe(
+      '\uFEFFExame;Categoria;Data da coleta;Unidade;Médico;Situação\r\n' +
+        '"Hemácias; contagem";Hematologia;24 Jul 2026;Asa Sul;;Liberado\r\n' +
+        'Glicose;Bioquímica;;Asa Norte;Dr. João;Em análise\r\n',
+    )
+  })
+
+  it('"Exportar" baixa o arquivo, avisa e registra só a quantidade', () => {
+    const criar = vi.fn(() => 'blob:x')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: criar, revokeObjectURL: vi.fn() }))
+    const recebidos: Aviso[] = []
+    const cancela = aoAvisar((a) => recebidos.push(a))
+    monta([exame({ id: 'a' }), exame({ id: 'b' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar' }))
+    expect(criar).toHaveBeenCalledOnce()
+    expect(recebidos[0]).toMatchObject({ title: 'Exportação concluída', message: '2 exames em resultados-labhub.csv' })
+    expect(track).toHaveBeenCalledWith('resultados_exportados', { quantidade: 2 })
+    cancela()
+  })
+
+  it('sem linha filtrada, "Exportar" fica desligado', () => {
+    monta([exame()])
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por exame/), { target: { value: 'zzz' } })
+    expect((screen.getByRole('button', { name: 'Exportar' }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

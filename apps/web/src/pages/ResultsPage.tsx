@@ -7,6 +7,12 @@ import { atualizaResultados, combinaExams, useResultados } from '../lib/useResul
 import { ehSessaoAdmin } from '../lib/admin'
 import { api, ApiError } from '../lib/api'
 import { apenasDigitos, formatarCpf, validarCpf } from '../lib/validators'
+import { norm } from '../lib/texto'
+import { baixarArquivo, gerarCsv } from '../lib/csv'
+import { situacaoDoExame } from '../lib/exibicaoExame'
+import { avisar } from '../lib/avisos'
+import { track } from '../lib/analytics'
+import { useLocal } from '../lib/router'
 
 type FilterId = 'all' | 'ready' | 'analyzing'
 
@@ -40,6 +46,45 @@ const OPCOES_PERIODO = PERIODO_OPTIONS.map((p) => ({ value: p.id, label: p.label
 
 const ehPeriodo = (valor: string): valor is PeriodoId => PERIODO_OPTIONS.some((p) => p.id === valor)
 
+// `?filtro=` na URL (links da Visão geral e da busca) → filtro de status.
+const FILTRO_DA_URL: Record<string, FilterId> = { liberados: 'ready', andamento: 'analyzing' }
+
+const filtroDaUrl = (search: string): FilterId =>
+  FILTRO_DA_URL[new URLSearchParams(search).get('filtro') ?? ''] ?? 'all'
+
+const SEM_VALOR = '—'
+
+/** Nome, categoria, médico ou qualquer marcador do exame, sem diferenciar acentos. */
+function casaBusca(e: Exam, q: string): boolean {
+  if (q === '') return true
+  const marcadores = [...e.panels, ...(e.groups?.flatMap((g) => g.panels) ?? [])]
+  return (
+    norm(e.name).includes(q) ||
+    norm(e.category).includes(q) ||
+    (e.doctor !== SEM_VALOR && norm(e.doctor).includes(q)) ||
+    marcadores.some((p) => norm(p.name).includes(q))
+  )
+}
+
+const ARQUIVO_CSV = 'resultados-labhub.csv'
+const COLUNAS_CSV = ['Exame', 'Categoria', 'Data da coleta', 'Unidade', 'Médico', 'Situação'] as const
+
+const semTraco = (v: string | undefined) => (v === undefined || v === SEM_VALOR ? '' : v)
+
+export function csvDosResultados(exams: readonly Exam[]): string {
+  return gerarCsv(
+    COLUNAS_CSV,
+    exams.map((e) => [
+      e.name,
+      semTraco(e.category),
+      semTraco(e.dataColetaCurta ?? e.dataColeta),
+      semTraco(e.unit),
+      semTraco(e.doctor),
+      situacaoDoExame(e).rotulo,
+    ]),
+  )
+}
+
 function contaDoFiltro(exams: readonly Exam[], id: FilterId): number {
   return id === 'all' ? exams.length : exams.filter((e) => e.status === id).length
 }
@@ -63,7 +108,8 @@ interface ResultsPageProps {
 
 export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProps) {
   const { exams, loading, error } = useResultados()
-  const [filter, setFilter] = useState<FilterId>('all')
+  const { search } = useLocal()
+  const [filter, setFilter] = useState<FilterId>(() => filtroDaUrl(search))
   const [query, setQuery]   = useState('')
   const [periodo, setPeriodo]         = useState<PeriodoId>('all')
   const [atualizando, setAtualizando] = useState(false)
@@ -168,10 +214,7 @@ export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProp
     : examsAtivos.filter((e) =>
         (filter === 'all' || e.status === filter) &&
         (!corte || (e.coletadoEm ?? '') >= corte) &&
-        (
-          e.name.toLowerCase().includes(query.toLowerCase()) ||
-          e.category.toLowerCase().includes(query.toLowerCase())
-        )
+        casaBusca(e, norm(query))
       )
 
   const limparFiltros = () => {
@@ -220,6 +263,15 @@ export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProp
   }
 
   const prontoParaListar = !carregando && !erroAtivo
+  // Conta sem nenhum exame (não é filtro sem resultado): só o estado vazio.
+  const contaSemExames = prontoParaListar && examsAtivos.length === 0
+
+  const handleExportar = () => {
+    baixarArquivo(ARQUIVO_CSV, csvDosResultados(filtered), 'text/csv;charset=utf-8')
+    const n = filtered.length
+    avisar({ title: 'Exportação concluída', message: `${n} ${n === 1 ? 'exame' : 'exames'} em ${ARQUIVO_CSV}` })
+    track('resultados_exportados', { quantidade: n })
+  }
 
   return (
     <div className="lh-alvos">
@@ -279,14 +331,14 @@ export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProp
         </Panel>
       )}
 
-      {/* Toolbar — busca por nome/categoria, filtros de status/período e
+      {/* Toolbar — busca por exame/categoria/médico/marcador, filtros de status/período e
           Atualizar da visão NORMAL. Fica oculta em consulta admin: esses
           filtros não têm sentido para a lista de terceiro, e aplicá-los sem
           a UI visível esconderia resultados do admin sem explicação (ver
           ticket 03). */}
-      {!emConsultaAdmin && (
+      {!emConsultaAdmin && !contaSemExames && (
         <Panel pad={14} className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 16 }}>
-          <SearchField value={query} onChange={setQuery} placeholder="Buscar por nome ou categoria…" />
+          <SearchField value={query} onChange={setQuery} placeholder="Buscar por exame, categoria, médico ou marcador" />
           <div className="flex items-center gap-2 flex-wrap">
             {FILTER_OPTIONS.map((f) => (
               <Chip key={f.id} selected={filter === f.id} onClick={() => setFilter(f.id)}>
@@ -306,6 +358,9 @@ export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProp
             />
             <Btn variant="secondary" icon="refresh-cw" loading={atualizando} onClick={() => void handleAtualizar()}>
               {atualizando ? 'Atualizando…' : 'Atualizar'}
+            </Btn>
+            <Btn variant="secondary" icon="download" disabled={filtered.length === 0} onClick={handleExportar}>
+              Exportar
             </Btn>
           </div>
         </Panel>

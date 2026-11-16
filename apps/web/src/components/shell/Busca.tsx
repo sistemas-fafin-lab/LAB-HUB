@@ -7,6 +7,7 @@ import { navegar } from '../../lib/router'
 import { Ico, useDismiss } from '../portal'
 import type { Exam } from '../../lib/exame'
 import { situacaoDoExame } from '../../lib/exibicaoExame'
+import { norm } from '../../lib/texto'
 import { itensVisiveis } from './menu'
 import type { Item as Pagina, ItemMenu } from './menu'
 
@@ -18,9 +19,6 @@ import type { Item as Pagina, ItemMenu } from './menu'
 
 const PLACEHOLDER = '—'
 
-// Busca acento-insensível: "hemacia" casa "Hemácia", "glicose" casa "Glicose".
-const norm = (s: string) =>
-  s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 
 interface ExamMatch {
   exam: Exam
