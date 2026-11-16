@@ -5,11 +5,11 @@
 // PRESERVADO no lugar; aqui apenas controlamos a exibição. Troque para `true`
 // quando o backend correspondente existir para reexibir a parte.
 //
-// (Hero e Exames recentes usam dado real da API e estão ligados; as demais
-//  flags da HomePage escondem mocks.)
+// (Hero, Acompanhamento e Exames recentes usam dado real da API e estão
+//  ligados; as demais flags da HomePage escondem mocks.)
 // ---------------------------------------------------------------------------
 
-export const MOSTRAR_ACOMPANHAMENTO = false          // HomePage: card de marcadores
+export const MOSTRAR_ACOMPANHAMENTO = true           // HomePage: marcadores a acompanhar (lib/tendencias + último exame liberado; ver lib/acompanhamento)
 export const MOSTRAR_PROXIMOS_PASSOS_EXTRAS = false  // HomePage: compartilhar/baixar laudos
 export const MOSTRAR_RESULTADO_HERO = true           // HomePage: card "Seu último exame"
 export const MOSTRAR_EXAMES_RECENTES = true          // HomePage: lista "Exames recentes"

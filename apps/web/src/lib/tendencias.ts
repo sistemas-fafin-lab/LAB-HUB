@@ -1,3 +1,4 @@
+import type { IconName } from '../ds'
 import type { PillTone } from '../components/portal'
 import type { Exam, ExamPanel } from './exame'
 import { diaNoFuso } from './regiao'
@@ -11,6 +12,8 @@ import { diaNoFuso } from './regiao'
 // ---------------------------------------------------------------------------
 
 export type Direcao = 'up' | 'down' | 'flat'
+
+export const ICONE_DA_DIRECAO: Record<Direcao, IconName> = { up: 'trending-up', down: 'trending-down', flat: 'minus' }
 
 export interface Tendencia {
   marcador: string

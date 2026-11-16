@@ -1,7 +1,7 @@
-import { useId } from 'react'
+import { useId, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import type { IconName } from '../ds'
-import { Btn, EmptyState, ETAPAS, FalhaAoCarregar, IconTile, Node, PageHeader, Pill, Panel, PanelHead, SkeletonRows } from '../components/portal'
+import { Btn, EmptyState, ETAPAS, FalhaAoCarregar, Ico, IconTile, Node, PageHeader, Panel, PanelHead, SkeletonRows } from '../components/portal'
 import type { Exam } from '../lib/exame'
 import { DestaqueCarregando, DestaqueExame, DestaquePrimeiraColeta } from '../components/visao-geral/Destaque'
 import { ExamRow } from '../components/shared/ExamRow'
@@ -21,6 +21,9 @@ import { partesNoFuso } from '../lib/regiao'
 import { useAgendamentos } from '../lib/useAgendamentos'
 import { atualizaResultados, useResultados } from '../lib/useResultados'
 import { useExamesNovos } from '../lib/vistos'
+import { tendenciasDosExames } from '../lib/tendencias'
+import { itensDeAcompanhamento } from '../lib/acompanhamento'
+import type { ItemAcompanhamento } from '../lib/acompanhamento'
 
 function saudacao(agora: Date): string {
   const { hora } = partesNoFuso(agora)
@@ -38,12 +41,6 @@ interface Passo {
 }
 
 // Mockups sem fonte de dados real: só aparecem com as flags ligadas (lib/flags).
-const ACOMPANHAMENTO: readonly { label: string; note: string; icon: IconName; atencao?: boolean }[] = [
-  { label: 'Colesterol LDL', note: 'Acima da referência', icon: 'trending-up', atencao: true },
-  { label: 'Vitamina D', note: 'Subindo após suplementação', icon: 'trending-up' },
-  { label: 'Glicemia', note: 'Estável há 3 meses', icon: 'minus' },
-]
-
 const PASSOS_EXTRAS: readonly Passo[] = [
   { icon: 'send', title: 'Compartilhar com médico', sub: 'Dr. Carlos Silva — última troca há 2 sem.', action: 'Enviar' },
   { icon: 'download', title: 'Baixar todos os laudos', sub: 'ZIP com 12 PDFs · 4,2 MB', action: 'Baixar' },
@@ -85,9 +82,19 @@ export interface HomePageProps {
   onVerResultados: () => void
   /** Documentos com a caixa de envio aberta (/documentos?enviar=1). */
   onGuardarDocumento: () => void
+  onVerTendencias: () => void
 }
 
-export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColetas, onVerResultados, onGuardarDocumento }: HomePageProps) {
+export function HomePage({
+  nome,
+  onOpenExam,
+  onOpenColeta,
+  onAgendar,
+  onVerColetas,
+  onVerResultados,
+  onGuardarDocumento,
+  onVerTendencias,
+}: HomePageProps) {
   const { exams, loading: carregandoExames, error: erroExames } = useResultados()
   const { agendamentos, loading: carregandoColetas, error: erroColetas, reload: recarregarColetas } = useAgendamentos()
 
@@ -137,6 +144,19 @@ export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColet
   ].slice(0, 3)
 
   const ultimoLiberado = exams.find((e) => e.status === 'ready')
+  const tendencias = useMemo(() => tendenciasDosExames(exams), [exams])
+  const acompanhamento = itensDeAcompanhamento(
+    tendencias,
+    exams.find((e) => e.status === 'ready' && !e.retificado),
+  )
+  const abrirItem = (item: ItemAcompanhamento) => {
+    if (item.destino.tipo === 'tendencias') onVerTendencias()
+    else {
+      const { id } = item.destino
+      const exame = exams.find((e) => e.id === id)
+      if (exame) onOpenExam(exame)
+    }
+  }
   // "Primeira coleta" é uma afirmação sobre a conta: só com as duas listas
   // carregadas e sem erro. Conta como coleta a realizada (mesmo sem resultado
   // ainda) e a em andamento; cancelada e falta não contam.
@@ -185,24 +205,50 @@ export function HomePage({ nome, onOpenExam, onOpenColeta, onAgendar, onVerColet
         />
       </div>
 
-      {destaque && <div className={'col-span-12 ' + (MOSTRAR_ACOMPANHAMENTO ? 'lg:col-span-8' : '')}>{destaque}</div>}
+      {destaque && (
+        <div className={'col-span-12 ' + (MOSTRAR_ACOMPANHAMENTO ? 'lg:col-span-8' : '')} style={{ height: '100%' }}>
+          {destaque}
+        </div>
+      )}
 
       {MOSTRAR_ACOMPANHAMENTO && (
-        <Bloco title="Acompanhamento" className="col-span-12 lg:col-span-4" right={<Pill tone="brand">Ativo</Pill>}>
-          <div>
-            {ACOMPANHAMENTO.map((item) => (
-              <div key={item.label} className="flex items-center gap-3 py-3 border-t border-line first:border-t-0">
-                <IconTile name={item.icon} size={36} />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[14px] font-semibold truncate">{item.label}</span>
-                  <span className="text-[12px] text-muted truncate flex items-center gap-1.5">
-                    {item.atencao && <span className="lh-bl" style={{ background: 'var(--lh-coral)' }} />}
-                    {item.note}
+        <Bloco
+          title="Acompanhamento"
+          className="col-span-12 lg:col-span-4"
+          right={
+            acompanhamento.length > 0 && !rotaOculta('trends') ? (
+              <Btn variant="ghost" size="sm" onClick={onVerTendencias}>
+                Tendências
+              </Btn>
+            ) : undefined
+          }
+        >
+          {carregandoExames && exams.length === 0 ? (
+            <BlocoCarregando linhas={3} />
+          ) : acompanhamento.length === 0 ? (
+            <p className="text-[13px] text-muted py-3">Marcadores fora da referência ou em mudança aparecem aqui.</p>
+          ) : (
+            <div>
+              {acompanhamento.map((item) => (
+                <button
+                  key={item.chave}
+                  type="button"
+                  onClick={() => abrirItem(item)}
+                  className="w-full flex items-center gap-3 py-3 border-t border-line first:border-t-0 text-left"
+                >
+                  <IconTile name={item.icone} size={36} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] font-semibold truncate">{item.titulo}</span>
+                    <span className="text-[12px] text-muted truncate flex items-center gap-1.5">
+                      {item.foraDaReferencia && <span className="lh-bl shrink-0" style={{ background: 'var(--lh-coral)' }} />}
+                      <span className="truncate">{item.sub}</span>
+                    </span>
                   </span>
-                </span>
-              </div>
-            ))}
-          </div>
+                  <Ico name="chevron-right" size={16} className="text-faint shrink-0" />
+                </button>
+              ))}
+            </div>
+          )}
         </Bloco>
       )}
 

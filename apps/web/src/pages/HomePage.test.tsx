@@ -60,6 +60,7 @@ const acoes = {
   onVerColetas: vi.fn(),
   onVerResultados: vi.fn(),
   onGuardarDocumento: vi.fn(),
+  onVerTendencias: vi.fn(),
 }
 
 function exame(over: Partial<Exam> = {}): Exam {
@@ -414,16 +415,35 @@ describe('destaque do último exame (MOSTRAR_RESULTADO_HERO)', () => {
 })
 
 describe('acompanhamento (MOSTRAR_ACOMPANHAMENTO)', () => {
+  const bloco = () => within(screen.getByRole('region', { name: 'Acompanhamento' }))
+  const marcador = (name: string, value: string, ok: boolean) => ({ name, value, unit: 'mg/dL', ref: '', ok, trend: [] })
+
   it('segue a flag', () => {
     abrir()
     expect(screen.queryByRole('region', { name: 'Acompanhamento' })).toBeNull()
-    cleanup()
+  })
 
+  it('sem marcadores a acompanhar, explica o que aparece ali', () => {
     flags.acompanhamento = true
     abrir()
-    const bloco = within(screen.getByRole('region', { name: 'Acompanhamento' }))
-    expect(bloco.getByText('Colesterol LDL')).toBeTruthy()
-    expect(bloco.getByText('Ativo')).toBeTruthy()
+    expect(bloco().getByText('Marcadores fora da referência ou em mudança aparecem aqui.')).toBeTruthy()
+    expect(bloco().queryByRole('button', { name: 'Tendências' })).toBeNull()
+  })
+
+  it('com dado real: a tendência leva a Tendências e o marcador fora da referência abre o exame', () => {
+    flags.acompanhamento = true
+    resultados.exams = [
+      exame({ id: 'novo', coletadoEm: '2026-10-01', panels: [marcador('LDL', '170', false), marcador('Ferritina', '8', false)] }),
+      exame({ id: 'velho', coletadoEm: '2026-05-01', panels: [marcador('LDL', '150', false)] }),
+    ]
+    abrir()
+    expect(bloco().queryByText('Ativo')).toBeNull()
+    fireEvent.click(bloco().getByRole('button', { name: /^LDL/ }))
+    expect(acoes.onVerTendencias).toHaveBeenCalledOnce()
+    fireEvent.click(bloco().getByRole('button', { name: /^Ferritina.*Fora da referência · 8 mg\/dL/ }))
+    expect(acoes.onOpenExam).toHaveBeenCalledWith(resultados.exams[0])
+    fireEvent.click(bloco().getByRole('button', { name: 'Tendências' }))
+    expect(acoes.onVerTendencias).toHaveBeenCalledTimes(2)
   })
 })
 

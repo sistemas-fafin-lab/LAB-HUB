@@ -331,6 +331,7 @@ function AuthedApp({ local, onLogout, onContaExcluida, onSessaoExpirada }: Authe
         onVerColetas={() => navegar(caminhoDaAba('minhas'))}
         onVerResultados={() => navegar(CAMINHO_DA_TELA.results)}
         onGuardarDocumento={() => navegar(`${CAMINHO_DA_TELA.documents}?enviar=1`)}
+        onVerTendencias={() => navegar(CAMINHO_DA_TELA.trends)}
       />
     )
   }
