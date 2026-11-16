@@ -16,6 +16,10 @@ if (!url || !chave) {
   )
 }
 
+// Já conferidas acima; com tipo string para os clientes criados depois.
+const URL_SUPABASE: string = url
+const CHAVE_SUPABASE: string = chave
+
 // Cliente do browser: chave pública (respeita RLS) e sessão persistida.
 export const supabase = createClient(url, chave, {
   auth: {
@@ -24,3 +28,19 @@ export const supabase = createClient(url, chave, {
     detectSessionInUrl: true,
   },
 })
+
+/**
+ * Confere a senha atual sem mexer na sessão aberta: entra num cliente à parte
+ * (sem guardar sessão) e encerra essa entrada logo em seguida. Entrar pelo
+ * cliente principal trocaria a sessão do portal por uma nova — que, com a
+ * verificação em duas etapas, ainda não teria passado pelo código.
+ */
+export async function conferirSenha(email: string, senha: string): Promise<boolean> {
+  const avulso = createClient(URL_SUPABASE, CHAVE_SUPABASE, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'lh-conferir-senha' },
+  })
+  const { error } = await avulso.auth.signInWithPassword({ email, password: senha })
+  if (error) return false
+  await avulso.auth.signOut({ scope: 'local' })
+  return true
+}

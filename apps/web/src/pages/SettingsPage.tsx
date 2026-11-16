@@ -7,6 +7,7 @@ import type { IconTileTone } from '../components/portal'
 import { MOSTRAR_NOVIDADES, MOSTRAR_PRIVACIDADE_EXTRAS } from '../lib/flags'
 import { FUSOS, IDIOMAS, UNIDADES, salvarFuso, useFuso } from '../lib/regiao'
 import { CaixaExcluirConta, SUBTITULO_EXCLUIR_CONTA } from '../components/configuracoes/ExcluirConta'
+import { CaixaAlterarSenha } from '../components/configuracoes/AlterarSenha'
 
 interface SettingsPageProps {
   dark: boolean
@@ -112,6 +113,7 @@ const TEMAS = [
 export function SettingsPage({ dark, onSetDark, onContaExcluida }: SettingsPageProps) {
   const [pref, setPref] = useState<Prefs>(PREFS_INICIAIS)
   const [excluirAberta, setExcluirAberta] = useState(false)
+  const [senhaAberta, setSenhaAberta] = useState(false)
   const aparelho = aparelhoAtual()
   const fuso = useFuso()
 
@@ -161,6 +163,11 @@ export function SettingsPage({ dark, onSetDark, onContaExcluida }: SettingsPageP
                   </Linha>
                 </>
               )}
+              <Linha icon="key-round" title="Senha" sub="Altere a senha de acesso">
+                <Btn variant="secondary" size="sm" onClick={() => setSenhaAberta(true)}>
+                  Alterar
+                </Btn>
+              </Linha>
               <Linha icon="trash-2" tone="coral" title="Excluir minha conta" sub={SUBTITULO_EXCLUIR_CONTA}>
                 <Btn variant="secondary" size="sm" onClick={() => setExcluirAberta(true)}>
                   Solicitar
@@ -226,6 +233,7 @@ export function SettingsPage({ dark, onSetDark, onContaExcluida }: SettingsPageP
           </Secao>
         </div>
       </div>
+      <CaixaAlterarSenha aberta={senhaAberta} onFechar={() => setSenhaAberta(false)} />
       <CaixaExcluirConta aberta={excluirAberta} onFechar={() => setExcluirAberta(false)} onExcluida={onContaExcluida} />
     </div>
   )
