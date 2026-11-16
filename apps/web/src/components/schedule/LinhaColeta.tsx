@@ -4,6 +4,7 @@ import { podeCancelar, situacaoDaColeta } from '../../lib/coletas'
 import { formatDataHora, formatDataHoraCurta, timeFmt } from '../../lib/datetime'
 import { JEJUM_LABEL, preparoAplicavel } from '../../lib/preparo'
 import { PreparoPopover } from './PreparoColeta'
+import { linkComoChegar, useLocaisDosPostos } from '../../lib/usePostos'
 
 /** Ações que a coleta oferece. Só aparecem nos status em que valem. */
 export interface AcoesColeta {
@@ -101,8 +102,9 @@ export function ProximaColeta({
   onOpen,
   ...acoes
 }: AcoesColeta & { agendamento: Agendamento; onOpen: (id: string) => void }) {
-  const { id, postoNome, dataHora } = agendamento
+  const { id, postoNome, postoFlowlabId, dataHora } = agendamento
   const data = new Date(dataHora)
+  const endereco = useLocaisDosPostos().get(postoFlowlabId)?.endereco
   return (
     <section aria-label="Próxima coleta" className="mb-5">
       <Panel>
@@ -113,12 +115,16 @@ export function ProximaColeta({
             <div className="text-[16px] font-semibold">
               <span className="tabular-nums">{timeFmt.format(data)}</span> · {postoNome}
             </div>
+            {endereco && <div className="text-[13px] text-muted mt-0.5">{endereco}</div>}
             <div className="flex items-center gap-2 flex-wrap mt-3">
               <Pill icon="utensils-crossed">Jejum de {JEJUM_LABEL}</Pill>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <BotoesDaColeta agendamento={agendamento} {...acoes} />
+            <Btn variant="secondary" size="sm" icon="navigation" href={linkComoChegar(postoNome, endereco)} externo>
+              Como chegar
+            </Btn>
             <Btn size="sm" onClick={() => onOpen(id)}>
               Ver detalhes
             </Btn>

@@ -1,5 +1,5 @@
 import type { Agendamento } from '@lab-hub/shared'
-import { BackLink, EmptyState, ETAPAS, Ico, IconTile, InfoGrid, Node, Panel, PanelHead, Pill, Timeline } from '../portal'
+import { BackLink, Btn, EmptyState, ETAPAS, IconTile, InfoGrid, Node, Panel, PanelHead, Pill, Timeline } from '../portal'
 import { DocumentUploader } from '../documents/DocumentUploader'
 import { DocumentList } from '../documents/DocumentList'
 import { situacaoDaColeta } from '../../lib/coletas'
@@ -10,6 +10,7 @@ import { useDocumentos } from '../../lib/useDocumentos'
 import { BotoesDaColeta } from './LinhaColeta'
 import type { AcoesColeta } from './LinhaColeta'
 import { ConteudoPreparo } from './PreparoColeta'
+import { linkComoChegar, useLocaisDosPostos } from '../../lib/usePostos'
 
 interface ColetaTimelineProps extends AcoesColeta {
   agendamento: Agendamento
@@ -39,7 +40,8 @@ function previsaoDeLiberacao(dataHora: string): string {
 // Detalhe da coleta em /coleta/:id. O agendamento vem de useAgendamentos, então
 // sobrevive a recarregar a página.
 export function ColetaTimeline({ agendamento, onBack, ...acoes }: ColetaTimelineProps) {
-  const { id, postoNome, dataHora, status, criadoEm, exames } = agendamento
+  const { id, postoNome, postoFlowlabId, dataHora, status, criadoEm, exames } = agendamento
+  const endereco = useLocaisDosPostos().get(postoFlowlabId)?.endereco
   const { rotulo, tom, passo, alerta } = situacaoDaColeta(status)
   const cancelada = status === 'cancelado'
   const bloqueada = status === 'bloqueado'
@@ -147,11 +149,17 @@ export function ColetaTimeline({ agendamento, onBack, ...acoes }: ColetaTimeline
 
         <div className="flex flex-col gap-5 min-w-0">
           <Panel>
-            <PanelHead title="Local" className="mb-2" />
-            <div className="flex items-center gap-2.5 text-[14px] font-semibold">
-              <Ico name="map-pin" size={16} className="text-muted" />
-              {postoNome}
-            </div>
+            <PanelHead
+              title="Local"
+              className="mb-2"
+              right={
+                <Btn variant="ghost" size="sm" icon="navigation" href={linkComoChegar(postoNome, endereco)} externo>
+                  Como chegar
+                </Btn>
+              }
+            />
+            <div className="text-[14px] font-semibold">{postoNome}</div>
+            {endereco && <div className="text-[13px] text-muted mt-0.5">{endereco}</div>}
           </Panel>
 
           {comPreparo && (

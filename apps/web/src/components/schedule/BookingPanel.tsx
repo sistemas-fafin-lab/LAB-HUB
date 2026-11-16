@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { Agendamento, PostoDisponivel } from '@lab-hub/shared'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Agendamento } from '@lab-hub/shared'
 import { Btn, EmptyState, FalhaAoCarregar, Panel, PanelHead, SkeletonRows } from '../portal'
 import { api } from '../../lib/api'
+import { alterarPostos, recarregarPostos, usePostos } from '../../lib/usePostos'
 import { track } from '../../lib/analytics'
 import { avisar } from '../../lib/avisos'
 import { formatDataHora, formatDataHoraCurta } from '../../lib/datetime'
@@ -22,6 +23,8 @@ interface BookingPanelProps {
   refreshKey?: number
   /** "Cancelar" do resumo: sai do agendamento sem marcar nada. */
   onCancelar?: () => void
+  /** Unidade já escolhida ao abrir ("Agendar novamente", ?posto=). */
+  postoInicial?: string | null
 }
 
 const ETAPAS_AGENDAMENTO = ['Local', 'Data e horário', 'Confirmação'] as const
@@ -52,37 +55,27 @@ function EtapasDoAgendamento({ atual }: { atual: number }) {
 
 // Escolhe a unidade, mostra a disponibilidade e confirma a coleta. A validação
 // do horário e a janela retroativa do FlowLab ficam na API.
-export function BookingPanel({ onBooked, refreshKey, onCancelar }: BookingPanelProps) {
-  const [postos, setPostos] = useState<PostoDisponivel[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [tentativa, setTentativa] = useState(0)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+export function BookingPanel({ onBooked, refreshKey, onCancelar, postoInicial }: BookingPanelProps) {
+  const { dado: postos, loading, error: erroAoCarregar, carregado } = usePostos()
+  const [erroAoAgendar, setErroAoAgendar] = useState<string | null>(null)
+  const error = erroAoAgendar ?? erroAoCarregar
+  const [selectedId, setSelectedId] = useState<string | null>(postoInicial ?? null)
   const [submitting, setSubmitting] = useState(false)
   const [horario, setHorario] = useState<string | null>(null) // horário escolhido
   const [confirmando, setConfirmando] = useState(false) // caixa de confirmação aberta
 
+  // "Recarregar" da tela (refreshKey) força a revalidação; a primeira montagem
+  // já revalida pelo próprio cache.
+  const primeiraChave = useRef(refreshKey)
   useEffect(() => {
-    let alive = true
-    setLoading(true)
-    api
-      .get<PostoDisponivel[]>('/postos/disponibilidade')
-      .then((data) => {
-        if (!alive) return
-        setPostos(data)
-        setSelectedId((prev) => prev ?? data[0]?.id ?? null)
-        setError(null)
-      })
-      .catch((e: unknown) => {
-        if (alive) setError(e instanceof Error ? e.message : 'Erro ao carregar disponibilidade')
-      })
-      .finally(() => {
-        if (alive) setLoading(false)
-      })
-    return () => {
-      alive = false
-    }
-  }, [refreshKey, tentativa])
+    if (refreshKey !== primeiraChave.current) void recarregarPostos()
+  }, [refreshKey])
+
+  // Sem unidade escolhida (ou com uma que não existe mais), fica a primeira.
+  useEffect(() => {
+    if (postos.length === 0) return
+    if (selectedId === null || !postos.some((p) => p.id === selectedId)) setSelectedId(postos[0]!.id)
+  }, [postos, selectedId])
 
   const selected = useMemo(() => postos.find((p) => p.id === selectedId) ?? null, [postos, selectedId])
 
@@ -95,7 +88,7 @@ export function BookingPanel({ onBooked, refreshKey, onCancelar }: BookingPanelP
   const handleConfirm = async (dataHora: string) => {
     if (!selected) return
     setSubmitting(true)
-    setError(null)
+    setErroAoAgendar(null)
     try {
       // O POST /agendamentos só aceita posto + data/hora. Os exames não são
       // escolhidos aqui: o paciente leva o pedido médico e a recepção seleciona
@@ -108,14 +101,14 @@ export function BookingPanel({ onBooked, refreshKey, onCancelar }: BookingPanelP
       track('agendamento_confirmado', { posto: selected.nome })
       avisar({ title: 'Coleta confirmada', message: `${selected.nome}, ${formatDataHora(dataHora)}` })
       // Remove o horário recém-agendado da lista local.
-      setPostos((prev) =>
+      alterarPostos((prev) =>
         prev.map((p) => (p.id === selected.id ? { ...p, slots: p.slots.filter((s) => s !== dataHora) } : p)),
       )
       setHorario(null)
       onBooked?.(criado)
     } catch (e: unknown) {
       const motivo = e instanceof Error ? e.message : 'Falha ao agendar'
-      setError(motivo)
+      setErroAoAgendar(motivo)
       track('agendamento_erro', { motivo })
     } finally {
       setSubmitting(false)
@@ -123,7 +116,7 @@ export function BookingPanel({ onBooked, refreshKey, onCancelar }: BookingPanelP
     }
   }
 
-  if (loading) {
+  if (loading && !carregado) {
     return (
       <div className="flex flex-col gap-5">
         <Panel pad={0}>
@@ -143,7 +136,7 @@ export function BookingPanel({ onBooked, refreshKey, onCancelar }: BookingPanelP
           <FalhaAoCarregar
             titulo="Não foi possível carregar os horários"
             erro={error}
-            onTentar={() => setTentativa((t) => t + 1)}
+            onTentar={recarregarPostos}
           />
         ) : (
           <EmptyState icon="map-pin" title="Nenhuma unidade disponível no momento." />

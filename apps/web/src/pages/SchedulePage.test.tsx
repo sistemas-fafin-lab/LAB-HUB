@@ -28,6 +28,8 @@ const useDocumentos = vi.fn((_id?: string) => documentos)
 vi.mock('../lib/useDocumentos', () => ({ useDocumentos: (id?: string) => useDocumentos(id) }))
 
 const get = vi.mocked(api.get)
+const { descartarAgendamentos } = await import('../lib/useAgendamentos')
+const { descartarPostos } = await import('../lib/usePostos')
 const post = vi.mocked(api.post)
 
 const DIA = 86_400_000
@@ -60,6 +62,9 @@ let lista: Agendamento[]
 let postos: PostoDisponivel[]
 
 beforeEach(() => {
+  // Agendamentos e postos vivem em cache de módulo: cada caso começa do zero.
+  descartarAgendamentos()
+  descartarPostos()
   lista = []
   postos = [posto()]
   Object.assign(documentos, { documentos: [], loading: false, error: null, enviando: false })
@@ -120,6 +125,29 @@ describe('Minhas coletas', () => {
     expect(within(proxima).getByText(`Jejum de ${JEJUM_LABEL}`)).toBeTruthy()
     fireEvent.click(within(proxima).getByRole('button', { name: 'Ver detalhes' }))
     expect(props.onAbrirColeta).toHaveBeenCalledWith('perto')
+  })
+
+  it('a próxima coleta mostra o endereço e "Como chegar" no Google Maps, em outra aba', async () => {
+    lista = [ag({ id: 'perto', dataHora: emDias(2) })]
+    naLista()
+    const proxima = await screen.findByRole('region', { name: 'Próxima coleta' })
+    expect(await within(proxima).findByText('SGAS 915')).toBeTruthy()
+    const link = within(proxima).getByRole('link', { name: /Como chegar/ })
+    expect(link.getAttribute('href')).toBe(
+      'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('Unidade Asa Sul, SGAS 915'),
+    )
+    expect(link.getAttribute('target')).toBe('_blank')
+  })
+
+  it('a disponibilidade é buscada uma vez para a lista e o detalhe', async () => {
+    lista = [ag({ id: 'perto', dataHora: emDias(2) })]
+    const { unmount } = naLista()
+    await screen.findByText('SGAS 915')
+    unmount()
+    noDetalhe('perto')
+    await screen.findAllByText('SGAS 915')
+    // A segunda montagem revalida em silêncio, sem esconder o endereço.
+    expect(get.mock.calls.filter(([url]) => url === '/postos/disponibilidade').length).toBeLessThanOrEqual(2)
   })
 
   it('separa em andamento e histórico, com a contagem de cada um', async () => {
@@ -552,6 +580,14 @@ describe('detalhe da coleta', () => {
     expect(screen.queryByText('Coleta não encontrada')).toBeNull()
   })
 
+  it('cartão Local: endereço e "Como chegar"; sem endereço, procura pelo nome do laboratório', async () => {
+    lista = [ag()]
+    postos = []
+    noDetalhe()
+    const link = await screen.findByRole('link', { name: /Como chegar/ })
+    expect(link.getAttribute('href')).toContain(encodeURIComponent('LAB Medicina Diagnóstica Unidade Asa Sul'))
+  })
+
   it('mostra a unidade, as etapas com rótulo e volta para a lista', async () => {
     lista = [ag({ status: 'em_coleta' })]
     noDetalhe()
@@ -710,6 +746,7 @@ describe('detalhe da coleta', () => {
     lista = [ag()]
     noDetalhe()
     await screen.findByRole('heading', { name: 'Linha do tempo' })
-    expect(screen.queryByText(/push|e-mail|SMS|Remarcar|calendário|Como chegar/i)).toBeNull()
+    // "Como chegar" e "Adicionar ao calendário" existem (PV2-13 e 14); remarcar não tem endpoint.
+    expect(screen.queryByText(/push|e-mail|SMS|Remarcar/i)).toBeNull()
   })
 })
