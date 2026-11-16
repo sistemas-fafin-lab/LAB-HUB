@@ -280,6 +280,7 @@ function AuthedApp({ local, onLogout, onContaExcluida, onSessaoExpirada }: Authe
           // Fechar um exame volta para a lista de Resultados (de onde ele foi aberto).
           onBack={() => navegar(CAMINHO_DA_TELA.results)}
           onViewLaudo={() => navegar(caminhoDoLaudo(exam.id))}
+          onAbrirColeta={(id) => navegar(caminhoDaColeta(id))}
         />
       )
     }

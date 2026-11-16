@@ -275,6 +275,40 @@ describe('referência', () => {
   })
 })
 
+describe('exame ainda sem conteúdo', () => {
+  const montaCom = (over: Partial<Exam>, onAbrirColeta = vi.fn()) => {
+    render(
+      <ExamDetailPage exam={exame([], { status: 'analyzing', ...over })} onBack={() => {}} onViewLaudo={() => {}} onAbrirColeta={onAbrirColeta} />,
+    )
+    return onAbrirColeta
+  }
+
+  it('não oferece "Ver laudo"; com a coleta, oferece acompanhá-la', () => {
+    const onAbrirColeta = montaCom({ agendamentoId: 'ag-9' })
+    expect(screen.queryByRole('button', { name: 'Ver laudo' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Acompanhar coleta' }))
+    expect(onAbrirColeta).toHaveBeenCalledWith('ag-9')
+  })
+
+  it('sem a coleta (laudo do LIS), não mostra nenhum dos dois', () => {
+    montaCom({})
+    expect(screen.queryByRole('button', { name: 'Ver laudo' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Acompanhar coleta' })).toBeNull()
+  })
+
+  it('liberado continua com "Ver laudo"', () => {
+    montaCom({ status: 'ready', agendamentoId: 'ag-9' })
+    expect(screen.getByRole('button', { name: 'Ver laudo' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Acompanhar coleta' })).toBeNull()
+  })
+
+  it('o cartão Coleta leva à coleta pelo "Ver coleta"', () => {
+    const onAbrirColeta = montaCom({ status: 'ready', agendamentoId: 'ag-9' })
+    fireEvent.click(screen.getByRole('button', { name: 'Ver coleta' }))
+    expect(onAbrirColeta).toHaveBeenCalledWith('ag-9')
+  })
+})
+
 describe('etapas', () => {
   const NOMES = ['Agendamento', 'Check-in', 'Coleta', 'Análise', 'Liberação']
 

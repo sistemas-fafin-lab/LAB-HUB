@@ -13,6 +13,8 @@ interface ExamDetailPageProps {
   exam: Exam
   onBack: () => void
   onViewLaudo: () => void
+  /** Abre a coleta que originou o exame (/coleta/:id), quando o exame a informa. */
+  onAbrirColeta?: (agendamentoId: string) => void
 }
 
 const PLACEHOLDER = '—'
@@ -163,7 +165,7 @@ function Resultado({ exam }: { exam: Exam }) {
 }
 
 /** Dados da coleta, só o que a fonte informou; só o laudo dos LIS traz a maioria. */
-function FichaDaColeta({ exam }: { exam: Exam }) {
+function FichaDaColeta({ exam, onAbrirColeta }: { exam: Exam; onAbrirColeta?: (agendamentoId: string) => void }) {
   const campos: readonly (readonly [string, string | undefined])[] = [
     ['Unidade', exam.unit],
     ['Data da coleta', exam.dataColeta],
@@ -171,10 +173,17 @@ function FichaDaColeta({ exam }: { exam: Exam }) {
     ['Método', exam.metodo],
   ]
   const itens = campos.filter((item): item is readonly [string, string] => preenchido(item[1]))
-  if (itens.length === 0) return null
+  const { agendamentoId } = exam
+  const verColeta =
+    agendamentoId && onAbrirColeta ? (
+      <Btn variant="ghost" size="sm" onClick={() => onAbrirColeta(agendamentoId)}>
+        Ver coleta
+      </Btn>
+    ) : null
+  if (itens.length === 0 && verColeta === null) return null
   return (
     <Panel>
-      <PanelHead title="Coleta" className="mb-2" />
+      <PanelHead title="Coleta" className="mb-2" right={verColeta} />
       <dl className="text-[13px]">
         {itens.map(([rotulo, valor]) => (
           <div key={rotulo} className="flex justify-between gap-4 py-2 border-t border-line first:border-t-0">
@@ -187,8 +196,13 @@ function FichaDaColeta({ exam }: { exam: Exam }) {
   )
 }
 
-export function ExamDetailPage({ exam, onBack, onViewLaudo }: ExamDetailPageProps) {
+export function ExamDetailPage({ exam, onBack, onViewLaudo, onAbrirColeta }: ExamDetailPageProps) {
   const { rotulo, tom, passo } = situacaoDoExame(exam)
+  // Ainda não liberado e sem nada para ler: o laudo só diria "ainda não
+  // liberado". O que serve é acompanhar a coleta.
+  const semConteudo =
+    exam.status !== 'ready' && exam.panels.length === 0 && !isLaudoEmSecoes(exam) && laudoDescritivo(exam) === null
+  const { agendamentoId } = exam
 
   const handleDownload = () => {
     // Só a origem do clique — `exam.id`/nome do exame são dados do paciente.
@@ -250,9 +264,16 @@ export function ExamDetailPage({ exam, onBack, onViewLaudo }: ExamDetailPageProp
               somenteLeituraAdmin (ver lib/exame.ts). */}
           {!exam.somenteLeituraAdmin && (
             <div className="flex items-center gap-2 flex-wrap">
-              <Btn variant="secondary" icon="file-text" onClick={onViewLaudo}>
-                Ver laudo
-              </Btn>
+              {!semConteudo && (
+                <Btn variant="secondary" icon="file-text" onClick={onViewLaudo}>
+                  Ver laudo
+                </Btn>
+              )}
+              {semConteudo && agendamentoId && onAbrirColeta && (
+                <Btn variant="secondary" icon="activity" onClick={() => onAbrirColeta(agendamentoId)}>
+                  Acompanhar coleta
+                </Btn>
+              )}
               {exam.declaracaoUrl && (
                 <Btn icon="download" onClick={handleDownload}>
                   Baixar PDF
@@ -296,7 +317,7 @@ export function ExamDetailPage({ exam, onBack, onViewLaudo }: ExamDetailPageProp
               }}
             />
           </Panel>
-          <FichaDaColeta exam={exam} />
+          <FichaDaColeta exam={exam} {...(onAbrirColeta ? { onAbrirColeta } : {})} />
         </div>
       </div>
     </div>
