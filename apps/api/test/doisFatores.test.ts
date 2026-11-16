@@ -32,9 +32,10 @@ const PAC_ID = '11111111-1111-1111-1111-111111111111'
 const SESSAO = '33333333-3333-3333-3333-333333333333'
 
 /** JWT só com o payload que a API lê (o Auth já o aceitou no getUser). */
-function jwt(amr: string[], sessionId = SESSAO): string {
+function jwt(amr: string[], sessionId = SESSAO, senhaHaS = 60): string {
+  const timestamp = Math.floor(Date.now() / 1000) - senhaHaS
   const payload = Buffer.from(
-    JSON.stringify({ session_id: sessionId, amr: amr.map((method) => ({ method, timestamp: 1 })) }),
+    JSON.stringify({ session_id: sessionId, amr: amr.map((method) => ({ method, timestamp })) }),
   ).toString('base64url')
   return `cabecalho.${payload}.assinatura`
 }
@@ -44,6 +45,8 @@ const SO_PELO_CODIGO = jwt(['otp'])
 interface Cenario {
   doisFatores: boolean
   linha: Record<string, unknown> | null
+  /** O update condicional da tentativa não acha a linha (outra conferência chegou antes). */
+  corrida?: boolean
 }
 
 let app: FastifyInstance
@@ -58,6 +61,9 @@ async function montar(rotas = doisFatoresRoutes) {
         return { data: { id: PAC_ID, dois_fatores_email: cenario.doisFatores }, error: null }
       }
       if (call.table === 'sessoes_dois_fatores' && call.op === 'select') return { data: cenario.linha, error: null }
+      if (call.table === 'sessoes_dois_fatores' && call.op === 'update') {
+        return { data: cenario.corrida ? [] : [{ session_id: SESSAO }], error: null }
+      }
       if (call.table === 'resultados') return { data: [], error: null }
       return { data: null, error: null }
     },
@@ -149,6 +155,7 @@ describe('enviar e verificar', () => {
     expect(res.statusCode).toBe(400)
     expect(res.json().codigo).toBe('CODIGO_INVALIDO')
     expect(atualizacoes()[0]?.payload).toEqual({ tentativas: 3 })
+    expect(atualizacoes()[0]?.filters).toMatchObject({ tentativas: 2 })
     expect(atualizacoes().some((c) => 'verificada_em' in (c.payload as object))).toBe(false)
   })
 
@@ -168,6 +175,31 @@ describe('enviar e verificar', () => {
     const res = await pedir('POST', '/auth/dois-fatores/verificar', SO_PELO_CODIGO, { codigo: '123456' })
     expect(res.statusCode).toBe(403)
     expect(otp.conferir).not.toHaveBeenCalled()
+  })
+})
+
+describe('limites', () => {
+  it('duas conferências em paralelo: a que perde a reserva da tentativa nem confere', async () => {
+    cenario.linha = { session_id: SESSAO, verificada_em: null, enviado_em: new Date().toISOString(), tentativas: 4 }
+    cenario.corrida = true
+    await montar()
+    const res = await pedir('POST', '/auth/dois-fatores/verificar', PELA_SENHA, { codigo: '123456' })
+    expect(res.statusCode).toBe(429)
+    expect(otp.conferir).not.toHaveBeenCalled()
+  })
+
+  it('senha digitada há mais de 30 minutos não pede nem confere o código de entrada', async () => {
+    const antiga = jwt(['password'], SESSAO, 31 * 60)
+    await montar()
+    expect((await pedir('POST', '/auth/dois-fatores/enviar', antiga, { finalidade: 'login' })).statusCode).toBe(403)
+    expect((await pedir('POST', '/auth/dois-fatores/verificar', antiga, { codigo: '123456' })).statusCode).toBe(403)
+  })
+
+  it('com a verificação desligada, não há código de entrada para enviar', async () => {
+    cenario.doisFatores = false
+    await montar()
+    expect((await pedir('POST', '/auth/dois-fatores/enviar', PELA_SENHA, { finalidade: 'login' })).statusCode).toBe(403)
+    expect(otp.enviar).not.toHaveBeenCalled()
   })
 })
 

@@ -12,12 +12,21 @@ interface CaixaComCodigoProps {
   descricao?: ReactNode
   rotuloConfirmar: string
   rotuloConfirmando: string
+  rotuloCancelar?: string
   onConfirmar: (codigo: string) => Promise<void>
   onFechar: () => void
 }
 
 /** Caixa que pede o código do e-mail antes de uma mudança (montar = enviar o código). */
-export function CaixaComCodigo({ titulo, descricao, rotuloConfirmar, rotuloConfirmando, onConfirmar, onFechar }: CaixaComCodigoProps) {
+export function CaixaComCodigo({
+  titulo,
+  descricao,
+  rotuloConfirmar,
+  rotuloConfirmando,
+  rotuloCancelar = 'Cancelar',
+  onConfirmar,
+  onFechar,
+}: CaixaComCodigoProps) {
   const [email, setEmail] = useState<string | null>(null)
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => setEmail(data.session?.user.email ?? null))
@@ -45,7 +54,7 @@ export function CaixaComCodigo({ titulo, descricao, rotuloConfirmar, rotuloConfi
       footer={
         <>
           <Btn variant="secondary" disabled={confirmando} onClick={onFechar}>
-            Cancelar
+            {rotuloCancelar}
           </Btn>
           <Btn loading={confirmando} onClick={() => void confirmar()}>
             {confirmando ? rotuloConfirmando : rotuloConfirmar}

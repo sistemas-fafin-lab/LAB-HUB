@@ -10,6 +10,7 @@ import {
   enviarCodigo,
   entrouPelaSenha,
   linhaDaSessao,
+  senhaRecente,
 } from '../lib/doisFatores.js'
 import { enviarCodigoSchema, preferenciaSchema, verificarCodigoSchema } from '../schemas/doisFatores.js'
 
@@ -48,13 +49,22 @@ export async function conferirCodigoDaSessao(request: FastifyRequest, reply: Fas
     void recusa(reply, 429, 'TENTATIVAS_ESGOTADAS', 'Muitas tentativas. Peça um novo código.')
     return false
   }
+  // Reserva a tentativa ANTES de conferir, com update condicional: duas
+  // conferências em paralelo não passam as duas pelo mesmo número, então o
+  // limite de 5 vale mesmo com pedidos simultâneos.
+  const { data: reservada } = await supabase
+    .from('sessoes_dois_fatores')
+    .update({ tentativas: linha.tentativas + 1 })
+    .eq('session_id', sessionId)
+    .eq('tentativas', linha.tentativas)
+    .select('session_id')
+  if (!reservada || (Array.isArray(reservada) && reservada.length === 0)) {
+    void recusa(reply, 429, 'TENTATIVAS_ESGOTADAS', 'Muitas tentativas. Peça um novo código.')
+    return false
+  }
   const email = request.sessao.email
   const confere = email !== null && (await conferirCodigo(email, codigo))
   if (!confere) {
-    await supabase
-      .from('sessoes_dois_fatores')
-      .update({ tentativas: linha.tentativas + 1 })
-      .eq('session_id', sessionId)
     void recusa(reply, 400, 'CODIGO_INVALIDO', 'Código inválido ou expirado. Confira a mensagem ou peça um novo código.')
     return false
   }
@@ -69,10 +79,10 @@ export async function conferirCodigoDaSessao(request: FastifyRequest, reply: Fas
 export async function doisFatoresRoutes(app: FastifyInstance): Promise<void> {
   // GET /auth/dois-fatores — preferência e situação da sessão atual.
   app.get('/auth/dois-fatores', { preHandler: authenticateParcial }, async (request) => {
-    const liberada = await sessaoLiberada(request.sessao)
-    const id = request.sessao.claims?.sessionId
-    const linha = id ? await linhaDaSessao(id) : null
-    return { ativa: request.sessao.doisFatores, pendente: !liberada, enviadoEm: linha?.enviado_em ?? null }
+    const { sessao } = request
+    const linha = sessao.claims ? await linhaDaSessao(sessao.claims.sessionId) : null
+    const liberada = !sessao.doisFatores || (entrouPelaSenha(sessao.claims) && linha?.verificada_em != null)
+    return { ativa: sessao.doisFatores, pendente: !liberada, enviadoEm: linha?.enviado_em ?? null }
   })
 
   // POST /auth/dois-fatores/enviar — manda o código ao e-mail da conta.
@@ -86,8 +96,12 @@ export async function doisFatoresRoutes(app: FastifyInstance): Promise<void> {
       // login: só a sessão que entrou pela senha recebe o código da segunda
       // etapa. confirmacao: só a sessão já liberada (o código confirma uma
       // mudança, não abre acesso).
+      // A etapa de entrada só existe para quem ligou a verificação, e só logo
+      // depois da senha.
       const pode =
-        parsed.data.finalidade === 'login' ? entrouPelaSenha(sessao.claims) : await sessaoLiberada(sessao)
+        parsed.data.finalidade === 'login'
+          ? sessao.doisFatores && senhaRecente(sessao.claims)
+          : await sessaoLiberada(sessao)
       if (!pode || !sessao.email) throw app.httpErrors.forbidden('Esta sessão não pode pedir o código.')
 
       const sessionId = sessionIdDe(request)
@@ -124,8 +138,9 @@ export async function doisFatoresRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = verificarCodigoSchema.safeParse(request.body)
       if (!parsed.success) throw app.httpErrors.badRequest(mensagemZod(parsed.error))
-      // A sessão aberta só pelo código nunca vira "senha + código".
-      if (!entrouPelaSenha(request.sessao.claims)) {
+      // A sessão aberta só pelo código nunca vira "senha + código"; e a senha
+      // precisa ser recente.
+      if (!senhaRecente(request.sessao.claims)) {
         throw app.httpErrors.forbidden('Entre com a sua senha antes do código.')
       }
       if (!(await conferirCodigoDaSessao(request, reply, parsed.data.codigo))) return reply

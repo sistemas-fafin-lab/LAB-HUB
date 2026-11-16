@@ -45,9 +45,18 @@ export function CaixaExcluirConta({ aberta, onFechar, onExcluida, pedeCodigo = f
         descricao={<OQueAcontece />}
         rotuloConfirmar="Excluir conta"
         rotuloConfirmando="Excluindo…"
+        rotuloCancelar="Manter conta"
         onFechar={onFechar}
         onConfirmar={async (codigo) => {
-          await api.del('/pacientes/me', { codigo })
+          const falha = await api.del('/pacientes/me', { codigo }).then(
+            () => null,
+            (e: unknown) => e,
+          )
+          // O 429 do limite da rota (sem código da API) leva o texto da exclusão.
+          if (falha instanceof ApiError && falha.status === 429 && falha.codigo === undefined) {
+            throw new ApiError(429, 'Muitas tentativas. Aguarde um minuto e tente de novo.')
+          }
+          if (falha !== null) throw falha
           track('conta_excluida')
           await onExcluida()
         }}

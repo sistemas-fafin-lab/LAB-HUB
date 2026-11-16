@@ -13,14 +13,17 @@ const DIGITE_OS_6 = 'Digite os 6 dígitos do código.'
 export function useFluxoDoCodigo(finalidade: FinalidadeDoCodigo, email: string | null, enviadoAntes: string | null = null) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
-  const [enviadoEm, setEnviadoEm] = useState<number | null>(enviadoAntes ? Date.parse(enviadoAntes) : null)
+  // No relógio deste aparelho: a hora do servidor, com o relógio local
+  // adiantado ou atrasado, mostraria uma contagem errada. A do envio anterior
+  // (recarga) vem do servidor e só é usada limitada ao "agora" daqui.
+  const [enviadoEm, setEnviadoEm] = useState<number | null>(enviadoAntes ? Math.min(Date.parse(enviadoAntes), Date.now()) : null)
   const enviouAoAbrir = useRef(false)
 
   const enviar = useCallback(
     async (reenvio: boolean) => {
       try {
-        const r = await doisFatores.enviar(finalidade)
-        setEnviadoEm(Date.parse(r.enviadoEm))
+        await doisFatores.enviar(finalidade)
+        setEnviadoEm(Date.now())
         if (reenvio && email) avisar({ title: 'Código reenviado', message: mascararEmail(email) })
       } catch (e: unknown) {
         // 429: já houve envio há menos de um minuto; a contagem segue.

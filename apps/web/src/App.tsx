@@ -167,7 +167,8 @@ function Portal() {
           marcarEntrada()
         }}
         onVoltar={async () => {
-          await signOut()
+          // Só esta sessão: as de outros aparelhos que já passaram pelo código continuam.
+          await signOut('local')
           navegar(CAMINHO_ENTRAR, { substituir: true })
         }}
       />

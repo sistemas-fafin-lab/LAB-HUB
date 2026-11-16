@@ -16,7 +16,12 @@ export interface ClaimsDaSessao {
   sessionId: string
   /** Métodos de autenticação da sessão (`amr` do JWT): "password", "otp"… */
   metodos: string[]
+  /** Quando a senha foi digitada (epoch s, do `amr`); null sem senha. */
+  senhaEm: number | null
 }
+
+/** A senha precisa ter sido digitada há pouco para pedir e conferir o código de entrada. */
+export const SENHA_RECENTE_MS = 30 * 60 * 1000
 
 /**
  * `session_id` e `amr` do JWT do Supabase. Só deve ser chamado DEPOIS de
@@ -31,19 +36,26 @@ export function claimsDoToken(token: string): ClaimsDaSessao | null {
       amr?: unknown
     }
     if (typeof json.session_id !== 'string') return null
-    const metodos = Array.isArray(json.amr)
-      ? json.amr
-          .map((a: unknown) => (a && typeof a === 'object' && 'method' in a ? String((a as { method: unknown }).method) : null))
-          .filter((m): m is string => m !== null)
-      : []
-    return { sessionId: json.session_id, metodos }
+    const amr = Array.isArray(json.amr) ? (json.amr as unknown[]) : []
+    const entradas = amr
+      .filter((a): a is { method: unknown; timestamp?: unknown } => !!a && typeof a === 'object' && 'method' in a)
+      .map((a) => ({ metodo: String(a.method), em: typeof a.timestamp === 'number' ? a.timestamp : null }))
+    const senha = entradas.find((e) => e.metodo === 'password')
+    return { sessionId: json.session_id, metodos: entradas.map((e) => e.metodo), senhaEm: senha?.em ?? null }
   } catch {
     return null
   }
 }
 
 /** Só a sessão que entrou pela senha pode valer como "senha + código". */
-export const entrouPelaSenha = (claims: ClaimsDaSessao | null) => claims?.metodos.includes('password') === true
+export function entrouPelaSenha(claims: ClaimsDaSessao | null): claims is ClaimsDaSessao {
+  return claims?.metodos.includes('password') === true
+}
+
+/** Entrou pela senha há menos de SENHA_RECENTE_MS (para a etapa de entrada). */
+export function senhaRecente(claims: ClaimsDaSessao | null, agora = Date.now()): claims is ClaimsDaSessao {
+  return entrouPelaSenha(claims) && claims.senhaEm !== null && agora - claims.senhaEm * 1000 < SENHA_RECENTE_MS
+}
 
 /**
  * Cliente NOVO a cada uso, sem guardar sessão. `verifyOtp` cria uma sessão no

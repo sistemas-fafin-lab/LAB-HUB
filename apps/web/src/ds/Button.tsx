@@ -116,7 +116,7 @@ export function Button({
       <a
         {...(disabled ? { 'aria-disabled': true } : { href })}
         {...(externo ? { target: '_blank', rel: 'noreferrer' } : {})}
-        onClick={onClick}
+        {...(disabled || !onClick ? {} : { onClick })}
         {...ponteiro}
         style={{ textDecoration: 'none', boxSizing: 'border-box', ...estilo }}
       >

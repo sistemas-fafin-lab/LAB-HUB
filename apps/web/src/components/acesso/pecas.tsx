@@ -211,17 +211,19 @@ export function CodigoVerificacao({ valor, onChange, erro = null, disabled = fal
 
 /** "Reenviar código em 0:SS" e, depois, o link para reenviar. */
 export function ReenviarCodigo({ enviadoEm, onReenviar }: { enviadoEm: number | null; onReenviar: () => void }) {
-  const [agora, setAgora] = useState(() => Date.now())
-  const restante = enviadoEm === null ? 0 : Math.max(0, Math.ceil((enviadoEm + ESPERA_PARA_REENVIAR_S * 1000 - agora) / 1000))
+  // `enviadoEm` está no relógio deste aparelho (ver useFluxoDoCodigo); o tique
+  // só força o novo render a cada segundo.
+  const [, setTique] = useState(0)
+  const restante = enviadoEm === null ? 0 : Math.max(0, Math.ceil((enviadoEm + ESPERA_PARA_REENVIAR_S * 1000 - Date.now()) / 1000))
   useEffect(() => {
     if (restante === 0) return
-    const t = setInterval(() => setAgora(Date.now()), 1000)
+    const t = setInterval(() => setTique((n) => n + 1), 1000)
     return () => clearInterval(t)
   }, [restante])
   if (restante > 0) {
     return (
       <p className="text-[13px] text-muted tabular-nums">
-        Reenviar código em 0:{String(restante).padStart(2, '0')}
+        Reenviar código em 0:{String(Math.min(restante, ESPERA_PARA_REENVIAR_S)).padStart(2, '0')}
       </p>
     )
   }

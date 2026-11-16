@@ -60,7 +60,7 @@ export async function sessaoLiberada(sessao: SessaoDoPaciente): Promise<boolean>
   if (!sessao.doisFatores) return true
   // Só a sessão aberta pela senha vale: a aberta só pelo código, nunca.
   if (!entrouPelaSenha(sessao.claims)) return false
-  const linha = await linhaDaSessao(sessao.claims!.sessionId)
+  const linha = await linhaDaSessao(sessao.claims.sessionId)
   return linha?.verificada_em != null
 }
 
