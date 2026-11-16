@@ -12,6 +12,7 @@ import { navegar, useLocal } from '../lib/router'
 import { caminhoDaEntrada, modoDaEntrada } from '../lib/rotas'
 import type { ModoEntrada } from '../lib/rotas'
 import { lerTema, salvarTema } from '../lib/tema'
+import { tituloDaEntrada, useTituloDaAba } from '../lib/tituloDaAba'
 
 const ABAS = [
   { value: 'login', label: 'Entrar' },
@@ -34,6 +35,7 @@ export function AuthGate({ comSessao }: AuthGateProps) {
   const [dark, setDark] = useState(lerTema)
   // E-mail da conta recém-criada que ainda precisa ser confirmado.
   const [emailEnviado, setEmailEnviado] = useState<string | null>(null)
+  useTituloDaAba(tituloDaEntrada(modo))
 
   // Mesmo evento e payload usados pelo botão de tema do cabeçalho (App.tsx).
   const handleToggleDark = () => {

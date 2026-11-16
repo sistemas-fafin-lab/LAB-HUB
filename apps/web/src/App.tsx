@@ -39,6 +39,7 @@ import {
   resolveRota,
 } from './lib/rotas'
 import { lerTema, salvarTema } from './lib/tema'
+import { tituloDaRota, useTituloDaAba } from './lib/tituloDaAba'
 import type { Exam } from './lib/exame'
 
 // Logout feito nesta aba. Enquanto vale, a entrada não guarda `next`: o
@@ -218,6 +219,7 @@ function AuthedApp({ local, onLogout, onSessaoExpirada }: AuthedAppProps) {
   useEffect(() => {
     if (telaPageview !== null) trackPageview(telaPageview)
   }, [href, telaPageview])
+  useTituloDaAba(exameInexistente ? 'Página não encontrada' : tituloDaRota(rota))
 
   // ---------------------------------------------------------------------------
   // Route → page
