@@ -3,24 +3,10 @@ import type { FormEvent } from 'react'
 import { Btn, Modal } from '../portal'
 import { AvisoErro, CampoSenha, RegrasSenha } from '../acesso/pecas'
 import { conferirSenha, supabase } from '../../lib/supabase'
-import { validarSenha } from '../../lib/validators'
+import { errosDaTrocaDeSenha } from '../../lib/validators'
+import type { ErrosDaTrocaDeSenha as Erros } from '../../lib/validators'
 import { avisar } from '../../lib/avisos'
 import { track } from '../../lib/analytics'
-
-interface Erros {
-  atual?: string | undefined
-  nova?: string | undefined
-  confirmacao?: string | undefined
-}
-
-/** Valida os três campos; a política da nova senha é a mesma do cadastro. */
-export function errosDaTrocaDeSenha(atual: string, nova: string, confirmacao: string): Erros {
-  return {
-    atual: atual === '' ? 'Informe a senha atual.' : undefined,
-    nova: validarSenha(nova) ?? (nova === atual ? 'A nova senha precisa ser diferente da atual.' : undefined),
-    confirmacao: confirmacao !== nova ? 'As senhas não conferem.' : undefined,
-  }
-}
 
 export function CaixaAlterarSenha({ aberta, onFechar }: { aberta: boolean; onFechar: () => void }) {
   const [atual, setAtual] = useState('')

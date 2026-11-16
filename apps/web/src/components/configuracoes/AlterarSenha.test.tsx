@@ -16,7 +16,8 @@ vi.mock('../../lib/supabase', () => ({
 }))
 vi.mock('../../lib/analytics', () => ({ track: vi.fn() }))
 
-const { CaixaAlterarSenha, errosDaTrocaDeSenha } = await import('./AlterarSenha')
+const { CaixaAlterarSenha } = await import('./AlterarSenha')
+const { errosDaTrocaDeSenha } = await import('../../lib/validators')
 
 const NOVA = 'NovaSenha#2026'
 
