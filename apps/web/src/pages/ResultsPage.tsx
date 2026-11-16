@@ -8,8 +8,8 @@ import { ehSessaoAdmin } from '../lib/admin'
 import { api, ApiError } from '../lib/api'
 import { apenasDigitos, formatarCpf, validarCpf } from '../lib/validators'
 import { norm } from '../lib/texto'
-import { baixarArquivo, gerarCsv } from '../lib/csv'
-import { situacaoDoExame } from '../lib/exibicaoExame'
+import { baixarArquivo } from '../lib/csv'
+import { ARQUIVO_CSV, csvDosResultados } from '../lib/exportarResultados'
 import { avisar } from '../lib/avisos'
 import { track } from '../lib/analytics'
 import { useLocal } from '../lib/router'
@@ -63,25 +63,6 @@ function casaBusca(e: Exam, q: string): boolean {
     norm(e.category).includes(q) ||
     (e.doctor !== SEM_VALOR && norm(e.doctor).includes(q)) ||
     marcadores.some((p) => norm(p.name).includes(q))
-  )
-}
-
-const ARQUIVO_CSV = 'resultados-labhub.csv'
-const COLUNAS_CSV = ['Exame', 'Categoria', 'Data da coleta', 'Unidade', 'Médico', 'Situação'] as const
-
-const semTraco = (v: string | undefined) => (v === undefined || v === SEM_VALOR ? '' : v)
-
-export function csvDosResultados(exams: readonly Exam[]): string {
-  return gerarCsv(
-    COLUNAS_CSV,
-    exams.map((e) => [
-      e.name,
-      semTraco(e.category),
-      semTraco(e.dataColetaCurta ?? e.dataColeta),
-      semTraco(e.unit),
-      semTraco(e.doctor),
-      situacaoDoExame(e).rotulo,
-    ]),
   )
 }
 

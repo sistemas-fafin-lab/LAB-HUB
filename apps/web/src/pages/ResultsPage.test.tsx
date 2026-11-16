@@ -32,7 +32,8 @@ vi.mock('../lib/api', () => ({
 
 vi.mock('../lib/analytics', () => ({ track: vi.fn() }))
 
-const { ResultsPage, csvDosResultados } = await import('./ResultsPage')
+const { ResultsPage } = await import('./ResultsPage')
+const { csvDosResultados } = await import('../lib/exportarResultados')
 const { track } = await import('../lib/analytics')
 const { aoAvisar } = await import('../lib/avisos')
 type Aviso = import('../lib/avisos').Aviso
