@@ -20,6 +20,7 @@ import { JEJUM_LABEL, preparoAplicavel } from '../lib/preparo'
 import { partesNoFuso } from '../lib/regiao'
 import { useAgendamentos } from '../lib/useAgendamentos'
 import { atualizaResultados, useResultados } from '../lib/useResultados'
+import { useExamesNovos } from '../lib/vistos'
 
 function saudacao(agora: Date): string {
   const { hora } = partesNoFuso(agora)
@@ -310,12 +311,13 @@ interface ExamesRecentesProps {
 
 function ExamesRecentes({ exams, carregando, erro, onOpenExam, onVerResultados }: ExamesRecentesProps) {
   const id = useId()
+  const novos = useExamesNovos()
   let corpo: ReactNode
   if (exams.length > 0) {
     corpo = (
       <div className="divide-y divide-line">
         {exams.slice(0, 5).map((e) => (
-          <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(e)} />
+          <ExamRow key={e.id} exam={e} novo={novos.has(e.id)} onClick={() => onOpenExam(e)} />
         ))}
       </div>
     )

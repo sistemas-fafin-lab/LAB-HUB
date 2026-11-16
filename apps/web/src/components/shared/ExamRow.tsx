@@ -3,7 +3,7 @@ import type { Exam } from '../../lib/exame'
 import { contextoDoExame, responsavelDoExame, situacaoDoExame } from '../../lib/exibicaoExame'
 
 /** Linha de um exame numa lista. Nó e pílula dizem a etapa; a pílula, em texto. */
-export function ExamRow({ exam, onClick }: { exam: Exam; onClick: () => void }) {
+export function ExamRow({ exam, onClick, novo = false }: { exam: Exam; onClick: () => void; /** Liberado e ainda não aberto. */ novo?: boolean }) {
   const { rotulo, tom, passo } = situacaoDoExame(exam)
   const responsavel = responsavelDoExame(exam)
   const contexto = contextoDoExame(exam)
@@ -21,6 +21,7 @@ export function ExamRow({ exam, onClick }: { exam: Exam; onClick: () => void }) 
               precisa da distinção. A pílula segue "Liberado": este laudo foi
               liberado, só não é mais o vigente. */}
           {exam.retificado && <span className="text-[11px] font-semibold text-muted shrink-0">Versão anterior</span>}
+          {novo && <span className="text-[11px] font-semibold text-link shrink-0">Novo</span>}
         </span>
         <span className="block text-[12px] text-muted truncate">{exam.category}</span>
         {/* Abaixo de md as colunas não cabem; descem para cá em vez de sumirem. */}

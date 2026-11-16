@@ -142,3 +142,13 @@ describe('linha', () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('selo "Novo"', () => {
+  it('aparece só quando a lista diz que o exame é novo', () => {
+    const exam = resultadoToExam({ id: 'r-1', exameNome: 'Glicose', status: 'ready', paineis: [] } as unknown as Resultado)
+    const { rerender } = render(<ExamRow exam={exam} onClick={() => {}} novo />)
+    expect(screen.getByText('Novo')).toBeTruthy()
+    rerender(<ExamRow exam={exam} onClick={() => {}} />)
+    expect(screen.queryByText('Novo')).toBeNull()
+  })
+})

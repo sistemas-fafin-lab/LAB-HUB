@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import type { Agendamento, Paciente } from '@lab-hub/shared'
 import type { Exam } from './lib/exame'
@@ -58,6 +58,7 @@ vi.mock('./lib/useResultados', async (importOriginal) => {
 
 const agendamentos = { lista: [] as Agendamento[] }
 vi.mock('./lib/useAgendamentos', () => ({
+  useContagemColetasAtivas: () => agendamentos.lista.filter((a) => a.status !== 'cancelado' && a.status !== 'realizado').length,
   useAgendamentos: () => ({
     agendamentos: agendamentos.lista,
     loading: false,
@@ -299,10 +300,20 @@ describe('navegação e histórico do navegador', () => {
   it('"Minhas coletas" e "Agendar coleta" levam cada um à sua aba', () => {
     abre('/')
     const menu = screen.getByRole('navigation', { name: 'Navegação principal' })
-    fireEvent.click(within(menu).getByRole('link', { name: 'Minhas coletas' }))
+    fireEvent.click(within(menu).getByRole('link', { name: /^Minhas coletas/ }))
     expect(caminho()).toBe('/coletas')
     fireEvent.click(within(menu).getByRole('link', { name: 'Agendar coleta' }))
     expect(caminho()).toBe('/agendar')
+  })
+
+  it('Minhas coletas mostra quantas estão em andamento; com 0, nada', () => {
+    abre('/')
+    const menu = () => screen.getByRole('navigation', { name: 'Navegação principal' })
+    expect(within(menu()).getByRole('link', { name: /^Minhas coletas.*1 em andamento$/ })).toBeTruthy()
+    cleanup()
+    agendamentos.lista = [agendamento({ status: 'cancelado' })]
+    abre('/')
+    expect(within(menu()).getByRole('link', { name: 'Minhas coletas' })).toBeTruthy()
   })
 
   it('exame aberto deixa Resultados marcado no menu', () => {

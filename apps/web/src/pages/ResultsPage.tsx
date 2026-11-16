@@ -13,6 +13,7 @@ import { ARQUIVO_CSV, csvDosResultados } from '../lib/exportarResultados'
 import { avisar } from '../lib/avisos'
 import { track } from '../lib/analytics'
 import { useLocal } from '../lib/router'
+import { useExamesNovos } from '../lib/vistos'
 
 type FilterId = 'all' | 'ready' | 'analyzing'
 
@@ -90,6 +91,7 @@ interface ResultsPageProps {
 export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProps) {
   const { exams, loading, error } = useResultados()
   const { search } = useLocal()
+  const novos = useExamesNovos()
   const [filter, setFilter] = useState<FilterId>(() => filtroDaUrl(search))
   const [query, setQuery]   = useState('')
   const [periodo, setPeriodo]         = useState<PeriodoId>('all')
@@ -360,7 +362,12 @@ export function ResultsPage({ onOpenExam, onAgendar, paciente }: ResultsPageProp
               // vêm na resposta, sem chamada nova) — a marca somenteLeituraAdmin
               // é quem faz o detalhe esconder "Ver laudo"/declaração, que exigem
               // a sessão do PRÓPRIO paciente (ver o campo em lib/exame.ts).
-              <ExamRow key={e.id} exam={e} onClick={() => onOpenExam(emConsultaAdmin ? { ...e, somenteLeituraAdmin: true } : e)} />
+              <ExamRow
+                key={e.id}
+                exam={e}
+                novo={!emConsultaAdmin && novos.has(e.id)}
+                onClick={() => onOpenExam(emConsultaAdmin ? { ...e, somenteLeituraAdmin: true } : e)}
+              />
             ))}
           </div>
         )}

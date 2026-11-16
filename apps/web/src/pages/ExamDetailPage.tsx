@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import type { IconName } from '../ds'
 import { BackLink, Btn, EmptyState, ETAPAS, Ico, Node, Panel, PanelHead, Pill, Spark, Timeline } from '../components/portal'
@@ -8,6 +9,7 @@ import type { Exam, ExamPanel } from '../lib/exame'
 import { track } from '../lib/analytics'
 import { baixarDeclaracao } from '../lib/declaracao'
 import { situacaoDoExame } from '../lib/exibicaoExame'
+import { marcarVisto } from '../lib/vistos'
 
 interface ExamDetailPageProps {
   exam: Exam
@@ -198,6 +200,10 @@ function FichaDaColeta({ exam, onAbrirColeta }: { exam: Exam; onAbrirColeta?: (a
 
 export function ExamDetailPage({ exam, onBack, onViewLaudo, onAbrirColeta }: ExamDetailPageProps) {
   const { rotulo, tom, passo } = situacaoDoExame(exam)
+  // Abrir o exame o tira dos "novos". O de outro paciente (consulta admin) não conta.
+  useEffect(() => {
+    if (!exam.somenteLeituraAdmin) marcarVisto(exam.id)
+  }, [exam.id, exam.somenteLeituraAdmin])
   // Ainda não liberado e sem nada para ler: o laudo só diria "ainda não
   // liberado". O que serve é acompanhar a coleta.
   const semConteudo =
