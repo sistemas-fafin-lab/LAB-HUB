@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import type {
   BuscarPacientesResposta,
   CorrigirIdentidadeResposta,
+  CorrigirNomePacienteResposta,
   CriarAgendamentoRecepcaoResposta,
   DocumentoFlowLab,
   PacienteBuscaItem,
@@ -24,6 +25,7 @@ import {
   buscarPacientesQuerySchema,
   correcaoIdentidadeParamSchema,
   corrigirIdentidadeSchema,
+  corrigirNomePacienteSchema,
   criarAgendamentoRecepcaoSchema,
 } from '../schemas/recepcao.js'
 import { nomeArquivoDe, type DocumentoRow } from '../lib/mappers.js'
@@ -343,6 +345,69 @@ export async function integracaoRoutes(app: FastifyInstance): Promise<void> {
         laudosInvalidados: resultado.laudosInvalidados,
         corrigidoEm: resultado.corrigidoEm,
       }
+    },
+  )
+
+  // POST /integracao/agendamentos/:labhubId/paciente-nome
+  //
+  // Corrige o NOME do paciente dono do agendamento — erro de digitação percebido
+  // pela recepção do FlowLab depois da coleta. Parte do agendamento porque é o id
+  // que o FlowLab conhece (ac_agendamentos.labhub_id); o paciente sai dele.
+  //
+  // A troca é no cadastro da pessoa (pacientes.nome), não no agendamento: vale
+  // para o portal e para todos os agendamentos dela. A RPC troca e grava a trilha
+  // (correcoes_nome) na mesma transação. Nome igual ao atual não é erro: devolve
+  // `alterado: false` — o FlowLab pode repetir a chamada sem efeito.
+  app.post(
+    '/integracao/agendamentos/:labhubId/paciente-nome',
+    {
+      preHandler: autenticarFlowlab, // API key, NÃO JWT de paciente
+      // Operação de exceção, feita à mão no balcão — mesmo teto da correção de identidade.
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    },
+    async (request): Promise<CorrigirNomePacienteResposta> => {
+      const paramParsed = labhubIdParamSchema.safeParse(request.params)
+      if (!paramParsed.success) {
+        throw app.httpErrors.badRequest('labhubId inválido')
+      }
+      const bodyParsed = corrigirNomePacienteSchema.safeParse(request.body)
+      if (!bodyParsed.success) {
+        request.log.warn({ issues: bodyParsed.error.issues }, 'payload inválido')
+        throw app.httpErrors.badRequest(mensagemZod(bodyParsed.error))
+      }
+      const { nome, solicitadoPor } = bodyParsed.data
+      const { labhubId } = paramParsed.data
+
+      const { data, error } = await supabase.rpc('corrigir_nome_paciente', {
+        p_agendamento_id: labhubId,
+        p_nome: nome,
+        p_solicitado_por: solicitadoPor,
+      })
+
+      if (error) {
+        //   22023 = entrada inválida · P0002 = agendamento inexistente
+        if (error.code === '22023') throw app.httpErrors.badRequest(error.message)
+        if (error.code === 'P0002') throw app.httpErrors.notFound('Agendamento não encontrado')
+        request.log.error({ err: error, labhubId }, 'Falha ao corrigir o nome do paciente')
+        throw app.httpErrors.internalServerError('Falha ao corrigir o nome do paciente')
+      }
+
+      const resultado = data as CorrigirNomePacienteResposta
+
+      // Trilha permanente é a da tabela; este log é o eco operacional. Sem o nome
+      // (nem o antigo, nem o novo) — quem precisa do valor consulta a trilha.
+      request.log.info(
+        {
+          correcaoId: resultado.correcaoId,
+          pacienteId: resultado.pacienteId,
+          labhubId,
+          solicitadoPor,
+          alterado: resultado.alterado,
+        },
+        'Nome de paciente corrigido pela recepção',
+      )
+
+      return resultado
     },
   )
 

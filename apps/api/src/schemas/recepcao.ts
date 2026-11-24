@@ -84,3 +84,13 @@ export const corrigirIdentidadeSchema = z.object({
 })
 
 export type CorrigirIdentidadeInput = z.infer<typeof corrigirIdentidadeSchema>
+
+// Body do POST /integracao/agendamentos/:labhubId/paciente-nome — correção do
+// nome do paciente (erro de digitação) feita pela recepção do FlowLab. O limite
+// de 200 casa com a RPC corrigir_nome_paciente.
+export const corrigirNomePacienteSchema = z.object({
+  nome: z.string().trim().min(1, 'Informe o nome do paciente').max(200, 'Nome longo demais'),
+  solicitadoPor: z.string().trim().min(1, 'Identifique quem pediu a correção').max(120),
+})
+
+export type CorrigirNomePacienteInput = z.infer<typeof corrigirNomePacienteSchema>

@@ -1115,3 +1115,124 @@ describe('POST /integracao/pacientes/:pacienteId/correcao-identidade — sincron
     expect(mock.rpcCalls).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// POST /integracao/agendamentos/:labhubId/paciente-nome
+//
+// Correção do nome (erro de digitação) pela recepção do FlowLab. O que a rota
+// precisa garantir: só o canal de API key chega nela, entrada inválida não toca
+// o banco, e as recusas da RPC viram o status certo.
+// ---------------------------------------------------------------------------
+
+const URL_NOME = `/integracao/agendamentos/${AG_ID}/paciente-nome`
+const CORPO_NOME = { nome: '  Ireni Lousado Barbosa ', solicitadoPor: 'Ana Recepção' }
+
+const RPC_NOME_OK: RpcHandler = () => ({
+  data: {
+    correcaoId: '77777777-7777-7777-7777-777777777777',
+    pacienteId: PAC_ID,
+    alterado: true,
+  },
+  error: null,
+})
+
+function setupNome(rpc?: RpcHandler) {
+  const mock = createSupabaseMock({ handler: supaHandler(), ...(rpc ? { rpc } : {}) })
+  h.setSb(mock.client)
+  return mock
+}
+
+describe('POST /integracao/agendamentos/:labhubId/paciente-nome', () => {
+  it('401 sem x-api-key — não é rota de portal', async () => {
+    const mock = setupNome(RPC_NOME_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({ method: 'POST', url: URL_NOME, payload: CORPO_NOME })
+
+    expect(res.statusCode).toBe(401)
+    expect(mock.rpcCalls).toHaveLength(0)
+  })
+
+  it('401 com JWT de paciente no lugar da chave', async () => {
+    const mock = setupNome(RPC_NOME_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_NOME,
+      headers: { authorization: 'Bearer jwt-de-paciente' },
+      payload: CORPO_NOME,
+    })
+
+    expect(res.statusCode).toBe(401)
+    expect(mock.rpcCalls).toHaveLength(0)
+  })
+
+  it('repassa agendamento, nome aparado e quem pediu para a RPC e devolve o resultado', async () => {
+    const mock = setupNome(RPC_NOME_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({ method: 'POST', url: URL_NOME, headers: CHAVE, payload: CORPO_NOME })
+
+    expect(res.statusCode).toBe(200)
+    expect(mock.rpcCalls).toHaveLength(1)
+    expect(mock.rpcCalls[0]?.fn).toBe('corrigir_nome_paciente')
+    expect(mock.rpcCalls[0]?.args).toEqual({
+      p_agendamento_id: AG_ID,
+      p_nome: 'Ireni Lousado Barbosa',
+      p_solicitado_por: 'Ana Recepção',
+    })
+    expect(res.json()).toEqual({
+      correcaoId: '77777777-7777-7777-7777-777777777777',
+      pacienteId: PAC_ID,
+      alterado: true,
+    })
+  })
+
+  it.each([
+    ['nome vazio', { nome: '   ' }],
+    ['sem quem pediu', { solicitadoPor: '' }],
+    ['nome longo demais', { nome: 'a'.repeat(201) }],
+  ])('400 com %s, sem ir ao banco', async (_caso, over) => {
+    const mock = setupNome(RPC_NOME_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: URL_NOME,
+      headers: CHAVE,
+      payload: { ...CORPO_NOME, ...over },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(mock.rpcCalls).toHaveLength(0)
+  })
+
+  it('400 quando o labhubId da URL não é uuid', async () => {
+    const mock = setupNome(RPC_NOME_OK)
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integracao/agendamentos/nao-e-uuid/paciente-nome',
+      headers: CHAVE,
+      payload: CORPO_NOME,
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(mock.rpcCalls).toHaveLength(0)
+  })
+
+  it.each([
+    ['P0002', 404],
+    ['22023', 400],
+    ['XX000', 500],
+  ])('recusa %s da RPC vira %i', async (code, status) => {
+    setupNome(() => ({ data: null, error: { code, message: 'recusa' } }))
+    app = await buildApp(integracaoRoutes)
+
+    const res = await app.inject({ method: 'POST', url: URL_NOME, headers: CHAVE, payload: CORPO_NOME })
+
+    expect(res.statusCode).toBe(status)
+  })
+})

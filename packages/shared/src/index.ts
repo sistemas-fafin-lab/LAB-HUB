@@ -277,6 +277,24 @@ export interface CorrigirIdentidadeResposta {
   corrigidoEm: string
 }
 
+// Body do POST /integracao/agendamentos/:labhubId/paciente-nome.
+//
+// Corrige o NOME do paciente dono do agendamento — erro de digitação percebido
+// pela recepção do FlowLab. Troca o cadastro (vale para todos os agendamentos da
+// pessoa) e grava trilha em `correcoes_nome`. Não serve para agendamento ligado
+// ao paciente errado.
+export interface CorrigirNomePacientePayload {
+  nome: string
+  solicitadoPor: string // operador do FlowLab
+}
+
+// `alterado: false` = o nome já era este (ex.: retry); nada foi gravado.
+export interface CorrigirNomePacienteResposta {
+  correcaoId: string | null
+  pacienteId: string
+  alterado: boolean
+}
+
 // Payload recebido do FlowLab via webhook de resultado (D1)
 export interface ResultadoWebhookPayload {
   agendamentoLabhubId: string
