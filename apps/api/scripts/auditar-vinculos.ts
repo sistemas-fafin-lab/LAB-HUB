@@ -4,6 +4,7 @@ import { supabase } from '../src/lib/supabase.js'
 import { AolService } from '../src/laudos/aol.js'
 import { AplisService } from '../src/laudos/aplis.js'
 import { conferirCpf, type Veredito } from '../src/laudos/identidade.js'
+import { auditarOsPdf } from './auditar-os-pdf.js'
 
 // ---------------------------------------------------------------------------
 // Auditoria dos vínculos já gravados em exam_results.
@@ -23,6 +24,11 @@ import { conferirCpf, type Veredito } from '../src/laudos/identidade.js'
 // --dump-xml salva a resposta crua da AOL da primeira OS auditada. É com ela que
 // se confirma em qual atributo do nó <paciente> vem o CPF, para então apertar o
 // extrairCpfPaciente (hoje deliberadamente tolerante).
+//
+// Segundo modo — compara a O.S. do PDF "Laudo EXTERNO" com a do `idOsLis`, sem
+// tocar em exam_results (ver scripts/auditar-os-pdf.ts):
+//   npx tsx scripts/auditar-vinculos.ts --os-pdf --paciente <uuid> [--dias N]
+//   npx tsx scripts/auditar-vinculos.ts --os-pdf --requisicoes <cod1,cod2,…> [--dias N]
 // ---------------------------------------------------------------------------
 
 interface Argumentos {
@@ -70,6 +76,8 @@ async function identidadeNoLis(
 }
 
 async function main(): Promise<void> {
+  if (process.argv.includes('--os-pdf')) return auditarOsPdf(process.argv.slice(2))
+
   const args = lerArgumentos(process.argv.slice(2))
 
   let consulta = supabase

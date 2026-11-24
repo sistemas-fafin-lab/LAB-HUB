@@ -215,6 +215,7 @@ Os webhooks do FlowLab são **at-least-once**: a API trata reentrega como idempo
 | **FlowLab** (webhooks recebidos) | Resultado liberado, mudança de status de coleta — HMAC-SHA256 | `routes/webhooks.ts` |
 | **Álvaro Online (AOL)** | LIS do laboratório de apoio — SOAP/XML, fonte principal de laudo | `laudos/aol.ts` |
 | **APLIS** | LIS do laboratório de apoio — REST/JSON, descoberta de requisição | `laudos/aplis.ts` |
+| **APLIS (site interno)** | Leitura do anexo "Laudo EXTERNO" (PDF tipo 14) da requisição, de onde saem O.S. e CPF. Sem contrato do fornecedor; somente leitura; hoje usado só pela auditoria `scripts/auditar-vinculos.ts --os-pdf` | `laudos/aplisSite.ts`, `laudos/laudoExterno.ts` |
 | **Umami** | Analytics (web) | `VITE_UMAMI_*` |
 | **ngrok** | Túnel público HTTPS para a API em VPS (webhook do FlowLab, frontend) | `docker-compose.yml` |
 
@@ -257,6 +258,7 @@ Os webhooks do FlowLab são **at-least-once**: a API trata reentrega como idempo
 | Supabase (web) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` / `VITE_SUPABASE_ANON_KEY` (legado) | Pública, sob RLS |
 | Integração FlowLab | `FLOWLAB_EDGE_FUNCTION_URL`, `FLOWLAB_API_KEY`, `FLOWLAB_TIMEOUT_MS`, `FLOWLAB_DISPONIBILIDADE_TTL_MS`, `FLOWLAB_WEBHOOK_SECRET` | Chave e secret precisam bater com o `.env` do FlowLab |
 | LIS (laudos) | `APLIS_BASE_URL`, `APLIS_USUARIO`, `APLIS_SENHA`, `APLIS_PERIODO_DIAS`, `AOL_BASE_URL`, `AOL_IDAGENTE`, `AOL_SENHA`, `AOL_ENTIDADE`, `EXAM_CACHE_TTL_HOURS`, `LAUDOS_SOMENTE_ALVARO` | |
+| APLIS site interno (anexo Laudo EXTERNO) | `APLIS_WEB_URL`, `APLIS_WEB_USUARIO`, `APLIS_WEB_SENHA` | Opcionais: sem as três o caminho fica inerte. Usuário próprio e somente leitura |
 | Criptografia | `PII_KEY_K1` (+`K2`... p/ rotação), `PII_CHAVE_ATUAL`, `CPF_HASH_KEY` | Obrigatórias em produção — boot falha sem elas (fail-closed) |
 | Cadastro | `REQUIRE_EMAIL_CONFIRMATION` | `false` só em fase de teste — sem SMTP, qualquer um cria conta com e-mail de outro |
 | Rede/segurança | `CORS_ORIGIN`, `TRUST_PROXY_HOPS`, `PORT`, `HOST` | `CORS_ORIGIN` obrigatória em produção |

@@ -48,6 +48,9 @@ export interface AolAnalito {
 //  - `laudo_texto` — patologia/citologia: o laudo descritivo (laudoMacro/Micro)
 export interface AplisRequisicao {
   cod_requisicao: string
+  // Id interno da requisição no apLIS. Só a listagem o devolve; é a chave que o
+  // site interno usa para listar os anexos (ver aplisSite.ts).
+  id_requisicao?: string | null
   data_solicitacao: string | null
   data_liberacao: string | null
   tipo_exame: string | null

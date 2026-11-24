@@ -17,14 +17,17 @@ export class LaudoError extends Error {
 // Entrada inválida na fronteira do módulo (CPF malformado, código ausente) → 400.
 export class ValidationError extends LaudoError {}
 
+/** De onde veio a falha: os dois LIS e o site interno do apLIS (anexos). */
+export type ServicoIntegrado = 'aol' | 'aplis' | 'aplis-site' | 'unknown'
+
 // Falha de rede/timeout/protocolo ao falar com ApLIS ou AOL → 502.
 // É esperada e recuperável: o laudo pode vir na próxima revalidação.
 export class IntegrationError extends LaudoError {
-  readonly service: 'aol' | 'aplis' | 'unknown'
+  readonly service: ServicoIntegrado
 
   constructor(
     message: string,
-    service: 'aol' | 'aplis' | 'unknown' = 'unknown',
+    service: ServicoIntegrado = 'unknown',
     context?: Record<string, unknown>,
   ) {
     super(message, { ...context, service })

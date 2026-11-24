@@ -256,6 +256,10 @@ export class AplisService implements IAplisService {
       .filter((item) => String(item.CPF ?? item.Cpf ?? item.cpf ?? '').replace(/\D/g, '') === cpfDigits)
       .map((item) => ({
         cod_requisicao: String(item.CodRequisicao ?? item.codRequisicao ?? ''),
+        id_requisicao:
+          (item.IdRequisicao ?? item.idRequisicao) != null
+            ? String(item.IdRequisicao ?? item.idRequisicao)
+            : null,
         data_solicitacao: item.DtaSolicitacao ?? null,
         data_liberacao: item.DtaFinalizacao ?? null,
         tipo_exame: item.NomExame ?? null,
