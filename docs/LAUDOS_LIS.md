@@ -133,9 +133,9 @@ guarda uma O.S. só. Então:
 - com a flag ligada, a FASE 2.5 também deixa de descartar a O.S. cujo `idOsLis`
   aponta uma requisição já ocupada por outra O.S.: ela entra como linha própria.
 
-O que nunca acontece: sobrescrever a O.S. de uma linha; copiar para uma
-requisição a O.S. que já está em outra do mesmo paciente (é logado como
-divergência); mostrar erro ao paciente por falha do site.
+O que nunca acontece: a mesma O.S. em duas requisições do paciente; trocar a
+O.S. de requisição sem as duas fontes na mesa (ver "Quando o PDF e o idOsLis
+divergem"); mostrar erro ao paciente por falha do site.
 
 ### Um pedido, um card: o elo para o pedido de origem
 
@@ -156,8 +156,9 @@ Quem grava o elo, sempre com `LAUDOS_OS_VIA_PDF` ligada:
 - a O.S. cujo `idOsLis` aponta uma requisição já ocupada por outra O.S.
   (FASE 2.5) — ali é o próprio `idOsLis` que diz de qual pedido ela é.
 
-Elo já gravado nunca é trocado: PDF que situe a O.S. em outra requisição conta
-como divergência no log, como a O.S. que já está na linha de outra requisição.
+Elo já gravado só é trocado pela regra de divergência abaixo. Fora dela, PDF
+que situe a O.S. em outra requisição conta como divergência no log, como a O.S.
+que já está na linha de outra requisição.
 
 Quem lê é `fundirPedidos` (mappers.ts), ao **servir** — cache normal, busca ao
 vivo e consulta administrativa passam pelo mesmo ponto. O.S. com elo funde no
@@ -179,6 +180,63 @@ conta os elos gravados pelo passo do PDF (os da FASE 2.5 não entram nele).
 
 Como o `cached_at`, o elo é coluna da linha e o repositório o injeta em cada
 laudo ao ler (`codigo_lis_pedido`); não faz parte do JSON cifrado.
+
+### Quando o PDF e o `idOsLis` divergem: vence o PDF (25/11/2026)
+
+O laudo está anexado na requisição A e o `idOsLis` digitado na O.S. aponta a
+requisição B, do mesmo paciente. **A O.S. fica em A.** A regra é uma função
+pura (`pedidoDaOs`, em `divergencia.ts`) e a fonte vencedora é uma constante
+(`FONTE_QUE_VENCE`).
+
+- **O que cada fonte "afirma".** O PDF afirma as requisições do paciente em
+  cujo laudo a O.S. aparece, e só para a O.S. que passou na conferência de
+  identidade. O `idOsLis` só afirma quando aponta requisição do próprio
+  paciente; código de outra pessoa não conta. Por isso a regra escolhe entre
+  pedidos da mesma pessoa e nunca decide de quem a O.S. é.
+- **Laudo anexado em duas requisições.** Se o `idOsLis` aponta uma delas, é
+  essa (não há divergência). Se aponta uma terceira, o PDF não tem uma
+  resposta só: nada é movido, fica o registro.
+- **Correção do que já está gravado.** Só com as duas fontes afirmando na
+  mesma busca. A O.S. que ocupa a linha da requisição errada sai dela junto com
+  o laudo em cache (`desvincularOs`) e entra na certa — na linha da requisição
+  ou, se ocupada, em linha própria com o elo. A O.S. em linha própria tem o elo
+  trocado. Vale também quando as fontes passaram a concordar e o gravado é
+  outro (a recepção corrigiu o `idOsLis`). Com uma fonte só (site ou Álvaro
+  fora do ar, `idOsLis` vazio) nada é movido. Também não quando o laudo de
+  alguma requisição do paciente não pôde ser lido naquela busca, nem para a
+  O.S. que algum laudo trouxe e a identidade recusou: o PDF que falta poderia
+  mudar a resposta, e a busca seguinte desfaria a correção.
+- **Quando acontece.** Na busca ao vivo e na revalidação em segundo plano do
+  cache — a correção chega sozinha na revalidação seguinte, sem migração.
+- **Log.** Cada correção gera um `warn` "Vínculo da O.S. corrigido" com
+  `requisicaoOrigem`, `requisicaoDestino`, `codigoOs` e `fonteQueVenceu`;
+  as contagens saem em `vinculosCorrigidos`, nos dois logs de resumo.
+- Para isso a listagem do Álvaro passou a ser lida **antes** do passo do PDF
+  (FASE 2.1): o PDF já grava no pedido que a regra escolhe. Antes da regra, uma
+  O.S. nova com as fontes divergindo podia ser gravada nas duas requisições.
+
+Limites: desvincular e regravar não é transação (se a regravação falhar, a
+O.S. some até a busca seguinte — o log da correção já saiu); e desligar a flag
+depois de uma correção deixa a varredura livre para pôr a mesma O.S. de volta
+na requisição do `idOsLis`, sem tirá-la da outra — a varredura sem a flag nunca
+conferiu se a O.S. já existe.
+
+**Por que o PDF.** Os 16 casos da auditoria (398 requisições, 25/11/2026)
+foram conferidos contra o apLIS e o Álvaro, sem a recepção:
+
+| O que o `idOsLis` aponta | O.S. |
+|---|---|
+| Requisição de outro paciente (Captura Híbrida de 2022) | 1 |
+| Requisição de PCR do mesmo paciente (a O.S. tem 23 e 30 exames de análises clínicas) | 2 |
+| Requisição de 4 meses antes da coleta | 1 |
+| Requisição vizinha, finalizada, que tem laudo próprio com outra O.S. — com o PDF, cada requisição fica com a sua | 3 |
+| Requisição do mesmo dia (ou do seguinte) que nunca foi finalizada e não tem laudo | 8 |
+| A mesma requisição: o laudo está anexado nas duas (não é divergência) | 1 |
+
+Em nenhum caso o `idOsLis` se mostrou certo contra o PDF. Em 2 dos 8 a data de
+coleta da O.S. (um exame só) coincide com a da requisição não finalizada — o
+indício mais forte a favor do `idOsLis`, e ainda assim essa requisição não
+tem laudo liberado. **Falta a conferência com a recepção** (ticket 04).
 
 **Identidade, por O.S., com duas provas.** Cada O.S. responde pelo que está
 impresso nas páginas em que ela aparece — não é por arquivo, porque um mesmo

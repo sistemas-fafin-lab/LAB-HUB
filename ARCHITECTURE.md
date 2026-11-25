@@ -215,7 +215,7 @@ Os webhooks do FlowLab são **at-least-once**: a API trata reentrega como idempo
 | **FlowLab** (webhooks recebidos) | Resultado liberado, mudança de status de coleta — HMAC-SHA256 | `routes/webhooks.ts` |
 | **Álvaro Online (AOL)** | LIS do laboratório de apoio — SOAP/XML, fonte principal de laudo | `laudos/aol.ts` |
 | **APLIS** | LIS do laboratório de apoio — REST/JSON, descoberta de requisição | `laudos/aplis.ts` |
-| **APLIS (site interno)** | Leitura do anexo "Laudo EXTERNO" (PDF tipo 14) da requisição, de onde saem O.S. e CPF. Sem contrato do fornecedor; somente leitura. Usado pela busca de laudos quando `LAUDOS_OS_VIA_PDF=true` e pela auditoria `scripts/auditar-vinculos.ts --os-pdf` | `laudos/aplisSite.ts`, `laudos/laudoExterno.ts`, `laudos/vinculoPdf.ts` |
+| **APLIS (site interno)** | Leitura do anexo "Laudo EXTERNO" (PDF tipo 14) da requisição, de onde saem O.S. e CPF. Sem contrato do fornecedor; somente leitura. Usado pela busca de laudos quando `LAUDOS_OS_VIA_PDF=true` e pela auditoria `scripts/auditar-vinculos.ts --os-pdf` | `laudos/aplisSite.ts`, `laudos/laudoExterno.ts`, `laudos/vinculoPdf.ts`, `laudos/divergencia.ts` (PDF × `idOsLis`) |
 | **Umami** | Analytics (web) | `VITE_UMAMI_*` |
 | **ngrok** | Túnel público HTTPS para a API em VPS (webhook do FlowLab, frontend) | `docker-compose.yml` |
 

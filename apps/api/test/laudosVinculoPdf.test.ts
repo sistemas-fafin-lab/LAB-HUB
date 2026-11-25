@@ -94,6 +94,9 @@ class RepositorioEmMemoria implements IExamResultRepository {
   async setCodigoOs(id: string, codigoOs: string): Promise<void> {
     this.linhas.find((l) => l.id === id)!.codigo_os = codigoOs
   }
+  async desvincularOs(id: string): Promise<void> {
+    Object.assign(this.linhas.find((l) => l.id === id)!, { codigo_os: null, result: null, cached_at: null })
+  }
   async saveResult(id: string, result: Laudo[]): Promise<void> {
     const linha = this.linhas.find((l) => l.id === id)!
     linha.result = result
@@ -589,6 +592,272 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
       await buscar()
 
       expect(resumoDoPdf(log)).toMatchObject({ extrasPeloPdf: 1, elosGravados: 2 })
+    })
+  })
+
+  describe('divergência entre o PDF e o idOsLis: vence o PDF', () => {
+    const REQ_C = '0040000000003'
+    const duas = [requisicao(REQ_A), requisicao(REQ_B)]
+    /** O log de cada correção de vínculo. */
+    const correcoes = (log: { warn: ReturnType<typeof vi.fn> }): unknown[] =>
+      log.warn.mock.calls.filter((c) => /Vínculo da O\.S\. corrigido/.test(String(c[1]))).map((c) => c[0])
+
+    it('vínculo gravado antes pelo idOsLis é corrigido: a O.S. vai para a requisição do laudo', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_B, '111111101')
+
+      const { exams } = await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101', [REQ_B]: null })
+      expect(osNaTela(exams).filter(Boolean)).toEqual(['111111101'])
+      expect(exams.find((e) => e.codigo_os === '111111101')?.codigo_lis).toBe(REQ_A)
+      expect(correcoes(log)).toEqual([
+        {
+          pacienteId: PACIENTE,
+          codigoOs: '111111101',
+          requisicaoOrigem: REQ_B,
+          requisicaoDestino: REQ_A,
+          fontesDivergem: true,
+          fonteQueVenceu: 'pdf',
+        },
+      ])
+      expect(resumoDoPdf(log)).toMatchObject({ vinculosCorrigidos: 1 })
+    })
+
+    it('o outro sentido: vínculo gravado pelo PDF não é desfeito pelo idOsLis', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_A, '111111101')
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101', [REQ_B]: null })
+      expect(correcoes(log)).toEqual([])
+    })
+
+    it('O.S. nova com as fontes divergindo: entra uma vez só, na requisição do laudo', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101', [REQ_B]: null })
+      expect(correcoes(log)).toEqual([])
+    })
+
+    it('o laudo em cache da requisição que perde a O.S. sai junto', async () => {
+      const { repo, buscar, servico } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_B, '111111101')
+      await buscar()
+
+      const emCache = await servico.readCachedExams(PACIENTE, CPF)
+
+      expect(osNaTela(emCache).filter(Boolean)).toEqual(['111111101'])
+      expect(repo.linhas.find((l) => l.codigo_lis === REQ_B)?.result?.some((l) => l.codigo_os)).toBeFalsy()
+    })
+
+    it('a requisição do laudo já tem outra O.S.: a corrigida entra em linha própria, com o elo', async () => {
+      const { repo, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['333333303', '111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_A, '333333303')
+      repo.semente(REQ_B, '111111101')
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '333333303', [REQ_B]: null, 'avulsa:111111101': '111111101' })
+      expect(repo.elos()).toEqual({ '111111101': REQ_A })
+    })
+
+    it('O.S. em linha própria com o elo para a requisição do idOsLis: o elo é corrigido', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['333333303', '111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_A, '333333303')
+      repo.semente(null, '111111101', REQ_B)
+
+      await buscar()
+
+      expect(repo.elos()).toEqual({ '111111101': REQ_A })
+      expect(correcoes(log)).toHaveLength(1)
+    })
+
+    it('repetir a busca depois da correção não corrige de novo', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_B, '111111101')
+
+      await buscar()
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101', [REQ_B]: null })
+      expect(correcoes(log)).toHaveLength(1)
+    })
+
+    it('as fontes passaram a concordar e o gravado é outro: corrige também', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_A }],
+      })
+      repo.semente(REQ_B, '111111101')
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101', [REQ_B]: null })
+      expect(correcoes(log)).toMatchObject([{ fontesDivergem: false }])
+    })
+
+    it('CPF divergente no laudo: a regra não move a O.S. para a requisição desse laudo', async () => {
+      // O laudo anexado em A atribui a O.S. a outra pessoa: para a regra, o PDF
+      // não afirma nada. A conferência de identidade decide antes.
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'], OUTRO_CPF)] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_B, '111111101')
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_B]: '111111101', [REQ_A]: null })
+      expect(correcoes(log)).toEqual([])
+    })
+
+    it('idOsLis com requisição que não é do paciente: a O.S. fica na requisição do laudo, sem correção', async () => {
+      const { repo, log, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: '0200000000009' }],
+      })
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101' })
+      expect(correcoes(log)).toEqual([])
+    })
+
+    it('o mesmo laudo anexado em duas requisições e o idOsLis numa delas: é essa', async () => {
+      const { repo, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])], [REQ_B]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_B]: '111111101', [REQ_A]: null })
+    })
+
+    it('laudo anexado em duas requisições e o idOsLis numa terceira: nada é movido, fica o registro', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: [...duas, requisicao(REQ_C)],
+        pdfs: { [REQ_A]: [pdf(['111111101'])], [REQ_C]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_B, '111111101')
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_B]: '111111101', [REQ_A]: null, [REQ_C]: null })
+      expect(correcoes(log)).toEqual([])
+      expect(resumoDoPdf(log)).toMatchObject({ divergentes: 2 })
+    })
+
+    it('laudo de uma requisição não pôde ser lido: nada é corrigido nesta busca', async () => {
+      // O laudo está anexado em A e em B e o idOsLis diz B. Se a leitura de B
+      // falha, o PDF parece apontar só A — corrigir aqui moveria a O.S. para A
+      // e a busca seguinte a traria de volta.
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: {
+          [REQ_A]: [pdf(['111111101'])],
+          [REQ_B]: async () => {
+            throw new IntegrationError('site fora do ar', 'aplis')
+          },
+        },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_B, '111111101')
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_B]: '111111101', [REQ_A]: null })
+      expect(correcoes(log)).toEqual([])
+    })
+
+    it('O.S. recusada pela identidade no laudo de outra requisição: nada é corrigido', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])], [REQ_B]: [pdf(['111111101'], null)] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_B, '111111101')
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_B]: '111111101', [REQ_A]: null })
+      expect(correcoes(log)).toEqual([])
+    })
+
+    it('a correção é logada mesmo se a regravação da O.S. falhar depois de desvinculá-la', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_B, '111111101')
+      vi.spyOn(repo, 'setCodigoOs').mockRejectedValueOnce(new Error('banco fora do ar'))
+
+      await buscar()
+
+      expect(correcoes(log)).toMatchObject([{ requisicaoOrigem: REQ_B, requisicaoDestino: REQ_A }])
+    })
+
+    it('listagem do Álvaro fora do ar: sem a segunda fonte, nada é corrigido', async () => {
+      const { repo, aol, log, buscar } = montar({ requisicoes: duas, pdfs: { [REQ_A]: [pdf(['111111101'])] } })
+      aol.listOrders.mockRejectedValue(new IntegrationError('AOL fora do ar', 'aol'))
+      repo.semente(REQ_B, '111111101')
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_B]: '111111101', [REQ_A]: null })
+      expect(correcoes(log)).toEqual([])
+    })
+
+    it('flag desligada: o vínculo do idOsLis fica como está', async () => {
+      vi.stubEnv('LAUDOS_OS_VIA_PDF', 'false')
+      const { repo, externos, buscar } = montar({
+        requisicoes: duas,
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_B }],
+      })
+      repo.semente(REQ_B, '111111101')
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_B]: '111111101', [REQ_A]: null })
+      expect(externos.lerDaRequisicao).not.toHaveBeenCalled()
     })
   })
 

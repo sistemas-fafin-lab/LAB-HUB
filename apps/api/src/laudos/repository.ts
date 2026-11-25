@@ -116,6 +116,12 @@ export interface IExamResultRepository {
   setPedidoDeOrigem(id: string, codigoLisPedido: string): Promise<void>
   /** Liga a OS da AOL a uma linha existente (link determinístico via idOsLis). */
   setCodigoOs(id: string, codigoOs: string): Promise<void>
+  /**
+   * Tira a O.S. da linha de uma requisição, junto com o laudo em cache — que
+   * era o dessa O.S. A linha continua existindo, como requisição sem O.S.
+   * Usado só pela correção de vínculo (ver divergencia.ts).
+   */
+  desvincularOs(id: string): Promise<void>
   /** Grava os laudos da linha e renova o TTL. */
   saveResult(id: string, result: Laudo[]): Promise<void>
   /** Renova só o TTL — usado quando o conteúdo clínico não mudou. */
@@ -262,6 +268,19 @@ export class ExamResultRepository implements IExamResultRepository {
 
     if (error) {
       throw new DatabaseError('Falha ao ligar a OS à linha do laudo', { id, codigoOs, cause: error })
+    }
+  }
+
+  async desvincularOs(id: string): Promise<void> {
+    // O laudo sai junto: ele foi montado com os valores da O.S. que está
+    // deixando a linha, e servi-lo do cache manteria o vínculo desfeito na tela.
+    const { error } = await supabase
+      .from(TABELA)
+      .update({ codigo_os: null, result_enc: null, cached_at: null })
+      .eq('id', id)
+
+    if (error) {
+      throw new DatabaseError('Falha ao desvincular a OS da linha do laudo', { id, cause: error })
     }
   }
 
