@@ -6,7 +6,7 @@ Na medição de 24/11/2026 isso ocorreu em 5 de 76 O.S. (7%), sempre entre requi
 
 **Blocked by:** 01 (a saída da auditoria lista os casos reais a examinar).
 
-**Status:** ready-for-human
+**Status:** done
 
 - [ ] Os casos divergentes apontados pela auditoria foram examinados com a recepção, e a conclusão está nos comentários deste ticket.
 - [x] A regra de qual fonte vence está decidida e registrada na documentação dos laudos LIS.
@@ -82,3 +82,7 @@ Corrigido depois da revisão:
 - O log da correção sai logo depois de desfazer o vínculo antigo, antes da regravação — se ela falhar, a origem e o destino já estão registrados.
 
 Fora do que o ticket pedia, e mantido: corrigir também quando as fontes passaram a concordar e o gravado é outro; `idOsLis` como desempate do laudo anexado em duas requisições; listagem do Álvaro antes do passo do PDF.
+
+### 25/11/2026 — regra confirmada
+
+O responsável pelo produto confirmou "vence o PDF" como está. A conferência dos casos com a recepção (primeiro critério) não foi feita e fica dispensada por essa decisão; as duas O.S. em que a data favorece o `idOsLis` (390843266 e 394818261) continuam listadas acima, caso alguém queira olhar.
