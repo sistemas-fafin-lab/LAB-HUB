@@ -134,8 +134,7 @@ guarda uma O.S. só. Então:
 - com a flag ligada, a FASE 2.5 também deixa de descartar a O.S. cujo `idOsLis`
   aponta uma requisição já ocupada por outra O.S.: ela entra como linha própria.
 
-O que nunca acontece: vincular pelo `idOsLis` uma O.S. que o laudo anexado
-atribui a outro CPF; sobrescrever a O.S. de uma linha; copiar para uma
+O que nunca acontece: sobrescrever a O.S. de uma linha; copiar para uma
 requisição a O.S. que já está em outra do mesmo paciente (é logado como
 divergência); mostrar erro ao paciente por falha do site.
 
@@ -148,9 +147,16 @@ PDF já veio com O.S. de CPFs diferentes. A regra (`identidadeDoLaudoExterno`):
    cadastro da própria requisição no apLIS → é dele. Vale para o laudo sem CPF
    e também para o de CPF diferente (decisão de 25/11/2026); neste último caso
    fica um `warn` para a recepção corrigir o CPF da O.S.;
-3. senão, o CPF diverge → é de outra pessoa: descartada, log em `error`, e a
-   varredura por `idOsLis` também não a vincula;
-4. senão → sem identidade: descartada aqui, mas ainda pode chegar pelo `idOsLis`.
+3. senão, o CPF diverge → não entra pelo PDF, log em `error`;
+4. senão → sem identidade: também não entra pelo PDF.
+
+**O PDF nunca remove o que o `idOsLis` já mostra — só acrescenta.** A O.S.
+recusada nos itens 3 e 4 continua podendo chegar pela varredura, sob a
+conferência de sempre (payload da AOL). Quando a varredura vincula uma O.S. que
+o laudo atribui a outro CPF, fica um `warn` para a recepção corrigir o cadastro
+na origem. Motivo (25/11/2026): a O.S. de 16 páginas da requisição
+0040002557003 saiu do laboratório de apoio com CPF e nascimento errados, é do
+próprio paciente, e bloqueá-la tiraria da tela um exame que hoje aparece.
 
 O cadastro da requisição só serve de referência se o CPF dele for o do paciente
 do token; é consultado só quando o CPF não resolve. Nome e nascimento ficam em
@@ -180,13 +186,13 @@ rodada da véspera (398 requisições), 35 não tinham O.S. nenhuma pelo `idOsLi
 
 **Limites conhecidos.**
 
-- Sobram fora as O.S. em que nem o CPF nem nome + nascimento conferem (pelo
-  teste, 1 das 14 sem CPF e 1 das 3 de CPF divergente).
-- **A de CPF divergente que não passa na segunda prova some também do caminho
-  do `idOsLis`**, que antes a mostrava. Caso real: O.S. de 16 páginas com o
-  mesmo nome, CPF diferente e nascimento 2 anos diferente do cadastro, apontada
-  pelo `idOsLis` para a requisição. Com a flag ligada ela deixa de aparecer até
-  o cadastro ser corrigido.
+- Sobram fora do caminho do PDF as O.S. em que nem o CPF nem nome + nascimento
+  conferem (pelo teste, 1 das 14 sem CPF e 1 das 3 de CPF divergente). Só
+  chegam ao paciente se o `idOsLis` as apontar.
+- A O.S. que o laudo atribui a outro CPF e que o `idOsLis` aponta para o
+  paciente depende só da conferência da AOL, que deixa passar quando a AOL não
+  devolve CPF. É o comportamento de sempre, sem a flag; o `warn` é o que a
+  torna visível.
 - A flag ainda não foi exercitada de ponta a ponta contra o banco real: os
   testes usam dublês e a leitura dos PDFs foi conferida ao vivo só em leitura.
 - A O.S. principal é a maior que ainda não é do paciente em outra linha: se a

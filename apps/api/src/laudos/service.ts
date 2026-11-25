@@ -401,14 +401,18 @@ export class LaudoService {
       for (const { orderId, idOsLis } of ordens) {
         const chave = normalizaIdOsLis(idOsLis)
 
-        // O laudo anexado diz que esta O.S. é de outro CPF: o `idOsLis`
-        // digitado à mão não passa por cima disso. (Vazio com a flag desligada.)
-        if (recusadasPeloPdf.has(orderId)) {
-          log?.error(
+        // O PDF NUNCA REMOVE o que o `idOsLis` já mostra — só acrescenta. O
+        // laudo anexado atribuir esta O.S. a outro CPF não a tira daqui: no
+        // caso real que motivou a regra (25/11/2026) a O.S. era do próprio
+        // paciente, registrada no laboratório de apoio com CPF e nascimento
+        // errados. A conferência dela continua sendo a do payload da AOL, na
+        // FASE 3, como sempre foi. Fica só o rastro, para a recepção corrigir
+        // o cadastro na origem. (Conjunto vazio com a flag desligada.)
+        if (recusadasPeloPdf.has(orderId) && (codigosDoPaciente.has(chave) || chave === cpfDigitos)) {
+          log?.warn(
             { pacienteId, orderId },
-            'idOsLis aponta para o paciente uma O.S. que o Laudo EXTERNO atribui a outro CPF — NÃO vinculada',
+            'idOsLis aponta para o paciente uma O.S. que o Laudo EXTERNO atribui a outro CPF — mantida; revisar o cadastro da O.S.',
           )
-          continue
         }
 
         if (codigosDoPaciente.has(chave)) {
@@ -522,9 +526,9 @@ export class LaudoService {
     requisicoes: AplisRequisicao[],
     log?: FastifyBaseLogger,
   ): Promise<Set<string>> {
-    // O.S. que algum laudo anexado afirma ser de OUTRO CPF. Sai daqui para a
-    // varredura por `idOsLis` não a readmitir pela porta dos fundos: lá a
-    // única conferência é a do payload da AOL, que deixa passar sem CPF.
+    // O.S. que algum laudo anexado afirma ser de OUTRO CPF, sem a segunda
+    // prova. Sai daqui só para a varredura por `idOsLis` AVISAR quando vincular
+    // uma delas — não para bloquear (ver a FASE 2.5).
     const deOutroPaciente = new Set<string>()
     const externos = this.laudosExternos
     if (!externos) return deOutroPaciente

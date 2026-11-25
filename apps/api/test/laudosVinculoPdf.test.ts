@@ -437,10 +437,10 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
       expect(tudo).not.toContain('1990')
     })
 
-    it('O.S. que o PDF atribui a outro CPF não volta pela varredura do idOsLis', async () => {
-      // O campo digitado à mão aponta a O.S. alheia para esta requisição — e a
-      // AOL, sem CPF no payload, não a barraria.
-      const { repo, aol, buscar } = montar({
+    it('o PDF nunca remove o que o idOsLis já mostra: O.S. recusada no laudo ainda chega pela varredura', async () => {
+      // Caso real: a O.S. saiu do laboratório de apoio com CPF e nascimento
+      // errados, mas é do paciente — e o idOsLis a aponta para a requisição.
+      const { repo, aol, log, buscar } = montar({
         pdfs: { [REQ_A]: [pdf(['999999909', '111111101'], CPF, { '999999909': OUTRO_CPF })] },
         ordens: [{ orderId: '999999909', idOsLis: REQ_A }],
       })
@@ -448,12 +448,15 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
 
       const { exams } = await buscar()
 
-      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101' })
-      expect(osNaTela(exams)).toEqual(['111111101'])
-      expect(aol.fetchExam).not.toHaveBeenCalledWith('999999909')
+      // Pelo PDF só entrou a que conferiu; a outra veio pelo idOsLis.
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101', 'avulsa:999999909': '999999909' })
+      expect(osNaTela(exams)).toEqual(['111111101', '999999909'])
+      // Fica o rastro para a recepção corrigir o cadastro na origem.
+      const aviso = log.warn.mock.calls.find((c) => /atribui a outro CPF/.test(String(c[1])))
+      expect(aviso?.[0]).toMatchObject({ orderId: '999999909' })
     })
 
-    it('nem quando a requisição ainda está sem O.S. e o idOsLis a preencheria', async () => {
+    it('idem quando a requisição ainda está sem O.S.: o idOsLis a preenche, como hoje', async () => {
       const { repo, buscar } = montar({
         pdfs: { [REQ_A]: [pdf(['999999909'], OUTRO_CPF)] },
         ordens: [{ orderId: '999999909', idOsLis: REQ_A }],
@@ -461,7 +464,19 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
 
       await buscar()
 
-      expect(repo.vinculos()).toEqual({ [REQ_A]: null })
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '999999909' })
+    })
+
+    it('a que chega pelo idOsLis continua sob a barreira do Álvaro: CPF de outro no payload bloqueia', async () => {
+      const { aol, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['999999909', '111111101'], CPF, { '999999909': OUTRO_CPF })] },
+        ordens: [{ orderId: '999999909', idOsLis: REQ_A }],
+      })
+      aol.fetchExam.mockImplementation(async (os: string) => [exameDaOs(os, os === '999999909' ? OUTRO_CPF : CPF)])
+
+      const { exams } = await buscar()
+
+      expect(osNaTela(exams)).toEqual(['111111101'])
     })
 
     it('O.S. sem CPF no laudo continua podendo chegar pelo idOsLis, como antes', async () => {
@@ -516,19 +531,17 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
       expect(resumoDoPdf(log)).toMatchObject({ aceitasPorNomeENascimento: 1, cpfDivergente: 0 })
     })
 
-    it('CPF divergente com nome igual e nascimento DIFERENTE continua fora', async () => {
+    it('CPF divergente com nome igual e nascimento DIFERENTE não entra pelo PDF', async () => {
       const { repo, buscar } = montar({
         pdfs: {
           [REQ_A]: [
             pdf(['999999909'], OUTRO_CPF, {}, { '999999909': { nome: 'PACIENTE EXEMPLO', nascimento: '1990-01-02' } }),
           ],
         },
-        ordens: [{ orderId: '999999909', idOsLis: REQ_A }],
       })
 
       await buscar()
 
-      // Nem pelo idOsLis: o CPF do laudo é de outra pessoa e nada o desmentiu.
       expect(repo.vinculos()).toEqual({ [REQ_A]: null })
     })
 
