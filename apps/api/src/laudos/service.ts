@@ -202,6 +202,34 @@ function regraDaOs(peloPdf: VinculosPeloPdf, codigoOs: string, pedidoPeloIdOsLis
   return semBase ? { ...regra, decidido: false } : regra
 }
 
+/**
+ * Nome e nascimento do paciente como o apLIS os tem NAQUELA requisição — a
+ * referência da segunda prova de identidade do Laudo EXTERNO, no vínculo e na
+ * entrega do laudo original (laudoOriginal.ts).
+ *
+ * Só vale se o CPF do cadastro for o do paciente do token: é isso que amarra
+ * "o nome que está no apLIS" a "quem está pedindo". Qualquer outra coisa
+ * (apLIS fora do ar, CPF ausente ou de outra pessoa) devolve `null`, e sem
+ * referência a segunda prova simplesmente não existe.
+ *
+ * Nome e nascimento ficam em memória; não vão para log.
+ */
+export async function lerCadastroDaRequisicao(
+  aplis: IAplisService,
+  codigoLis: string,
+  cpf: string,
+  log?: FastifyBaseLogger,
+): Promise<Pessoa | null> {
+  try {
+    const { paciente } = await aplis.requisicaoResultado(codigoLis)
+    if (conferirCpf(cpf, paciente?.cpf) !== 'confere') return null
+    return { nome: paciente.nome, nascimento: paciente.data_nascimento }
+  } catch (err) {
+    log?.warn({ codigoLis, err }, 'Laudo EXTERNO: cadastro da requisição indisponível para conferir nome e nascimento')
+    return null
+  }
+}
+
 /** O que uma busca ao vivo devolve: os laudos e a falha de integração, se houve. */
 interface BuscaAoVivo {
   laudos: Laudo[]
@@ -716,7 +744,7 @@ export class LaudoService {
       // a maioria fecha no CPF — e uma vez por requisição.
       let cadastro: Promise<Pessoa | null> | null = null
       const cadastroDaRequisicao = (): Promise<Pessoa | null> =>
-        (cadastro ??= this.#cadastroDaRequisicao(codigoLis, cpf, log))
+        (cadastro ??= lerCadastroDaRequisicao(this.aplis, codigoLis, cpf, log))
 
       const osDaRequisicao: string[] = []
       for (const [codigoOs, vezes] of impressoes) {
@@ -881,32 +909,6 @@ export class LaudoService {
       registrar()
     }
     return 'corrigido'
-  }
-
-  /**
-   * Nome e nascimento do paciente como o apLIS os tem NAQUELA requisição — a
-   * referência da segunda prova de identidade do Laudo EXTERNO.
-   *
-   * Só vale se o CPF do cadastro for o do paciente do token: é isso que amarra
-   * "o nome que está no apLIS" a "quem está pedindo". Qualquer outra coisa
-   * (apLIS fora do ar, CPF ausente ou de outra pessoa) devolve `null`, e sem
-   * referência a segunda prova simplesmente não existe.
-   *
-   * Nome e nascimento ficam em memória; não vão para log.
-   */
-  async #cadastroDaRequisicao(
-    codigoLis: string,
-    cpf: string,
-    log?: FastifyBaseLogger,
-  ): Promise<Pessoa | null> {
-    try {
-      const { paciente } = await this.aplis.requisicaoResultado(codigoLis)
-      if (conferirCpf(cpf, paciente?.cpf) !== 'confere') return null
-      return { nome: paciente.nome, nascimento: paciente.data_nascimento }
-    } catch (err) {
-      log?.warn({ codigoLis, err }, 'Laudo EXTERNO: cadastro da requisição indisponível para conferir nome e nascimento')
-      return null
-    }
   }
 
   // Caminho ApLIS puro — hoje o mais comum: a requisição não tem OS na AOL.

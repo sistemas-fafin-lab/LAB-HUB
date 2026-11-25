@@ -55,12 +55,22 @@ const laudoDe = (...cpfs: (string | null)[]): VinculoLaudoExterno => ({
   os: cpfs.map((cpf, i) => ({ numero: `11111110${i}`, cpf, nome: null, nascimento: null, paginas: 1 })),
 })
 
+const NOME = 'Paciente Exemplo da Silva'
+
+/** Uma O.S. com o nome e o nascimento do paciente impressos, e o CPF dado. */
+const laudoComPessoa = (cpf: string | null, pessoa = { nome: 'PACIENTE EXEMPLO DA SILVA', nascimento: '1990-01-01' }): VinculoLaudoExterno => ({
+  layout: 'atual',
+  os: [{ numero: '111111100', cpf, ...pessoa, paginas: 1 }],
+})
+
 interface Cenario {
   anexos?: AnexoLaudoExterno[]
   /** O que a leitura do PDF devolve, por id de anexo. Padrão: uma O.S. do paciente. */
   laudos?: Record<string, VinculoLaudoExterno>
   /** CPFs impressos em páginas sem O.S.; `null` = algum ilegível. Padrão: nenhum. */
   cpfsSemOs?: string[] | null
+  /** Sobrescreve o paciente do cadastro da requisição no apLIS; `null` = apLIS fora do ar. */
+  cadastro?: Partial<AplisRequisicao['paciente']> | null
   /** O paciente dono do token. Padrão: o dono da requisição. */
   pacienteDoToken?: string
   comSite?: boolean
@@ -129,8 +139,18 @@ async function montar(cenario: Cenario = {}) {
         local: { nome: '', endereco: null, numero: null },
       },
     ]),
-    requisicaoResultado: vi.fn(async () => {
-      throw new Error('não usado')
+    // O cadastro da requisição no apLIS: a referência da segunda prova.
+    requisicaoResultado: vi.fn(async (): Promise<AplisRequisicao> => {
+      if (cenario.cadastro === null) throw new IntegrationError('ApLIS: timeout', 'aplis')
+      return {
+        cod_requisicao: REQ,
+        data_solicitacao: null,
+        data_liberacao: null,
+        tipo_exame: null,
+        paciente: { nome: NOME, cpf: CPF, data_nascimento: '01/01/1990', sexo: null, ...cenario.cadastro },
+        procedimentos: [],
+        local: { nome: '', endereco: null, numero: null },
+      }
     }),
   } satisfies IAplisService
 
@@ -254,6 +274,60 @@ describe('GET /laudos/requisicoes/:codigoLis/original/:idAnexo — baixar o laud
       expect.stringContaining('RECUSADA'),
     )
     expect(auditoria()).toEqual([])
+  })
+
+  describe('segunda prova: nome + nascimento contra o cadastro da requisição', () => {
+    it('PDF sem CPF, com nome e nascimento do paciente: entrega e registra', async () => {
+      const { app, aplis, auditoria } = await montar({ laudos: { '501': laudoComPessoa(null) } })
+
+      const res = await app.inject({ method: 'GET', url: urlDoArquivo('501'), headers: auth })
+
+      expect(res.statusCode).toBe(200)
+      expect(aplis.requisicaoResultado).toHaveBeenCalledWith(REQ)
+      expect(auditoria()).toHaveLength(1)
+    })
+
+    it('PDF com CPF diferente, mas nome e nascimento do paciente: entrega e avisa para revisar o CPF', async () => {
+      const { app, log } = await montar({ laudos: { '501': laudoComPessoa(OUTRO_CPF) } })
+
+      const res = await app.inject({ method: 'GET', url: urlDoArquivo('501'), headers: auth })
+
+      expect(res.statusCode).toBe(200)
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ pacienteId: PACIENTE, codigoLis: REQ, idAnexo: '501' }),
+        expect.stringContaining('revisar o CPF'),
+      )
+    })
+
+    it('nome confere mas o nascimento não: recusa', async () => {
+      const outraData = { nome: 'PACIENTE EXEMPLO DA SILVA', nascimento: '1991-02-02' }
+      const { app } = await montar({ laudos: { '501': laudoComPessoa(OUTRO_CPF, outraData) } })
+
+      expect((await app.inject({ method: 'GET', url: urlDoArquivo('501'), headers: auth })).statusCode).toBe(409)
+    })
+
+    it('cadastro da requisição com CPF de outra pessoa não serve de referência: recusa', async () => {
+      const { app } = await montar({ laudos: { '501': laudoComPessoa(null) }, cadastro: { cpf: OUTRO_CPF } })
+
+      expect((await app.inject({ method: 'GET', url: urlDoArquivo('501'), headers: auth })).statusCode).toBe(409)
+    })
+
+    it('apLIS fora do ar na hora da segunda prova: recusa, sem erro técnico', async () => {
+      const { app } = await montar({ laudos: { '501': laudoComPessoa(null) }, cadastro: null })
+
+      const res = await app.inject({ method: 'GET', url: urlDoArquivo('501'), headers: auth })
+
+      expect(res.statusCode).toBe(409)
+      expect(res.payload).not.toMatch(/timeout/i)
+    })
+
+    it('o CPF confere: o cadastro nem é consultado', async () => {
+      const { app, aplis } = await montar()
+
+      await app.inject({ method: 'GET', url: urlDoArquivo('501'), headers: auth })
+
+      expect(aplis.requisicaoResultado).not.toHaveBeenCalled()
+    })
   })
 
   it('PDF que não deu para ler não é entregue', async () => {

@@ -345,14 +345,16 @@ e `routes/laudos.ts`.
   página que traga CPF sem trazer O.S. (`cpfsEmPaginasSemOs`). Não é pega a
   página sem O.S. e sem CPF em texto, como uma digitalização no meio do
   arquivo.
-- **A conferência é mais dura que a do vínculo.** Aqui não vale a segunda prova
-  (nome + nascimento): `diverge` e `indisponivel` recusam a entrega (409) e
-  saem em log `error` "Laudo original: … entrega RECUSADA", com `pacienteId`,
-  `codigoLis`, `idAnexo`, `veredito` e `layout`. O arquivo sai inteiro para o
-  paciente e não há barreira depois dele; um PDF com uma O.S. de outro CPF não
-  é entregue mesmo que as demais sejam dele. Pela medição de 25/11/2026 (488
-  O.S.: 14 sem CPF, 3 com CPF diferente), cerca de 3% dos laudos ficam sem
-  download por essa regra.
+- **As mesmas duas provas do vínculo** (decisão do responsável pelo produto,
+  25/11/2026): cada O.S. do arquivo passa pelo CPF e, quando ele falta ou
+  diverge, por nome + nascimento contra o cadastro da requisição
+  (`identidadeDoLaudoExterno`). A O.S. aceita pela segunda prova com CPF
+  diferente gera um `warn` para a recepção revisar o CPF. A diferença para o
+  vínculo é que o arquivo sai inteiro: basta uma O.S. sem nenhuma das provas
+  para nada ser entregue. A página com CPF sem O.S. só tem o CPF — ali não há
+  segunda prova. `diverge` e `indisponivel` recusam a entrega (409) e saem em
+  log `error` "Laudo original: … entrega RECUSADA", com `pacienteId`,
+  `codigoLis`, `idAnexo`, `veredito` e `layout`.
 - **O nome do arquivo no apLIS não sai da API** — pode trazer o nome de alguém,
   e a listagem acontece antes da conferência do PDF. O download se chama
   `laudo-original-<requisição>.pdf`.

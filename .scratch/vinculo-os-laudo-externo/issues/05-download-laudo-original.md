@@ -28,13 +28,9 @@ e botão "Baixar laudo original" na `LaudoPage`. Detalhes em
 
 Decisões tomadas na implementação, para o responsável pelo produto confirmar:
 
-- **Só o CPF libera a entrega.** A segunda prova (nome + nascimento), que vale
-  para o vínculo desde 25/11, não vale aqui: o ticket pede que `diverge` e
-  `indisponivel` recusem, e depois do download não há outra barreira. Pela
-  medição de 25/11 (488 O.S.: 14 sem CPF, 3 com CPF diferente), cerca de 3% dos
-  laudos ficam sem download.
-- **O arquivo inteiro precisa ser do paciente.** Uma O.S. de outro CPF, ou uma
-  página sem O.S. com CPF de outra pessoa, recusa o arquivo todo. Não é pega a
+- **O arquivo inteiro precisa ser do paciente.** Uma O.S. que não passe em
+  nenhuma das duas provas, ou uma página sem O.S. com CPF de outra pessoa,
+  recusa o arquivo todo. Não é pega a
   página sem O.S. e sem CPF em texto (digitalização no meio do arquivo);
   recusar toda página sem cabeçalho fecharia isso, mas falta medir em laudos
   reais quantos legítimos têm página assim.
@@ -50,4 +46,12 @@ Decisões tomadas na implementação, para o responsável pelo produto confirmar
 Não testado contra o apLIS real: os testes usam dublês do site e da API de
 integração. Antes de ligar a flag em produção vale um download de ponta a
 ponta, já com o usuário do ticket 06.
+
+### 25/11/2026 — a segunda prova vale no download
+
+Decisão do responsável pelo produto: o download aceita a segunda prova de
+identidade (nome + nascimento contra o cadastro da requisição), como o vínculo.
+Cada O.S. do arquivo passa pelo CPF e, se ele falta ou diverge, pela segunda
+prova; a aceita com CPF diferente gera `warn` para revisar o CPF da O.S. A
+página com CPF e sem O.S. continua só pelo CPF: não há nome ligado a ela.
 

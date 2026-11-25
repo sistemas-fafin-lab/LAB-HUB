@@ -2,10 +2,18 @@ import type { FastifyBaseLogger } from 'fastify'
 import type { IAplisService } from './aplis.js'
 import type { AnexoLaudoExterno } from './aplisSite.js'
 import { EntregaRecusadaError, IntegrationError, NaoEncontradoError } from './errors.js'
-import { conferirCpf, deveBloquear, piorVeredito, type Veredito } from './identidade.js'
+import {
+  conferirCpf,
+  conferirPessoa,
+  deveBloquear,
+  identidadeDoLaudoExterno,
+  piorVeredito,
+  type Pessoa,
+  type Veredito,
+} from './identidade.js'
 import type { LaudoExternoParaEntrega } from './laudoExterno.js'
 import type { IExamResultRepository } from './repository.js'
-import { PERIODO_DIAS, osViaPdfLigada } from './service.js'
+import { PERIODO_DIAS, lerCadastroDaRequisicao, osViaPdfLigada } from './service.js'
 import type { ExamResultRow } from './types.js'
 import type { IAnexosLaudoExterno } from './vinculoPdf.js'
 
@@ -24,11 +32,12 @@ import type { IAnexosLaudoExterno } from './vinculoPdf.js'
 //  3. o CPF impresso no PDF é o do paciente — em TODAS as O.S. do arquivo e
 //     em qualquer página que traga CPF sem trazer O.S.
 //
-// A terceira é mais dura que a do vínculo (service.ts, FASE 2.2): lá vale a
-// segunda prova por nome e nascimento, e depois ainda há a barreira sobre o
-// payload da AOL. Aqui o arquivo inteiro sai para a mão do paciente e não há
-// barreira depois — então só o CPF, e um arquivo com uma O.S. que não confira
-// não é entregue, mesmo que as outras sejam dele.
+// A terceira usa as mesmas duas provas do vínculo (service.ts, FASE 2.2;
+// decisão do responsável pelo produto em 25/11/2026): o CPF e, quando ele falta
+// ou diverge numa O.S., nome + nascimento contra o cadastro da requisição. A
+// diferença é que aqui o ARQUIVO sai inteiro: basta uma O.S. que não confira
+// para nenhuma página sair. E a página com CPF sem O.S. só tem o CPF — não há
+// nome ligado a ela para servir de segunda prova.
 // ---------------------------------------------------------------------------
 
 const DIA_MS = 24 * 60 * 60 * 1000
@@ -40,23 +49,6 @@ export interface ArquivoOriginal {
   /** Id do anexo no apLIS; só vale junto da requisição em que foi listado. */
   id: string
   retificacao: boolean
-}
-
-/**
- * O que o PDF afirma sobre o dono, para decidir a entrega do ARQUIVO: o pior
- * veredito entre as O.S. dele e os CPFs das páginas sem O.S. Layout não
- * reconhecido, sem O.S. legível ou com CPF ilegível não afirma nada.
- *
- * O que escapa: página sem O.S. E sem CPF em texto (uma digitalização no meio
- * do arquivo). Recusar toda página sem cabeçalho fecharia isso, mas não há
- * medição de quantos laudos legítimos têm página assim.
- */
-function identidadeDoArquivo(cpf: string, { vinculo, cpfsSemOs }: LaudoExternoParaEntrega): Veredito {
-  if (vinculo.layout !== 'atual' || vinculo.os.length === 0 || cpfsSemOs === null) return 'indisponivel'
-  return [...vinculo.os.map((os) => os.cpf), ...cpfsSemOs].reduce<Veredito>(
-    (pior, impresso) => piorVeredito(pior, conferirCpf(cpf, impresso)),
-    'confere',
-  )
 }
 
 const isoDoDia = (data: Date): string => data.toISOString().slice(0, 10)
@@ -91,14 +83,14 @@ export class LaudoOriginalService {
     if (!anexo) throw new NaoEncontradoError('Anexo não pertence à requisição', { codigoLis, idAnexo })
 
     const { pdf, ...impresso } = await fonte.baixarAnexo(anexo)
-    const veredito = identidadeDoArquivo(cpf, impresso)
+    const veredito = await this.#identidadeDoArquivo({ pacienteId, cpf, codigoLis, idAnexo }, impresso, log)
     if (veredito !== 'confere') {
       // `diverge` = PDF anexado na requisição errada; `indisponivel` = não deu
       // para ler de quem é. Os dois pedem revisão humana, por isso `error`.
       // Só códigos no log: nome e CPF do laudo não saem daqui.
       log?.error(
         { pacienteId, codigoLis, idAnexo, veredito, layout: impresso.vinculo.layout },
-        'Laudo original: o CPF do PDF não confere com o do paciente — entrega RECUSADA',
+        'Laudo original: a identidade impressa no PDF não confere com a do paciente — entrega RECUSADA',
       )
       throw new EntregaRecusadaError('Laudo original recusado pela conferência de identidade', {
         codigoLis,
@@ -107,6 +99,47 @@ export class LaudoOriginalService {
       })
     }
     return { pdf, linhaId: linha.id }
+  }
+
+  /**
+   * O que o PDF afirma sobre o dono, para decidir a entrega do ARQUIVO: o pior
+   * veredito entre as O.S. dele (cada uma pelas duas provas) e os CPFs das
+   * páginas sem O.S. Layout não reconhecido, sem O.S. legível ou com CPF
+   * ilegível não afirma nada.
+   *
+   * O que escapa: página sem O.S. E sem CPF em texto (uma digitalização no meio
+   * do arquivo). Recusar toda página sem cabeçalho fecharia isso, mas não há
+   * medição de quantos laudos legítimos têm página assim.
+   */
+  async #identidadeDoArquivo(
+    pedido: { pacienteId: string; cpf: string; codigoLis: string; idAnexo: string },
+    { vinculo, cpfsSemOs }: LaudoExternoParaEntrega,
+    log?: FastifyBaseLogger,
+  ): Promise<Veredito> {
+    const { cpf, codigoLis } = pedido
+    if (vinculo.layout !== 'atual' || vinculo.os.length === 0 || cpfsSemOs === null) return 'indisponivel'
+
+    // O cadastro só é consultado se alguma O.S. não fechar no CPF, e uma vez.
+    let cadastro: Promise<Pessoa | null> | null = null
+    let veredito: Veredito = 'confere'
+    for (const os of vinculo.os) {
+      const peloCpf = conferirCpf(cpf, os.cpf)
+      let pelaPessoa: Veredito = 'indisponivel'
+      if (peloCpf !== 'confere') {
+        const esperado = await (cadastro ??= lerCadastroDaRequisicao(this.aplis, codigoLis, cpf, log))
+        if (esperado) pelaPessoa = conferirPessoa(esperado, os)
+      }
+      const identidade = identidadeDoLaudoExterno(peloCpf, pelaPessoa)
+      if (identidade.prova === 'nome_nascimento' && peloCpf === 'diverge') {
+        const { pacienteId, idAnexo } = pedido
+        log?.warn(
+          { pacienteId, codigoLis, idAnexo, codigoOs: os.numero },
+          'Laudo original: O.S. com CPF diferente do cadastro, aceita por nome e nascimento — revisar o CPF da O.S.',
+        )
+      }
+      veredito = piorVeredito(veredito, identidade.veredito)
+    }
+    return cpfsSemOs.reduce<Veredito>((pior, solto) => piorVeredito(pior, conferirCpf(cpf, solto)), veredito)
   }
 
   async #anexosDaRequisicao(
