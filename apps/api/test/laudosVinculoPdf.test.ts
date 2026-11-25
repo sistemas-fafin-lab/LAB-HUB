@@ -21,6 +21,8 @@ const CPF = '52998224725'
 const OUTRO_CPF = '11144477735'
 const REQ_A = '0040000000001'
 const REQ_B = '0040000000002'
+const NOME = 'Paciente Exemplo'
+const NASCIMENTO = '1990-01-01'
 
 // ---------------------------------------------------------------------------
 // Dublês
@@ -80,7 +82,7 @@ function requisicao(codigo: string, over: Partial<AplisRequisicao> = {}): AplisR
     data_solicitacao: '2026-11-01',
     data_liberacao: '2026-11-03',
     tipo_exame: 'MEDICINA LABORATORIAL',
-    paciente: { nome: 'Paciente Exemplo', cpf: CPF, data_nascimento: null, sexo: null },
+    paciente: { nome: NOME, cpf: CPF, data_nascimento: '01/01/1990', sexo: null },
     procedimentos: [],
     local: { nome: 'Posto', endereco: null, numero: null },
     ...over,
@@ -106,15 +108,30 @@ function exameDaOs(codigoOs: string, cpf: string | null = CPF): AolExam {
   }
 }
 
-/** Um PDF no layout atual; todas as O.S. com o mesmo CPF, salvo `cpfPorOs`. */
+/**
+ * Um PDF no layout atual; todas as O.S. com o mesmo CPF, salvo `cpfPorOs`.
+ *
+ * Só a O.S. com o CPF do paciente traz o nome e o nascimento dele: a de outro
+ * CPF e a sem CPF vêm sem a segunda prova, a menos que o teste a dê em
+ * `pessoaPorOs` — é assim que cada teste escolhe qual prova está em jogo.
+ */
 const pdf = (
   os: string[],
   cpf: string | null = CPF,
   cpfPorOs: Record<string, string | null> = {},
+  pessoaPorOs: Record<string, { nome: string | null; nascimento: string | null }> = {},
 ): VinculoLaudoExterno => ({
-  os: os.map((numero) => ({ numero, cpf: numero in cpfPorOs ? cpfPorOs[numero]! : cpf, paginas: 1 })),
+  os: os.map((numero) => {
+    const cpfDaOs = numero in cpfPorOs ? cpfPorOs[numero]! : cpf
+    const pessoa =
+      pessoaPorOs[numero] ?? (cpfDaOs === CPF ? { nome: NOME, nascimento: NASCIMENTO } : { nome: null, nascimento: null })
+    return { numero, cpf: cpfDaOs, ...pessoa, paginas: 1 }
+  }),
   layout: 'atual',
 })
+
+/** O mesmo paciente, como o laudo o imprime. */
+const MESMA_PESSOA = { nome: 'PACIENTE EXEMPLO', nascimento: NASCIMENTO }
 
 interface Cenario {
   requisicoes?: AplisRequisicao[]
@@ -129,10 +146,12 @@ function montar(cenario: Cenario = {}) {
   const repo = new RepositorioEmMemoria()
   const requisicoes = cenario.requisicoes ?? [requisicao(REQ_A)]
 
-  const aplis: IAplisService = {
-    requisicaoListar: async () => requisicoes,
-    requisicaoResultado: async (codigo) => requisicoes.find((r) => r.cod_requisicao === codigo) ?? requisicao(codigo),
-  }
+  const aplis = {
+    requisicaoListar: vi.fn(async () => requisicoes),
+    requisicaoResultado: vi.fn(
+      async (codigo: string) => requisicoes.find((r) => r.cod_requisicao === codigo) ?? requisicao(codigo),
+    ),
+  } satisfies IAplisService
   const aol = {
     listOrders: vi.fn(async () => cenario.ordens ?? []),
     fetchExam: vi.fn(async (codigoOs: string) => [exameDaOs(codigoOs)]),
@@ -148,7 +167,7 @@ function montar(cenario: Cenario = {}) {
   const servico = new LaudoService(repo, aplis, aol, cenario.comFonte === false ? null : externos)
   const buscar = () => servico.fetchAndCacheExams(PACIENTE, CPF, true, log as unknown as FastifyBaseLogger)
 
-  return { repo, aol, externos, log, buscar }
+  return { repo, aplis, aol, externos, log, buscar }
 }
 
 /** As O.S. dos laudos que o paciente recebe, em ordem estável. */
@@ -396,7 +415,16 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
 
     it('nenhum log do passo carrega CPF nem nome do paciente', async () => {
       const { log, buscar } = montar({
-        pdfs: { [REQ_A]: [pdf(['111111101', '222222202', '333333303'], CPF, { '222222202': OUTRO_CPF, '333333303': null })] },
+        pdfs: {
+          [REQ_A]: [
+            pdf(
+              ['111111101', '222222202', '333333303', '444444404'],
+              CPF,
+              { '222222202': OUTRO_CPF, '333333303': null, '444444404': OUTRO_CPF },
+              { '444444404': MESMA_PESSOA, '333333303': { nome: 'Outra Pessoa Qualquer', nascimento: NASCIMENTO } },
+            ),
+          ],
+        },
       })
 
       await buscar()
@@ -404,7 +432,9 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
       const tudo = JSON.stringify([log.info.mock.calls, log.warn.mock.calls, log.error.mock.calls])
       expect(tudo).not.toContain(CPF)
       expect(tudo).not.toContain(OUTRO_CPF)
-      expect(tudo).not.toContain('Paciente Exemplo')
+      expect(tudo.toUpperCase()).not.toContain('PACIENTE EXEMPLO')
+      expect(tudo.toUpperCase()).not.toContain('OUTRA PESSOA')
+      expect(tudo).not.toContain('1990')
     })
 
     it('O.S. que o PDF atribui a outro CPF não volta pela varredura do idOsLis', async () => {
@@ -453,6 +483,118 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
 
       // A O.S. foi vinculada, mas o Álvaro diz que é de outra pessoa: bloqueada.
       expect(exams.filter((e) => e.source !== 'aplis')).toEqual([])
+    })
+  })
+
+  describe('segunda prova: nome + nascimento do laudo contra o cadastro da requisição', () => {
+    it('O.S. sem CPF no laudo entra quando nome e nascimento conferem', async () => {
+      const { repo, log, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['111111101'], null, {}, { '111111101': MESMA_PESSOA })] },
+      })
+
+      const { exams } = await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101' })
+      expect(osNaTela(exams)).toEqual(['111111101'])
+      expect(resumoDoPdf(log)).toMatchObject({ aceitasPorNomeENascimento: 1, cpfIndisponivel: 0 })
+    })
+
+    it('O.S. com CPF divergente aparece se nome e nascimento conferem, e o caso é logado para correção', async () => {
+      const { repo, log, buscar } = montar({
+        pdfs: {
+          [REQ_A]: [pdf(['999999909', '111111101'], CPF, { '999999909': OUTRO_CPF }, { '999999909': MESMA_PESSOA })],
+        },
+      })
+
+      const { exams } = await buscar()
+
+      // A maior do arquivo volta a ser a principal: ela é do paciente.
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '999999909', 'avulsa:111111101': '111111101' })
+      expect(osNaTela(exams)).toEqual(['111111101', '999999909'])
+      const aviso = log.warn.mock.calls.find((c) => /CPF diferente do cadastro/.test(String(c[1])))
+      expect(aviso?.[0]).toMatchObject({ codigoLis: REQ_A, codigoOs: '999999909' })
+      expect(resumoDoPdf(log)).toMatchObject({ aceitasPorNomeENascimento: 1, cpfDivergente: 0 })
+    })
+
+    it('CPF divergente com nome igual e nascimento DIFERENTE continua fora', async () => {
+      const { repo, buscar } = montar({
+        pdfs: {
+          [REQ_A]: [
+            pdf(['999999909'], OUTRO_CPF, {}, { '999999909': { nome: 'PACIENTE EXEMPLO', nascimento: '1990-01-02' } }),
+          ],
+        },
+        ordens: [{ orderId: '999999909', idOsLis: REQ_A }],
+      })
+
+      await buscar()
+
+      // Nem pelo idOsLis: o CPF do laudo é de outra pessoa e nada o desmentiu.
+      expect(repo.vinculos()).toEqual({ [REQ_A]: null })
+    })
+
+    it('sem CPF e com outro nome no laudo: fora', async () => {
+      const { repo, log, buscar } = montar({
+        pdfs: {
+          [REQ_A]: [pdf(['111111101'], null, {}, { '111111101': { nome: 'Outra Pessoa Qualquer', nascimento: NASCIMENTO } })],
+        },
+      })
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: null })
+      expect(resumoDoPdf(log)).toMatchObject({ cpfIndisponivel: 1, aceitasPorNomeENascimento: 0 })
+    })
+
+    it('a mesma O.S. em dois anexos: basta um deles trazer outra pessoa para a segunda prova cair', async () => {
+      const { repo, buscar } = montar({
+        pdfs: {
+          [REQ_A]: [
+            pdf(['111111101'], null, {}, { '111111101': MESMA_PESSOA }),
+            pdf(['111111101'], null, {}, { '111111101': { nome: 'Outra Pessoa Qualquer', nascimento: NASCIMENTO } }),
+          ],
+        },
+      })
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: null })
+    })
+
+    it('o cadastro da requisição só serve de referência se o CPF dele for o do paciente', async () => {
+      // Requisição listada para o paciente cujo detalhe vem com outro CPF: o
+      // nome e o nascimento de lá não provam nada sobre o paciente do token.
+      const { repo, aplis, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['111111101'], null, {}, { '111111101': MESMA_PESSOA })] },
+      })
+      aplis.requisicaoResultado.mockImplementation(async (codigo: string) =>
+        requisicao(codigo, { paciente: { nome: NOME, cpf: OUTRO_CPF, data_nascimento: '01/01/1990', sexo: null } }),
+      )
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: null })
+    })
+
+    it('apLIS fora do ar na hora de buscar o cadastro: a O.S. fica de fora, sem derrubar a busca', async () => {
+      const { repo, aplis, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['111111101'], null, {}, { '111111101': MESMA_PESSOA }), pdf(['222222202'])] },
+      })
+      aplis.requisicaoResultado.mockRejectedValue(new IntegrationError('ApLIS: HTTP 500', 'aplis'))
+
+      await expect(buscar()).resolves.toBeDefined()
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '222222202' })
+    })
+
+    it('quando o CPF de todas as O.S. confere, o cadastro nem é consultado para o vínculo', async () => {
+      const { aplis, aol, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['111111101'])] } })
+      // Sem OS no Álvaro para mapear, a FASE 3 também não consulta o detalhe.
+      aol.fetchExam.mockResolvedValue([])
+      aplis.requisicaoResultado.mockClear()
+
+      await buscar()
+
+      // A única consulta é a da FASE 3 (capa do apLIS), uma por requisição.
+      expect(aplis.requisicaoResultado).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -599,8 +741,8 @@ describe('LaudosExternosDoSite', () => {
 
     expect(site.listarLaudosExternos).toHaveBeenCalledWith('500', REQ_A)
     expect(lidos).toEqual([
-      { os: [{ numero: '111111101', cpf: CPF, paginas: 1 }], layout: 'atual' },
-      { os: [{ numero: '222222202', cpf: CPF, paginas: 1 }], layout: 'atual' },
+      { os: [{ numero: '111111101', cpf: CPF, nome: null, nascimento: null, paginas: 1 }], layout: 'atual' },
+      { os: [{ numero: '222222202', cpf: CPF, nome: null, nascimento: null, paginas: 1 }], layout: 'atual' },
     ])
   })
 

@@ -10,7 +10,7 @@
 
 - [x] Flag desligada (padrão): o site interno não é chamado e o comportamento é idêntico ao atual.
 - [x] O passo roda depois de registrar as requisições novas e antes da varredura de O.S., para todas as requisições do paciente na janela — a que já tem O.S. também pode ter outras O.S. no PDF.
-- [x] A identidade é conferida por O.S.: o CPF impresso nas páginas de cada O.S. contra o paciente do token. `diverge` e `indisponivel` descartam aquela O.S. (falha fechada); `diverge` é logado como erro com o código da requisição e a O.S.
+- [x] A identidade é conferida por O.S., com duas provas: o CPF impresso nas páginas de cada O.S. contra o paciente do token e, quando ele falta ou diverge, nome + nascimento impressos (os dois, exatos) contra o cadastro da requisição no apLIS. Sem nenhuma das duas a O.S. é descartada (falha fechada); a de CPF divergente é logada como erro com o código da requisição e a O.S., e não é vinculada nem pelo `idOsLis`.
 - [x] A O.S. principal da requisição é gravada na linha dela e o `laudo` sai pelo caminho do Álvaro, com a barreira de identidade existente intacta. Principal = a que ocupa mais páginas no PDF entre as que são do paciente; empate, a que aparece antes; com vários anexos, vale a ordem da listagem do site.
 - [x] Requisição que já tem O.S. vinculada nunca é sobrescrita pelo PDF.
 - [x] As O.S. de todos os PDFs da requisição formam uma lista só, sem repetição: a mesma O.S. em vários PDFs, ou em várias páginas do mesmo PDF, conta uma vez.
@@ -98,3 +98,18 @@ Ficou como está, por decisão consciente: a fusão de buscas simultâneas vale 
 - Nascimento diverge em 7 de 488 O.S. com o mesmo nome: é erro de cadastro em um dos lados, e mostra que nascimento sozinho também falha.
 
 Decisão em aberto (do responsável pelo produto): usar nome + nascimento como segunda prova quando o laudo não traz CPF (recuperaria 13 das 14) e o que fazer com as 3 de CPF divergente.
+
+### 25/11/2026 — segunda prova de identidade implementada
+
+Decisão do responsável pelo produto: nome + nascimento valem como segunda prova quando o laudo não traz CPF, **e as O.S. de CPF divergente aparecem se nome e nascimento conferem**.
+
+- `laudoExterno.ts` extrai, por O.S., o nome (linha acima de "DN:") e o nascimento, com a mesma regra do CPF: as páginas da O.S. têm que concordar.
+- `identidade.ts`: `conferirPessoa` (nome sem acento/caixa/pontuação, igualdade exata, mínimo de duas palavras; nascimento exato) e `identidadeDoLaudoExterno`, que junta as duas provas.
+- A referência é o cadastro da própria requisição no apLIS, aceito só se o CPF dele for o do paciente do token, e consultado só quando o CPF da O.S. não resolve.
+- O.S. aceita por nome + nascimento com CPF divergente gera `warn` para correção do cadastro. O resumo do log ganhou `aceitasPorNomeENascimento`.
+- O script de auditoria mostra, por O.S., qual prova sustentou a identidade.
+
+Conferido contra dados reais só em três requisições (leitura). A medição completa não foi repetida com a regra nova; pelo teste anterior, o esperado é recuperar 13 das 14 O.S. sem CPF e 2 das 3 de CPF divergente.
+
+**Caso que continua de fora, e que hoje aparece:** na requisição do PDF de três O.S., a maior (16 páginas) tem o mesmo nome, CPF diferente e nascimento 2 anos diferente do cadastro. O `idOsLis` a aponta para a requisição, então o método atual a mostra; com a flag ligada ela é bloqueada nos dois caminhos até o cadastro ser corrigido. (Outra O.S. do mesmo PDF tem o CPF certo e o mesmo nascimento divergente — indício de cadastro duplicado do paciente no laboratório de apoio.)
+

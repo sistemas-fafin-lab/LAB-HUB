@@ -7,16 +7,33 @@ import { extrairVinculoDoLaudoExterno, lerLaudoExterno } from '../src/laudos/lau
 
 const CPF = '529.982.247-25'
 
-function laudoAtual(opcoes: { os?: string | null; cpf?: string | null; rodape?: string } = {}): string {
-  const { os = '123456789', cpf = CPF, rodape = 'Álvaro Centro de Análises e Pesquisas Clínicas' } = opcoes
+interface OpcoesDoLaudo {
+  os?: string | null
+  cpf?: string | null
+  rodape?: string
+  nome?: string
+  /** `null` tira a linha "DN:" da página. */
+  nascimento?: string | null
+}
+
+const NOME = 'Paciente Exemplo da Silva'
+
+function laudoAtual(opcoes: OpcoesDoLaudo = {}): string {
+  const {
+    os = '123456789',
+    cpf = CPF,
+    rodape = 'Álvaro Centro de Análises e Pesquisas Clínicas',
+    nome = NOME,
+    nascimento = '01/01/1990',
+  } = opcoes
   return [
     'GLICOSE',
     'Resultado 92 mg/dL 70 a 99 mg/dL',
     '(Material:soro)',
     'Assinado eletronicamente por: Fulano de Tal CRF-PR 1234 (04/11/2026 - 18:00 BRT)',
     'Hash: 00a111bbb22cc333d44444444e555ff6a7b88c9dd',
-    'Paciente Exemplo da Silva',
-    'DN: 01/01/1990 | 36 anos e 10 meses Sexo: Masculino',
+    nome,
+    ...(nascimento === null ? [] : [`DN: ${nascimento} | 36 anos e 10 meses Sexo: Masculino`]),
     'Solicitante: Dr(a). Sicrano Exemplo CRM: PR-0000',
     'FAP: 000000000001',
     ...(os === null ? [] : [`OS: ${os}`]),
@@ -33,6 +50,15 @@ function laudoAtual(opcoes: { os?: string | null; cpf?: string | null; rodape?: 
 const CPF_DIGITOS = '52998224725'
 const OUTRO_CPF = '111.444.777-35'
 
+/** Uma O.S. como a extração a devolve, com o nome e o nascimento do fixture. */
+const osDoPaciente = (numero: string, cpf: string | null, paginas: number) => ({
+  numero,
+  cpf,
+  nome: NOME,
+  nascimento: '1990-01-01',
+  paginas,
+})
+
 /** Atalho: só os números das O.S., na ordem devolvida. */
 const numeros = (paginas: string | string[]): string[] =>
   extrairVinculoDoLaudoExterno(paginas).os.map((o) => o.numero)
@@ -40,7 +66,7 @@ const numeros = (paginas: string | string[]): string[] =>
 describe('extrairVinculoDoLaudoExterno', () => {
   it('extrai O.S. e CPF (só dígitos) do layout atual com rodapé Álvaro', () => {
     expect(extrairVinculoDoLaudoExterno(laudoAtual())).toEqual({
-      os: [{ numero: '123456789', cpf: CPF_DIGITOS, paginas: 1 }],
+      os: [osDoPaciente('123456789', CPF_DIGITOS, 1)],
       layout: 'atual',
     })
   })
@@ -48,7 +74,7 @@ describe('extrairVinculoDoLaudoExterno', () => {
   it('extrai do mesmo layout com rodapé Dasa', () => {
     const texto = laudoAtual({ os: '987654321', rodape: 'Dasa — Diagnósticos da América S.A.' })
     expect(extrairVinculoDoLaudoExterno(texto)).toEqual({
-      os: [{ numero: '987654321', cpf: CPF_DIGITOS, paginas: 1 }],
+      os: [osDoPaciente('987654321', CPF_DIGITOS, 1)],
       layout: 'atual',
     })
   })
@@ -60,7 +86,7 @@ describe('extrairVinculoDoLaudoExterno', () => {
 
   it('a mesma O.S. em várias páginas é uma O.S. só, com as páginas contadas', () => {
     expect(extrairVinculoDoLaudoExterno([laudoAtual(), laudoAtual(), laudoAtual()]).os).toEqual([
-      { numero: '123456789', cpf: CPF_DIGITOS, paginas: 3 },
+      osDoPaciente('123456789', CPF_DIGITOS, 3),
     ])
   })
 
@@ -115,14 +141,14 @@ describe('extrairVinculoDoLaudoExterno', () => {
       ]
 
       expect(extrairVinculoDoLaudoExterno(paginas).os).toEqual([
-        { numero: '222222222', cpf: '11144477735', paginas: 3 },
-        { numero: '111111111', cpf: CPF_DIGITOS, paginas: 1 },
+        osDoPaciente('222222222', '11144477735', 3),
+        osDoPaciente('111111111', CPF_DIGITOS, 1),
       ])
     })
 
     it('páginas da mesma O.S. com CPFs diferentes: essa O.S. fica sem CPF', () => {
       const paginas = [laudoAtual({ os: '111111111' }), laudoAtual({ os: '111111111', cpf: OUTRO_CPF })]
-      expect(extrairVinculoDoLaudoExterno(paginas).os).toEqual([{ numero: '111111111', cpf: null, paginas: 2 }])
+      expect(extrairVinculoDoLaudoExterno(paginas).os).toEqual([osDoPaciente('111111111', null, 2)])
     })
 
     it('basta uma página da O.S. sem CPF legível para ela ficar sem CPF', () => {
@@ -130,14 +156,14 @@ describe('extrairVinculoDoLaudoExterno', () => {
       expect(extrairVinculoDoLaudoExterno(semCpf).os[0]!.cpf).toBeNull()
 
       const truncado = [laudoAtual({ os: '111111111', cpf: '529.982.247' })]
-      expect(extrairVinculoDoLaudoExterno(truncado).os[0]).toEqual({ numero: '111111111', cpf: null, paginas: 1 })
+      expect(extrairVinculoDoLaudoExterno(truncado).os[0]).toEqual(osDoPaciente('111111111', null, 1))
     })
 
     it('O.S. sem CPF não tira o CPF das outras O.S. do arquivo', () => {
       const paginas = [laudoAtual({ os: '111111111', cpf: null }), laudoAtual({ os: '222222222' })]
       expect(extrairVinculoDoLaudoExterno(paginas).os).toEqual([
-        { numero: '111111111', cpf: null, paginas: 1 },
-        { numero: '222222222', cpf: CPF_DIGITOS, paginas: 1 },
+        osDoPaciente('111111111', null, 1),
+        osDoPaciente('222222222', CPF_DIGITOS, 1),
       ])
     })
 
@@ -149,6 +175,53 @@ describe('extrairVinculoDoLaudoExterno', () => {
     it('página com dois CPFs diferentes não identifica ninguém', () => {
       const pagina = `${laudoAtual({ os: '111111111' })}\nCPF: ${OUTRO_CPF}`
       expect(extrairVinculoDoLaudoExterno([pagina]).os[0]!.cpf).toBeNull()
+    })
+  })
+
+  describe('nome e nascimento de cada O.S. (segunda prova de identidade)', () => {
+    it('saem da linha "DN:" e da linha logo acima dela, com a data em ISO', () => {
+      const [os] = extrairVinculoDoLaudoExterno(laudoAtual({ nome: 'Maria José d\'Ávila', nascimento: '31/12/1985' })).os
+      expect(os).toMatchObject({ nome: 'Maria José d\'Ávila', nascimento: '1985-12-31' })
+    })
+
+    it('cada O.S. responde pelo nome e nascimento das páginas dela', () => {
+      const paginas = [
+        laudoAtual({ os: '111111111' }),
+        laudoAtual({ os: '222222222', nome: 'Outra Pessoa', nascimento: '02/02/1980' }),
+      ]
+      expect(extrairVinculoDoLaudoExterno(paginas).os.map((o) => [o.numero, o.nome, o.nascimento])).toEqual([
+        ['111111111', NOME, '1990-01-01'],
+        ['222222222', 'Outra Pessoa', '1980-02-02'],
+      ])
+    })
+
+    it('O.S. sem CPF impresso continua trazendo nome e nascimento', () => {
+      expect(extrairVinculoDoLaudoExterno(laudoAtual({ cpf: null })).os).toEqual([osDoPaciente('123456789', null, 1)])
+    })
+
+    it('página sem a linha "DN:": sem nome e sem nascimento', () => {
+      const [os] = extrairVinculoDoLaudoExterno(laudoAtual({ nascimento: null })).os
+      expect(os).toMatchObject({ nome: null, nascimento: null, cpf: CPF_DIGITOS })
+    })
+
+    it('data impossível ou fora do formato não vira nascimento', () => {
+      expect(extrairVinculoDoLaudoExterno(laudoAtual({ nascimento: '31/02/1990' })).os[0]!.nascimento).toBeNull()
+      expect(extrairVinculoDoLaudoExterno(laudoAtual({ nascimento: '1/1/90' })).os[0]!.nascimento).toBeNull()
+    })
+
+    it('páginas da mesma O.S. com nomes diferentes: fica sem nome', () => {
+      const paginas = [laudoAtual({ os: '111111111' }), laudoAtual({ os: '111111111', nome: 'Outra Pessoa' })]
+      expect(extrairVinculoDoLaudoExterno(paginas).os[0]).toMatchObject({ nome: null, nascimento: '1990-01-01' })
+    })
+
+    it('página com duas pessoas (duas linhas "DN:" diferentes) não identifica ninguém', () => {
+      const pagina = `${laudoAtual({ os: '111111111' })}\nOutra Pessoa\nDN: 02/02/1980 | 46 anos`
+      expect(extrairVinculoDoLaudoExterno([pagina]).os[0]).toMatchObject({ nome: null, nascimento: null })
+    })
+
+    it('página com duas O.S. não diz de qual é o nome', () => {
+      const pagina = `${laudoAtual({ os: '111111111' })}\n${laudoAtual({ os: '222222222' })}`
+      expect(extrairVinculoDoLaudoExterno([pagina]).os.map((o) => o.nome)).toEqual([null, null])
     })
   })
 
@@ -209,10 +282,17 @@ function pdfSintetico(...paginas: string[][]): Uint8Array {
 
 describe('lerLaudoExterno', () => {
   it('lê O.S. e CPF de um PDF com texto no layout atual', async () => {
-    const pdf = pdfSintetico(['FAP: 000000000001', 'OS: 123456789', 'OS Lis: 0040000000001', 'CPF: 529.982.247-25'])
+    const pdf = pdfSintetico([
+      NOME,
+      'DN: 01/01/1990 | 36 anos e 10 meses Sexo: Masculino',
+      'FAP: 000000000001',
+      'OS: 123456789',
+      'OS Lis: 0040000000001',
+      'CPF: 529.982.247-25',
+    ])
 
     expect(await lerLaudoExterno(pdf)).toEqual({
-      os: [{ numero: '123456789', cpf: '52998224725', paginas: 1 }],
+      os: [osDoPaciente('123456789', '52998224725', 1)],
       layout: 'atual',
     })
   })
@@ -224,8 +304,8 @@ describe('lerLaudoExterno', () => {
 
     expect(await lerLaudoExterno(pdfSintetico(doPaciente, deOutro, deOutro))).toEqual({
       os: [
-        { numero: '222222202', cpf: '11144477735', paginas: 2 },
-        { numero: '111111101', cpf: '52998224725', paginas: 1 },
+        { numero: '222222202', cpf: '11144477735', nome: null, nascimento: null, paginas: 2 },
+        { numero: '111111101', cpf: '52998224725', nome: null, nascimento: null, paginas: 1 },
       ],
       layout: 'atual',
     })

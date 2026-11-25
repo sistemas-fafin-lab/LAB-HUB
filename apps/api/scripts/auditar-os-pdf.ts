@@ -9,7 +9,14 @@ import { AplisService } from '../src/laudos/aplis.js'
 import { AplisSiteService, lerConfigAplisSite, type TravaLogin } from '../src/laudos/aplisSite.js'
 import { classificarOs, type ClasseOs, type OsDoPdf } from '../src/laudos/auditoriaOsPdf.js'
 import { IntegrationError, LaudoError } from '../src/laudos/errors.js'
-import { conferirCpf, type Veredito } from '../src/laudos/identidade.js'
+import {
+  conferirCpf,
+  conferirPessoa,
+  identidadeDoLaudoExterno,
+  type IdentidadeDoLaudo,
+  type Pessoa,
+  type Veredito,
+} from '../src/laudos/identidade.js'
 import { lerLaudoExterno, type LayoutLaudoExterno } from '../src/laudos/laudoExterno.js'
 
 // ---------------------------------------------------------------------------
@@ -86,17 +93,36 @@ class TravaLoginEmArquivo implements TravaLogin {
   }
 }
 
+/** O cadastro da requisição só é referência se o CPF dele for o do paciente. */
+function pessoaDoCadastro(paciente: { nome: string; cpf: string; data_nascimento: string | null }, cpf: string): Pessoa | null {
+  return conferirCpf(cpf, paciente.cpf) === 'confere'
+    ? { nome: paciente.nome, nascimento: paciente.data_nascimento }
+    : null
+}
+
+/** Como a identidade de uma O.S. aparece na saída — sem nome, nascimento nem CPF. */
+function rotuloIdentidade(os: { cpf: Veredito } & IdentidadeDoLaudo): string {
+  if (os.prova === 'cpf') return 'cpf confere'
+  if (os.prova === 'nome_nascimento') return `nome+nasc conferem, cpf ${os.cpf}`
+  return os.veredito === 'diverge' ? 'DIVERGE' : 'sem identidade'
+}
+
 /** Uma requisição a auditar, com o CPF contra o qual o PDF é conferido. */
 interface Alvo {
   requisicao: string
   idRequisicao: string | null
   /** Fica só em memória, para a conferência. Não vai para a saída. */
   cpfReferencia: string
+  /** Nome e nascimento do cadastro da requisição; `null` = sem a segunda prova. */
+  pessoaReferencia: Pessoa | null
 }
 
 interface PdfAuditado {
-  /** Cada O.S. do arquivo com o veredito do CPF das páginas DELA. */
-  os: { numero: string; veredito: Veredito }[]
+  /**
+   * Cada O.S. do arquivo com a identidade das páginas DELA: o veredito final
+   * (o mesmo que o portal usa), a prova que o sustentou e o que o CPF disse.
+   */
+  os: ({ numero: string; cpf: Veredito } & IdentidadeDoLaudo)[]
   layout: LayoutLaudoExterno | 'falha_download'
 }
 
@@ -139,14 +165,19 @@ async function alvosDoPaciente(
   const cpf = decifrarCpfPaciente(pacienteId, data.cpf_enc as string)
   const requisicoes = await aplis.requisicaoListar(cpf, inicio, fim)
   const noEscopo = requisicoes.filter((r) => EXAME_AUDITADO.test(r.tipo_exame ?? ''))
-  return {
-    alvos: noEscopo.map((r) => ({
+  const alvos: Alvo[] = []
+  for (const r of noEscopo) {
+    alvos.push({
       requisicao: r.cod_requisicao,
       idRequisicao: r.id_requisicao ?? null,
       cpfReferencia: cpf,
-    })),
-    foraDoEscopo: requisicoes.length - noEscopo.length,
+      pessoaReferencia: await aplis
+        .requisicaoResultado(r.cod_requisicao)
+        .then((detalhe) => pessoaDoCadastro(detalhe.paciente, cpf))
+        .catch(() => null),
+    })
   }
+  return { alvos, foraDoEscopo: requisicoes.length - noEscopo.length }
 }
 
 /**
@@ -166,7 +197,8 @@ async function alvosDasRequisicoes(
 
   for (const requisicao of codigos) {
     try {
-      const cpf = (await aplis.requisicaoResultado(requisicao)).paciente.cpf.replace(/\D/g, '')
+      const { paciente } = await aplis.requisicaoResultado(requisicao)
+      const cpf = paciente.cpf.replace(/\D/g, '')
       if (cpf.length !== 11) {
         falhas.push({ requisicao, pdfs: [], erro: 'o apLIS não informou o CPF do paciente' })
         continue
@@ -175,7 +207,12 @@ async function alvosDasRequisicoes(
         const lista = await aplis.requisicaoListar(cpf, inicio, fim)
         idsPorCpf.set(cpf, new Map(lista.map((r) => [r.cod_requisicao, r.id_requisicao ?? null])))
       }
-      alvos.push({ requisicao, idRequisicao: idsPorCpf.get(cpf)!.get(requisicao) ?? null, cpfReferencia: cpf })
+      alvos.push({
+        requisicao,
+        idRequisicao: idsPorCpf.get(cpf)!.get(requisicao) ?? null,
+        cpfReferencia: cpf,
+        pessoaReferencia: pessoaDoCadastro(paciente, cpf),
+      })
     } catch (err) {
       falhas.push({ requisicao, pdfs: [], erro: mensagem(err) })
     }
@@ -196,7 +233,11 @@ async function auditarRequisicao(site: AplisSiteService, alvo: Alvo): Promise<Re
       try {
         const laudo = await lerLaudoExterno(await site.baixarAnexo(anexo))
         pdfs.push({
-          os: laudo.os.map((o) => ({ numero: o.numero, veredito: conferirCpf(alvo.cpfReferencia, o.cpf) })),
+          os: laudo.os.map((o) => {
+            const cpf = conferirCpf(alvo.cpfReferencia, o.cpf)
+            const pessoa = alvo.pessoaReferencia ? conferirPessoa(alvo.pessoaReferencia, o) : 'indisponivel'
+            return { numero: o.numero, cpf, ...identidadeDoLaudoExterno(cpf, pessoa) }
+          }),
           layout: laudo.layout,
         })
       } catch {
@@ -299,7 +340,7 @@ async function auditar(argv: string[]): Promise<void> {
       : r.pdfs.length === 0
         ? 'sem anexo tipo 14'
         : r.pdfs
-            .map((p) => p.os.map((o) => `${o.numero} [cpf ${o.veredito}]`).join(' + ') || `sem O.S. (${p.layout})`)
+            .map((p) => p.os.map((o) => `${o.numero} [${rotuloIdentidade(o)}]`).join(' + ') || `sem O.S. (${p.layout})`)
             .join(', ')
     const pelaAol = classificadas.filter((c) => c.requisicaoIdOsLis === r.requisicao).map((c) => c.os)
     console.log(`req=${r.requisicao}  pdf: ${pdf}  |  idOsLis: ${pelaAol.join(', ') || '—'}`)
@@ -332,6 +373,7 @@ async function auditar(argv: string[]): Promise<void> {
   const layout = (l: PdfAuditado['layout']): number => pdfs.filter((p) => p.layout === l).length
   const osDosPdfs = pdfs.flatMap((p) => p.os)
   const veredito = (v: Veredito): number => osDosPdfs.filter((o) => o.veredito === v).length
+  const porNome = osDosPdfs.filter((o) => o.prova === 'nome_nascimento')
   const pdfsMisturados = pdfs.filter((p) => p.os.some((o) => o.veredito === 'diverge') && p.os.some((o) => o.veredito === 'confere')).length
   const classe = (c: ClasseOs): number => classificadas.filter((x) => x.classe === c).length
 
@@ -342,8 +384,10 @@ async function auditar(argv: string[]): Promise<void> {
       `  PDFs: ${pdfs.length} · layout atual ${layout('atual')} · antigo ${layout('antigo')} · ` +
       `desconhecido ${layout('desconhecido')} · ilegível ${layout('ilegivel')} · falha no download ${layout('falha_download')}\n` +
       `    ${pdfs.filter((p) => p.os.length > 1).length} PDF(s) trazem mais de uma O.S.\n` +
-      `  CPF por O.S. do PDF: ${veredito('confere')} confere · ${veredito('diverge')} DIVERGE · ${veredito('indisponivel')} indisponível\n` +
-      `    ${pdfsMisturados} PDF(s) misturam O.S. do paciente com O.S. de outro CPF\n` +
+      `  Identidade por O.S. do PDF: ${veredito('confere')} confere · ${veredito('diverge')} DIVERGE · ${veredito('indisponivel')} indisponível\n` +
+      `    das que conferem, ${porNome.length} só por nome + nascimento ` +
+      `(${porNome.filter((o) => o.cpf === 'indisponivel').length} sem CPF no laudo, ${porNome.filter((o) => o.cpf === 'diverge').length} com CPF diferente do cadastro)\n` +
+      `    ${pdfsMisturados} PDF(s) misturam O.S. do paciente com O.S. de outra pessoa\n` +
       `  O.S.: ${classificadas.length} · ${classe('iguais')} nas duas e iguais · ${classe('so_pdf')} só no PDF · ` +
       `${classe('so_idoslis')} só no idOsLis · ${classe('divergentes')} nas duas, requisições diferentes\n` +
       `    das "só no PDF", ${soPdfComCpf} têm o CPF no idOsLis: o método atual as acha, mas como card avulso, sem a requisição\n` +

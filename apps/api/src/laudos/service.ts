@@ -5,7 +5,17 @@ import type { IExamResultRepository } from './repository.js'
 import type { AolExam, AplisExam, AplisRequisicao, ExamResultRow, Laudo } from './types.js'
 import { consolidaLaudosDaOs, fundirPedidosPorColeta, mapAplisResult, mapExamResult } from './mappers.js'
 import { DatabaseError, ValidationError } from './errors.js'
-import { conferirCpf, deveBloquear, deveBloquearFechado, piorVeredito, type Veredito } from './identidade.js'
+import {
+  conferirCpf,
+  conferirPessoa,
+  deveBloquear,
+  deveBloquearFechado,
+  identidadeDoLaudoExterno,
+  piorVeredito,
+  type Pessoa,
+  type Veredito,
+} from './identidade.js'
+import type { OsDoLaudoExterno } from './laudoExterno.js'
 import { cpfValido } from '../lib/cpf.js'
 import { booleanEnv, numeroEnv } from '../lib/env.js'
 import { idadeEmAnos, type PerfilPaciente } from './mapperHelpers.js'
@@ -527,6 +537,7 @@ export class LaudoService {
       semAnexo: 0,
       layoutNaoReconhecido: 0,
       semOsLegivel: 0,
+      aceitasPorNomeENascimento: 0,
       cpfDivergente: 0,
       cpfIndisponivel: 0,
       divergentes: 0,
@@ -560,19 +571,21 @@ export class LaudoService {
 
       // Barreira de identidade, por O.S. e FECHADA.
       //
-      // Por O.S., e não por arquivo: um mesmo PDF já veio com O.S. de pessoas
-      // diferentes (a maior delas com o CPF de outro paciente). Cada O.S.
-      // responde pelo CPF impresso nas páginas dela.
+      // Por O.S., e não por arquivo: um mesmo PDF já veio com O.S. de CPFs
+      // diferentes. Cada O.S. responde pelo que está impresso nas páginas dela.
       //
       // Fechada: aqui `indisponivel` também descarta (ao contrário de
       // `deveBloquear`). O PDF é fonte nova, e a AOL muitas vezes não devolve
       // CPF — a barreira de lá não seguraria uma O.S. alheia que passasse aqui.
       //
+      // Duas provas (ver identidadeDoLaudoExterno): o CPF e, quando ele falta
+      // ou diverge, nome + nascimento contra o cadastro da requisição.
+      //
       // O veredito de uma O.S. junta TODOS os anexos da requisição: se ela
       // confere num arquivo e diverge em outro, não confere. O Map guarda a
       // ordem — anexos na ordem da listagem e, dentro do PDF, a maior O.S.
       // primeiro —, então a principal é a maior ENTRE AS QUE SÃO DO PACIENTE.
-      const vereditos = new Map<string, Veredito>()
+      const impressoes = new Map<string, OsDoLaudoExterno[]>()
       for (const pdf of pdfs) {
         if (pdf.layout !== 'atual') {
           resumo.layoutNaoReconhecido++
@@ -582,15 +595,41 @@ export class LaudoService {
         // de que o modelo do laudo mudou.
         if (pdf.os.length === 0) resumo.semOsLegivel++
 
-        for (const os of pdf.os) {
-          vereditos.set(os.numero, piorVeredito(vereditos.get(os.numero), conferirCpf(cpf, os.cpf)))
-        }
+        for (const os of pdf.os) impressoes.set(os.numero, [...(impressoes.get(os.numero) ?? []), os])
       }
 
+      // O cadastro só é consultado se alguma O.S. precisar da segunda prova —
+      // a maioria fecha no CPF — e uma vez por requisição.
+      let cadastro: Promise<Pessoa | null> | null = null
+      const cadastroDaRequisicao = (): Promise<Pessoa | null> =>
+        (cadastro ??= this.#cadastroDaRequisicao(codigoLis, cpf, log))
+
       const osDaRequisicao: string[] = []
-      for (const [codigoOs, veredito] of vereditos) {
+      for (const [codigoOs, vezes] of impressoes) {
+        const pior = (cada: (os: OsDoLaudoExterno) => Veredito): Veredito =>
+          vezes.reduce<Veredito | undefined>((acumulado, os) => piorVeredito(acumulado, cada(os)), undefined)!
+
+        const peloCpf = pior((os) => conferirCpf(cpf, os.cpf))
+        let pelaPessoa: Veredito = 'indisponivel'
+        if (peloCpf !== 'confere') {
+          const esperado = await cadastroDaRequisicao()
+          if (esperado) pelaPessoa = pior((os) => conferirPessoa(esperado, os))
+        }
+        const { veredito, prova } = identidadeDoLaudoExterno(peloCpf, pelaPessoa)
+
         if (!deveBloquearFechado(veredito)) {
           osDaRequisicao.push(codigoOs)
+          if (prova === 'nome_nascimento') {
+            resumo.aceitasPorNomeENascimento++
+            // O exame aparece, mas o cadastro está inconsistente em algum lado:
+            // fica o rastro para a recepção corrigir na origem.
+            if (peloCpf === 'diverge') {
+              log?.warn(
+                { pacienteId, codigoLis, codigoOs },
+                'Laudo EXTERNO: O.S. com CPF diferente do cadastro, aceita por nome e nascimento — revisar o CPF da O.S.',
+              )
+            }
+          }
         } else if (veredito === 'diverge') {
           resumo.cpfDivergente++
           deOutroPaciente.add(codigoOs)
@@ -600,7 +639,10 @@ export class LaudoService {
           )
         } else {
           resumo.cpfIndisponivel++
-          log?.warn({ pacienteId, codigoLis, codigoOs }, 'Laudo EXTERNO: O.S. sem CPF legível — descartada')
+          log?.warn(
+            { pacienteId, codigoLis, codigoOs },
+            'Laudo EXTERNO: O.S. sem CPF e sem nome e nascimento que confiram — descartada',
+          )
         }
       }
 
@@ -641,6 +683,32 @@ export class LaudoService {
 
     log?.info({ pacienteId, ...resumo }, 'Laudo EXTERNO: vínculo pelo PDF concluído')
     return deOutroPaciente
+  }
+
+  /**
+   * Nome e nascimento do paciente como o apLIS os tem NAQUELA requisição — a
+   * referência da segunda prova de identidade do Laudo EXTERNO.
+   *
+   * Só vale se o CPF do cadastro for o do paciente do token: é isso que amarra
+   * "o nome que está no apLIS" a "quem está pedindo". Qualquer outra coisa
+   * (apLIS fora do ar, CPF ausente ou de outra pessoa) devolve `null`, e sem
+   * referência a segunda prova simplesmente não existe.
+   *
+   * Nome e nascimento ficam em memória; não vão para log.
+   */
+  async #cadastroDaRequisicao(
+    codigoLis: string,
+    cpf: string,
+    log?: FastifyBaseLogger,
+  ): Promise<Pessoa | null> {
+    try {
+      const { paciente } = await this.aplis.requisicaoResultado(codigoLis)
+      if (conferirCpf(cpf, paciente?.cpf) !== 'confere') return null
+      return { nome: paciente.nome, nascimento: paciente.data_nascimento }
+    } catch (err) {
+      log?.warn({ codigoLis, err }, 'Laudo EXTERNO: cadastro da requisição indisponível para conferir nome e nascimento')
+      return null
+    }
   }
 
   // Caminho ApLIS puro — hoje o mais comum: a requisição não tem OS na AOL.

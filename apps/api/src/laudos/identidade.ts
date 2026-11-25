@@ -79,3 +79,82 @@ export function piorVeredito(a: Veredito | undefined, b: Veredito): Veredito {
   if (a === 'indisponivel' || b === 'indisponivel') return 'indisponivel'
   return 'confere'
 }
+
+// ---------------------------------------------------------------------------
+// Segunda prova: nome + nascimento
+// ---------------------------------------------------------------------------
+//
+// O CPF não fecha tudo. Medição de 25/11/2026 sobre 488 O.S. dos laudos
+// anexados: 14 saíram sem CPF impresso e 3 com um CPF diferente do cadastro —
+// e nessas 17 o NOME impresso era o do paciente (em 15, o nascimento também).
+// Descartá-las deixava exame do próprio paciente de fora.
+//
+// Nome + nascimento só valem JUNTOS e EXATOS. Nome sozinho tem homônimo;
+// nascimento sozinho, mais ainda. E "parecido" não serve: é a mesma tolerância
+// que fez o `idOsLis` casar com o paciente errado.
+//
+// O que esta prova NÃO tem: evidência de que barra laudo alheio. Na medição não
+// apareceu nenhum laudo com outro nome, então só se sabe que ela quase não
+// barra os do próprio paciente (7 nascimentos divergentes em 488).
+
+export interface Pessoa {
+  nome: string | null | undefined
+  /** "dd/mm/aaaa" (apLIS, laudo) ou "aaaa-mm-dd…" (ISO). */
+  nascimento: string | null | undefined
+}
+
+/** Maiúsculas, sem acento, só letras, um espaço entre as palavras. */
+function nomeNormalizado(nome: string | null | undefined): string {
+  return String(nome ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** A data como "aaaa-mm-dd", ou '' se não estiver num dos dois formatos. */
+function dataNormalizada(data: string | null | undefined): string {
+  const texto = String(data ?? '').trim()
+  const br = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(texto)
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`
+  return /^(\d{4}-\d{2}-\d{2})(?:$|[T ])/.exec(texto)?.[1] ?? ''
+}
+
+/**
+ * Confere nome + nascimento do laudo contra o cadastro do paciente.
+ *
+ * `indisponivel` quando falta qualquer peça de qualquer lado, ou quando o nome
+ * tem uma palavra só (aí ele não distingue ninguém). `confere` exige os dois
+ * iguais; qualquer diferença é `diverge`.
+ */
+export function conferirPessoa(esperado: Pessoa, doLaudo: Pessoa): Veredito {
+  const nomes = [nomeNormalizado(esperado.nome), nomeNormalizado(doLaudo.nome)] as const
+  const datas = [dataNormalizada(esperado.nascimento), dataNormalizada(doLaudo.nascimento)] as const
+  if (nomes.some((n) => n.split(' ').length < 2) || datas.some((d) => !d)) return 'indisponivel'
+  return nomes[0] === nomes[1] && datas[0] === datas[1] ? 'confere' : 'diverge'
+}
+
+export interface IdentidadeDoLaudo {
+  veredito: Veredito
+  /** O que sustentou o `confere`; `null` quando não conferiu. */
+  prova: 'cpf' | 'nome_nascimento' | null
+}
+
+/**
+ * A identidade de uma O.S. do "Laudo EXTERNO", juntando as duas provas.
+ *
+ *  - CPF confere → é do paciente, e nada mais é perguntado;
+ *  - senão, nome + nascimento conferem → é do paciente (inclusive quando o CPF
+ *    DIVERGE: decisão do produto em 25/11/2026 — os casos reais eram o próprio
+ *    paciente com outro CPF registrado naquela O.S.);
+ *  - senão, CPF diverge → é de outra pessoa;
+ *  - senão → não dá para afirmar. Nome ou nascimento diferente, sem CPF, não
+ *    prova que é de outro: o cadastro também erra o nascimento.
+ */
+export function identidadeDoLaudoExterno(cpf: Veredito, pessoa: Veredito): IdentidadeDoLaudo {
+  if (cpf === 'confere') return { veredito: 'confere', prova: 'cpf' }
+  if (pessoa === 'confere') return { veredito: 'confere', prova: 'nome_nascimento' }
+  return { veredito: cpf === 'diverge' ? 'diverge' : 'indisponivel', prova: null }
+}

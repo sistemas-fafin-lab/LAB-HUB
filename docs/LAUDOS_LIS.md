@@ -139,13 +139,29 @@ atribui a outro CPF; sobrescrever a O.S. de uma linha; copiar para uma
 requisição a O.S. que já está em outra do mesmo paciente (é logado como
 divergência); mostrar erro ao paciente por falha do site.
 
-**Identidade, por O.S.** Cada O.S. responde pelo CPF impresso nas páginas em que
-ela aparece, conferido por `conferirCpf` contra o paciente do token, com falha
-fechada: `diverge` (log em `error`) e `indisponivel` descartam aquela O.S. Não
-é por arquivo porque um mesmo PDF já veio com O.S. de pessoas diferentes
-(25/11/2026: duas O.S. do paciente e uma terceira, a maior, com outro CPF). A
-barreira sobre o payload da AOL continua valendo depois, mas ela sozinha não
-bastaria: a AOL muitas vezes não devolve CPF.
+**Identidade, por O.S., com duas provas.** Cada O.S. responde pelo que está
+impresso nas páginas em que ela aparece — não é por arquivo, porque um mesmo
+PDF já veio com O.S. de CPFs diferentes. A regra (`identidadeDoLaudoExterno`):
+
+1. o CPF impresso confere com o do paciente do token → é dele;
+2. senão, **nome + nascimento** impressos conferem, os dois e exatos, com o
+   cadastro da própria requisição no apLIS → é dele. Vale para o laudo sem CPF
+   e também para o de CPF diferente (decisão de 25/11/2026); neste último caso
+   fica um `warn` para a recepção corrigir o CPF da O.S.;
+3. senão, o CPF diverge → é de outra pessoa: descartada, log em `error`, e a
+   varredura por `idOsLis` também não a vincula;
+4. senão → sem identidade: descartada aqui, mas ainda pode chegar pelo `idOsLis`.
+
+O cadastro da requisição só serve de referência se o CPF dele for o do paciente
+do token; é consultado só quando o CPF não resolve. Nome e nascimento ficam em
+memória e não vão para log. A barreira sobre o payload da AOL continua valendo
+depois, mas sozinha não bastaria: a AOL muitas vezes não devolve CPF.
+
+Teste que embasou a segunda prova (25/11/2026, 488 O.S.): o nome impresso era o
+do cadastro em todas; nome + nascimento conferiram em 13 das 14 O.S. sem CPF e
+em 2 das 3 com CPF divergente. Nascimento divergiu em 7 de 488 com o mesmo
+nome. **Não apareceu laudo de pessoa com outro nome**, então o teste não mede o
+quanto a segunda prova barraria um laudo alheio.
 
 **O site interno não é API do fornecedor** (`/areas/shared/imagem.php`; a API de
 integração só entrega os tipos 1 e 5). Pode mudar sem aviso: toda falha vira
@@ -164,9 +180,13 @@ rodada da véspera (398 requisições), 35 não tinham O.S. nenhuma pelo `idOsLi
 
 **Limites conhecidos.**
 
-- Das 14 O.S. sem CPF no laudo, 11 chegam ao paciente pelo `idOsLis`; 3 não
-  chegam por nenhum caminho. O que fazer com elas é decisão em aberto (ticket
-  02 da spec).
+- Sobram fora as O.S. em que nem o CPF nem nome + nascimento conferem (pelo
+  teste, 1 das 14 sem CPF e 1 das 3 de CPF divergente).
+- **A de CPF divergente que não passa na segunda prova some também do caminho
+  do `idOsLis`**, que antes a mostrava. Caso real: O.S. de 16 páginas com o
+  mesmo nome, CPF diferente e nascimento 2 anos diferente do cadastro, apontada
+  pelo `idOsLis` para a requisição. Com a flag ligada ela deixa de aparecer até
+  o cadastro ser corrigido.
 - A flag ainda não foi exercitada de ponta a ponta contra o banco real: os
   testes usam dublês e a leitura dos PDFs foi conferida ao vivo só em leitura.
 - A O.S. principal é a maior que ainda não é do paciente em outra linha: se a

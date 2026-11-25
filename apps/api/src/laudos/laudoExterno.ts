@@ -38,6 +38,15 @@ export interface OsDoLaudoExterno {
    * páginas da mesma O.S. com CPFs diferentes, ou página com mais de uma O.S.
    */
   cpf: string | null
+  /**
+   * Nome do paciente e data de nascimento (ISO, aaaa-mm-dd) impressos nas
+   * páginas desta O.S. — a segunda prova de identidade, para o laudo que saiu
+   * sem CPF ou com um CPF diferente do cadastro. Mesma regra do CPF: `null`
+   * quando as páginas da O.S. não concordam num valor único. O nome vem como
+   * está no laudo; quem compara é que normaliza (ver identidade.ts).
+   */
+  nome: string | null
+  nascimento: string | null
   /** Em quantas páginas do arquivo a O.S. aparece. */
   paginas: number
 }
@@ -65,6 +74,10 @@ const ROTULO_OS = /(?:^|\s)OS:[ \t]*(\S*)/gm
 const ROTULO_CPF = /(?:^|\s)CPF:[ \t]*(\S*)/gm
 const MODELO_ANTIGO = /Ordem\s+Servi[çc]o/i
 
+// "DN: dd/mm/aaaa | 36 anos…" — a linha do nascimento. O nome do paciente é a
+// linha imediatamente acima dela (conferido contra laudos reais em 25/11/2026).
+const LINHA_NASCIMENTO = /^DN:[ \t]*(\S*)/
+
 const OS_VALIDA = /^\d{6,12}$/
 const CPF_VALIDO = /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/
 
@@ -86,8 +99,42 @@ function valoresDoRotulo(texto: string, rotulo: RegExp, formato: RegExp): string
   return [...valores]
 }
 
+/** "dd/mm/aaaa" → "aaaa-mm-dd"; `null` se não for uma data que existe. */
+function dataIso(bruto: string): string | null {
+  const partes = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(bruto)
+  if (!partes) return null
+  const [, dia, mes, ano] = partes
+  const data = new Date(Date.UTC(Number(ano), Number(mes) - 1, Number(dia)))
+  // O Date "corrige" 31/02 para março; se o mês mudou, a data não existia.
+  return data.getUTCMonth() === Number(mes) - 1 ? `${ano}-${mes}-${dia}` : null
+}
+
 /**
- * Função pura: texto extraído do PDF → as O.S., o CPF de cada uma e o layout.
+ * Nome e nascimento que a página afirma, ou nulos. Uma página com duas linhas
+ * "DN:" de pessoas diferentes não identifica ninguém.
+ */
+function pessoaDaPagina(pagina: string): { nome: string | null; nascimento: string | null } {
+  const linhas = pagina.split('\n')
+  const nomes = new Set<string>()
+  const nascimentos = new Set<string | null>()
+  linhas.forEach((linha, i) => {
+    const achado = LINHA_NASCIMENTO.exec(linha)
+    if (!achado) return
+    nascimentos.add(dataIso(achado[1] ?? ''))
+    nomes.add((linhas[i - 1] ?? '').trim())
+  })
+  const nome = nomes.size === 1 ? [...nomes][0]! : ''
+  return {
+    nome: nome || null,
+    nascimento: nascimentos.size === 1 ? [...nascimentos][0]! : null,
+  }
+}
+
+/** O valor em que todas as páginas concordam, ou `null`. */
+const unico = <T>(valores: Set<T | null>): T | null => (valores.size === 1 ? [...valores][0]! : null)
+
+/**
+ * Função pura: texto extraído do PDF → as O.S., a identidade de cada uma e o layout.
  * Recebe o texto página a página (ou inteiro, que vale como uma página só).
  */
 export function extrairVinculoDoLaudoExterno(textoOuPaginas: string | string[]): VinculoLaudoExterno {
@@ -100,7 +147,10 @@ export function extrairVinculoDoLaudoExterno(textoOuPaginas: string | string[]):
 
   // O Map guarda a ordem em que as O.S. aparecem; `cpfs` junta o que cada
   // página dela afirma (`null` = aquela página não serve de identidade).
-  const porOs = new Map<string, { paginas: number; cpfs: Set<string | null> }>()
+  const porOs = new Map<
+    string,
+    { paginas: number; cpfs: Set<string | null>; nomes: Set<string | null>; nascimentos: Set<string | null> }
+  >()
   for (const pagina of paginas) {
     const osDaPagina = valoresDoRotulo(pagina, ROTULO_OS, OS_VALIDA)
     // Um rótulo de O.S. ilegível em QUALQUER página esvazia o laudo inteiro.
@@ -109,22 +159,33 @@ export function extrairVinculoDoLaudoExterno(textoOuPaginas: string | string[]):
     const cpfsDaPagina = valoresDoRotulo(pagina, ROTULO_CPF, CPF_VALIDO)
     // A página só identifica alguém quando tem UMA O.S. e UM CPF: com duas
     // O.S. não se sabe de qual é o CPF, e com dois CPFs não se sabe qual vale.
-    const cpfDaPagina =
-      osDaPagina.length === 1 && cpfsDaPagina?.length === 1 ? cpfsDaPagina[0]! : null
+    const umaOsSo = osDaPagina.length === 1
+    const cpfDaPagina = umaOsSo && cpfsDaPagina?.length === 1 ? cpfsDaPagina[0]! : null
+    const pessoa = umaOsSo ? pessoaDaPagina(pagina) : { nome: null, nascimento: null }
 
     for (const numero of osDaPagina) {
-      const acumulado = porOs.get(numero) ?? { paginas: 0, cpfs: new Set() }
+      const acumulado = porOs.get(numero) ?? {
+        paginas: 0,
+        cpfs: new Set(),
+        nomes: new Set(),
+        nascimentos: new Set(),
+      }
       acumulado.paginas++
       acumulado.cpfs.add(cpfDaPagina)
+      acumulado.nomes.add(pessoa.nome)
+      acumulado.nascimentos.add(pessoa.nascimento)
       porOs.set(numero, acumulado)
     }
   }
 
-  const os = [...porOs].map(([numero, { paginas: quantas, cpfs }]) => ({
+  // Todas as páginas da O.S. precisam concordar: num único CPF, num único
+  // nome, num único nascimento — cada campo por si.
+  const os = [...porOs].map(([numero, acumulado]) => ({
     numero,
-    // Todas as páginas da O.S. precisam concordar num único CPF.
-    cpf: cpfs.size === 1 ? [...cpfs][0]! : null,
-    paginas: quantas,
+    cpf: unico(acumulado.cpfs),
+    nome: unico(acumulado.nomes),
+    nascimento: unico(acumulado.nascimentos),
+    paginas: acumulado.paginas,
   }))
   // O sort é estável: no empate fica a O.S. que apareceu antes.
   os.sort((a, b) => b.paginas - a.paginas)
