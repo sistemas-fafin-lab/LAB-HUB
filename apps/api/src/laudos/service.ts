@@ -5,11 +5,12 @@ import type { IExamResultRepository } from './repository.js'
 import type { AolExam, AplisExam, AplisRequisicao, ExamResultRow, Laudo } from './types.js'
 import { consolidaLaudosDaOs, fundirPedidosPorColeta, mapAplisResult, mapExamResult } from './mappers.js'
 import { DatabaseError, ValidationError } from './errors.js'
-import { conferirCpf, deveBloquear, type Veredito } from './identidade.js'
+import { conferirCpf, deveBloquear, deveBloquearFechado, piorVeredito, type Veredito } from './identidade.js'
 import { cpfValido } from '../lib/cpf.js'
 import { booleanEnv, numeroEnv } from '../lib/env.js'
 import { idadeEmAnos, type PerfilPaciente } from './mapperHelpers.js'
-import { emParalelo, type ILaudosExternos } from './vinculoPdf.js'
+import type { ILaudosExternos } from './vinculoPdf.js'
+import { emParalelo } from '../lib/concorrencia.js'
 
 const TTL_MS = numeroEnv('EXAM_CACHE_TTL_HOURS', 24) * 60 * 60 * 1000
 
@@ -164,6 +165,12 @@ function toAplisExam(req: AplisRequisicao): AplisExam {
 
 // ---------------------------------------------------------------------------
 
+/** O que uma busca ao vivo devolve: os laudos e a falha de integração, se houve. */
+interface BuscaAoVivo {
+  laudos: Laudo[]
+  falha: unknown
+}
+
 export class LaudoService {
   constructor(
     private readonly repo: IExamResultRepository,
@@ -183,7 +190,7 @@ export class LaudoService {
   //
   // Vale dentro de UM processo. Com mais de uma instância da API a proteção
   // teria que ser do banco (unicidade de paciente + O.S.).
-  readonly #buscasEmAndamento = new Map<string, Promise<{ laudos: Laudo[]; falha: unknown }>>()
+  readonly #buscasEmAndamento = new Map<string, Promise<BuscaAoVivo>>()
 
   /**
    * Busca os laudos do paciente nos LIS, com estratégia stale-while-revalidate.
@@ -304,7 +311,7 @@ export class LaudoService {
     cpf: string,
     perfil?: PerfilPaciente,
     log?: FastifyBaseLogger,
-  ): Promise<{ laudos: Laudo[]; falha: unknown }> {
+  ): Promise<BuscaAoVivo> {
     const emAndamento = this.#buscasEmAndamento.get(pacienteId)
     if (emAndamento) return emAndamento
 
@@ -320,7 +327,7 @@ export class LaudoService {
     cpf: string,
     perfil?: PerfilPaciente,
     log?: FastifyBaseLogger,
-  ): Promise<{ laudos: Laudo[]; falha: unknown }> {
+  ): Promise<BuscaAoVivo> {
     // A mesma janela vale para as duas fontes: capa no ApLIS, valores na AOL.
     const hoje = new Date()
     const inicio = new Date()
@@ -357,7 +364,9 @@ export class LaudoService {
     // ANTES da varredura: é determinístico (o PDF está anexado naquele pedido)
     // e não depende do campo digitado à mão. A FASE 2.5 preenche o que sobrar.
     const viaPdf = osViaPdfLigada() && this.laudosExternos !== null
-    if (viaPdf) await this.#vincularPeloPdf(pacienteId, cpf, requisicoes, log)
+    const recusadasPeloPdf = viaPdf
+      ? await this.#vincularPeloPdf(pacienteId, cpf, requisicoes, log)
+      : new Set<string>()
 
     // FASE 2.5 — descobrir as OS do paciente na AOL, que é onde estão os
     // valores. A listagem não filtra por paciente (⚠ ver aviso de custo em
@@ -381,6 +390,16 @@ export class LaudoService {
 
       for (const { orderId, idOsLis } of ordens) {
         const chave = normalizaIdOsLis(idOsLis)
+
+        // O laudo anexado diz que esta O.S. é de outro CPF: o `idOsLis`
+        // digitado à mão não passa por cima disso. (Vazio com a flag desligada.)
+        if (recusadasPeloPdf.has(orderId)) {
+          log?.error(
+            { pacienteId, orderId },
+            'idOsLis aponta para o paciente uma O.S. que o Laudo EXTERNO atribui a outro CPF — NÃO vinculada',
+          )
+          continue
+        }
 
         if (codigosDoPaciente.has(chave)) {
           doPaciente++
@@ -492,9 +511,13 @@ export class LaudoService {
     cpf: string,
     requisicoes: AplisRequisicao[],
     log?: FastifyBaseLogger,
-  ): Promise<void> {
+  ): Promise<Set<string>> {
+    // O.S. que algum laudo anexado afirma ser de OUTRO CPF. Sai daqui para a
+    // varredura por `idOsLis` não a readmitir pela porta dos fundos: lá a
+    // única conferência é a do payload da AOL, que deixa passar sem CPF.
+    const deOutroPaciente = new Set<string>()
     const externos = this.laudosExternos
-    if (!externos) return
+    if (!externos) return deOutroPaciente
 
     const resumo = {
       requisicoes: requisicoes.length,
@@ -560,32 +583,24 @@ export class LaudoService {
         if (pdf.os.length === 0) resumo.semOsLegivel++
 
         for (const os of pdf.os) {
-          const anterior = vereditos.get(os.numero)
-          const deste = conferirCpf(cpf, os.cpf)
-          // O pior veredito vence: diverge > indisponivel > confere.
-          const pior =
-            anterior === 'diverge' || deste === 'diverge'
-              ? 'diverge'
-              : anterior === 'indisponivel' || deste === 'indisponivel'
-                ? 'indisponivel'
-                : 'confere'
-          vereditos.set(os.numero, pior)
+          vereditos.set(os.numero, piorVeredito(vereditos.get(os.numero), conferirCpf(cpf, os.cpf)))
         }
       }
 
       const osDaRequisicao: string[] = []
       for (const [codigoOs, veredito] of vereditos) {
-        if (veredito === 'diverge') {
+        if (!deveBloquearFechado(veredito)) {
+          osDaRequisicao.push(codigoOs)
+        } else if (veredito === 'diverge') {
           resumo.cpfDivergente++
+          deOutroPaciente.add(codigoOs)
           log?.error(
             { pacienteId, codigoLis, codigoOs },
             'Laudo EXTERNO: O.S. com CPF de outro paciente — DESCARTADA (PDF anexado na requisição errada)',
           )
-        } else if (veredito === 'indisponivel') {
+        } else {
           resumo.cpfIndisponivel++
           log?.warn({ pacienteId, codigoLis, codigoOs }, 'Laudo EXTERNO: O.S. sem CPF legível — descartada')
-        } else {
-          osDaRequisicao.push(codigoOs)
         }
       }
 
@@ -625,6 +640,7 @@ export class LaudoService {
     }
 
     log?.info({ pacienteId, ...resumo }, 'Laudo EXTERNO: vínculo pelo PDF concluído')
+    return deOutroPaciente
   }
 
   // Caminho ApLIS puro — hoje o mais comum: a requisição não tem OS na AOL.

@@ -75,3 +75,26 @@ Pendências e limites (detalhe em `docs/LAUDOS_LIS.md`, "Vínculo da O.S. pelo P
 - Desligar a flag não desfaz vínculos já gravados.
 - Não há unicidade de paciente + O.S. no banco. Buscas simultâneas do mesmo paciente são fundidas dentro do processo; com mais de uma instância da API isso não basta.
 - A O.S. que entra em linha própria pelo `idOsLis` (requisição já ocupada) tem só a barreira do payload da AOL, como qualquer O.S. vinda do `idOsLis`.
+
+### 25/11/2026 — revisão em dois eixos e teste de nome + nascimento
+
+Corrigido depois da revisão do commit `77ff443`:
+
+- **Furo:** uma O.S. que o PDF atribui a outro CPF podia voltar pela varredura do `idOsLis` (linha própria ou linha da requisição), onde só resta a barreira do payload da AOL. Agora a varredura não vincula a O.S. recusada por CPF divergente. A O.S. sem CPF no laudo continua podendo chegar pelo `idOsLis`, como antes.
+- A política fechada e o combinador de vereditos foram para `identidade.ts`; o limitador de concorrência, para `lib/concorrencia.ts`.
+
+Ficou como está, por decisão consciente: a fusão de buscas simultâneas vale com a flag ligada ou desligada (o resultado para o paciente é o mesmo; evita duas varreduras e a O.S. duplicada); e `#vincularPeloPdf` continua uma função longa.
+
+**Teste: nome + nascimento do laudo × cadastro da requisição no apLIS** (somente leitura, 411 requisições, 488 O.S.; nome comparado sem acento e caixa, igualdade exata; nascimento exato):
+
+| CPF da O.S. | nome + nascimento conferem | nome igual, nascimento diferente | nome diferente |
+|---|---|---|---|
+| confere (471) | 466 | 5 | 0 |
+| não impresso (14) | 13 | 1 | 0 |
+| diverge (3) | 2 | 1 | 0 |
+
+- O nome bateu nas 488 O.S. Não apareceu nenhum laudo de pessoa com outro nome, então o teste **não mede** o quanto nome + nascimento barraria um laudo alheio — só mostra que ele não barraria os do próprio paciente além de 7 casos de nascimento divergente.
+- Nas 3 O.S. com CPF divergente o nome é o mesmo, e em 2 o nascimento também: tudo indica que são do próprio paciente, com outro CPF registrado naquela O.S. (inclui o caso das 16 páginas que motivou a identidade por O.S.). Hoje ficam de fora.
+- Nascimento diverge em 7 de 488 O.S. com o mesmo nome: é erro de cadastro em um dos lados, e mostra que nascimento sozinho também falha.
+
+Decisão em aberto (do responsável pelo produto): usar nome + nascimento como segunda prova quando o laudo não traz CPF (recuperaria 13 das 14) e o que fazer com as 3 de CPF divergente.

@@ -407,6 +407,44 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
       expect(tudo).not.toContain('Paciente Exemplo')
     })
 
+    it('O.S. que o PDF atribui a outro CPF não volta pela varredura do idOsLis', async () => {
+      // O campo digitado à mão aponta a O.S. alheia para esta requisição — e a
+      // AOL, sem CPF no payload, não a barraria.
+      const { repo, aol, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['999999909', '111111101'], CPF, { '999999909': OUTRO_CPF })] },
+        ordens: [{ orderId: '999999909', idOsLis: REQ_A }],
+      })
+      aol.fetchExam.mockImplementation(async (os: string) => [exameDaOs(os, null)])
+
+      const { exams } = await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101' })
+      expect(osNaTela(exams)).toEqual(['111111101'])
+      expect(aol.fetchExam).not.toHaveBeenCalledWith('999999909')
+    })
+
+    it('nem quando a requisição ainda está sem O.S. e o idOsLis a preencheria', async () => {
+      const { repo, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['999999909'], OUTRO_CPF)] },
+        ordens: [{ orderId: '999999909', idOsLis: REQ_A }],
+      })
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: null })
+    })
+
+    it('O.S. sem CPF no laudo continua podendo chegar pelo idOsLis, como antes', async () => {
+      const { repo, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['111111101'], null)] },
+        ordens: [{ orderId: '111111101', idOsLis: REQ_A }],
+      })
+
+      await buscar()
+
+      expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101' })
+    })
+
     it('a barreira sobre o payload do Álvaro continua valendo para a O.S. vinda do PDF', async () => {
       const { aol, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['111111101'])] } })
       aol.fetchExam.mockImplementation(async (os: string) => [exameDaOs(os, OUTRO_CPF)])

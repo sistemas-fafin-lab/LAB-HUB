@@ -57,3 +57,25 @@ export function conferirCpf(esperado: string, doPayload: string | null | undefin
 export function deveBloquear(veredito: Veredito): boolean {
   return veredito === 'diverge'
 }
+
+/**
+ * A política FECHADA, para fonte nova que ainda não ganhou confiança: só passa
+ * o que `confere`. É a do PDF "Laudo EXTERNO" (ver service.ts, FASE 2.2) — ali
+ * `indisponivel` também barra, porque depois dela só resta a barreira sobre o
+ * payload da AOL, que muitas vezes vem sem CPF.
+ */
+export function deveBloquearFechado(veredito: Veredito): boolean {
+  return veredito !== 'confere'
+}
+
+/**
+ * Junta dois vereditos sobre a MESMA coisa vindos de lugares diferentes (a
+ * mesma O.S. em dois anexos, por exemplo): o pior vence. Basta um lugar dizer
+ * que é de outra pessoa para ser de outra pessoa; basta um não saber para não
+ * se saber.
+ */
+export function piorVeredito(a: Veredito | undefined, b: Veredito): Veredito {
+  if (a === 'diverge' || b === 'diverge') return 'diverge'
+  if (a === 'indisponivel' || b === 'indisponivel') return 'indisponivel'
+  return 'confere'
+}

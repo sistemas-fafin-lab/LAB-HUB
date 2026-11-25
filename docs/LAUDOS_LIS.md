@@ -134,7 +134,8 @@ guarda uma O.S. só. Então:
 - com a flag ligada, a FASE 2.5 também deixa de descartar a O.S. cujo `idOsLis`
   aponta uma requisição já ocupada por outra O.S.: ela entra como linha própria.
 
-O que nunca acontece: sobrescrever a O.S. de uma linha; copiar para uma
+O que nunca acontece: vincular pelo `idOsLis` uma O.S. que o laudo anexado
+atribui a outro CPF; sobrescrever a O.S. de uma linha; copiar para uma
 requisição a O.S. que já está em outra do mesmo paciente (é logado como
 divergência); mostrar erro ao paciente por falha do site.
 
@@ -153,14 +154,23 @@ nenhuma função de gravação existe em `aplisSite.ts` — e, depois de um logi
 recusado, espera 10 minutos (recusas seguidas ativam captcha para todos que
 usam o mesmo usuário do apLIS). O PDF é lido em memória e descartado.
 
-**Medição** (24/11/2026, 398 requisições de Medicina Laboratorial em 80 dias,
-`scripts/auditar-vinculos.ts --os-pdf`): 396 com O.S. pelo PDF, 35 delas sem
-O.S. nenhuma pelo `idOsLis`; 407 PDFs, todos no layout atual, 60 com mais de
-uma O.S.; CPF conferiu em 400, divergiu em 1 e não saiu em 6; 490 O.S. no
-total — 354 iguais nas duas fontes, 103 só no PDF, 17 só no `idOsLis`, 16 com
-as fontes apontando requisições diferentes.
+**Medição** (25/11/2026, 411 requisições de Medicina Laboratorial em 80 dias,
+`scripts/auditar-vinculos.ts --os-pdf`): 409 com O.S. pelo PDF; 422 PDFs, todos
+no layout atual, 60 com mais de uma O.S. e 2 misturando O.S. do paciente com
+O.S. de outro CPF. Identidade por O.S.: 475 conferem, 3 divergem e 14 não têm
+CPF impresso. 504 O.S. no total — 365 iguais nas duas fontes, 104 só no PDF,
+19 só no `idOsLis`, 16 com as fontes apontando requisições diferentes. Na
+rodada da véspera (398 requisições), 35 não tinham O.S. nenhuma pelo `idOsLis`.
 
 **Limites conhecidos.**
+
+- Das 14 O.S. sem CPF no laudo, 11 chegam ao paciente pelo `idOsLis`; 3 não
+  chegam por nenhum caminho. O que fazer com elas é decisão em aberto (ticket
+  02 da spec).
+- A flag ainda não foi exercitada de ponta a ponta contra o banco real: os
+  testes usam dublês e a leitura dos PDFs foi conferida ao vivo só em leitura.
+- A O.S. principal é a maior que ainda não é do paciente em outra linha: se a
+  maior já existir como linha própria, a seguinte ocupa a linha da requisição.
 
 - Desligar a flag para de ler PDFs, mas não desfaz o que já foi gravado: a O.S.
   posta na linha de uma requisição continua lá, e as linhas próprias também.
