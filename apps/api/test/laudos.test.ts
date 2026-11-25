@@ -165,6 +165,71 @@ describe('GET /laudos', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it('funde no card do pedido a O.S. cuja linha tem o elo para ele, com coleta em outra data', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const fresco = new Date().toISOString()
+
+    const server = await build(
+      supaHandler({
+        examResults: {
+          data: [
+            { result: [laudo({ data_coleta_pedido: '2026-05-12' })], cached_at: fresco },
+            {
+              // Linha própria da segunda remessa: sem requisição, só o elo.
+              codigo_lis_pedido: '0200058505001',
+              result: [
+                laudo({
+                  name: 'Exames Laboratoriais',
+                  codigo_os: '460077',
+                  codigo_lis: null,
+                  source: 'aol',
+                  data_coleta: '2026-05-20',
+                }),
+              ],
+              cached_at: fresco,
+            },
+          ],
+          error: null,
+        },
+      }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: '/laudos', headers: auth })
+
+    const { exams } = res.json() as { exams: Array<{ name: string; codigo_os: string; codigo_lis: string }> }
+    expect(exams).toHaveLength(1)
+    expect(exams[0]).toMatchObject({
+      name: 'Hemograma Completo',
+      codigo_lis: '0200058505001',
+      codigo_os: '458213,460077',
+    })
+  })
+
+  it('linha gravada antes de o elo existir (coluna nula) continua servida como card próprio', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const fresco = new Date().toISOString()
+
+    const server = await build(
+      supaHandler({
+        examResults: {
+          data: [
+            { result: [laudo({ data_coleta_pedido: '2026-05-12' })], cached_at: fresco },
+            {
+              codigo_lis_pedido: null,
+              result: [laudo({ codigo_os: '460077', codigo_lis: null, source: 'aol', data_coleta: '2026-05-20' })],
+              cached_at: fresco,
+            },
+          ],
+          error: null,
+        },
+      }),
+    )
+
+    const res = await server.inject({ method: 'GET', url: '/laudos', headers: auth })
+
+    expect((res.json() as { exams: unknown[] }).exams).toHaveLength(2)
+  })
+
   it('responde 502 quando o ApLIS falha e não há nada em cache', async () => {
     // Sem linhas no banco, a busca ao vivo é síncrona — a falha do LIS chega ao cliente.
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))

@@ -3,7 +3,7 @@ import { normalizaIdOsLis, type IAolService } from './aol.js'
 import type { IAplisService } from './aplis.js'
 import type { IExamResultRepository } from './repository.js'
 import type { AolExam, AplisExam, AplisRequisicao, ExamResultRow, Laudo } from './types.js'
-import { consolidaLaudosDaOs, fundirPedidosPorColeta, mapAplisResult, mapExamResult } from './mappers.js'
+import { consolidaLaudosDaOs, fundirPedidos, mapAplisResult, mapExamResult } from './mappers.js'
 import { DatabaseError, ValidationError } from './errors.js'
 import {
   conferirCpf,
@@ -286,7 +286,7 @@ export class LaudoService {
   // só para os três caminhos (cache normal, ao vivo, cache-only do admin)
   // não poderem divergir silenciosamente.
   static #compoe(laudos: Laudo[]): Laudo[] {
-    return filtraPorFonte(fundirPedidosPorColeta(laudos))
+    return filtraPorFonte(fundirPedidos(laudos))
   }
 
   // A resposta já foi enviada quando isto roda: falha aqui não pode derrubar a
@@ -387,9 +387,10 @@ export class LaudoService {
     //  - codRequisicao do ApLIS (a maioria) → link DETERMINÍSTICO: a OS entra na
     //    MESMA linha da requisição e o laudo sai fundido (valores da AOL +
     //    metadados do ApLIS), sem card duplicado;
-    //  - CPF do paciente → linha própria, só-AOL. Se a coleta bater com a
-    //    dtaColeta de exatamente uma requisição, o card se funde ao do pedido na
-    //    hora de servir (fundirPedidosPorColeta) — a linha continua separada.
+    //  - CPF do paciente → linha própria, só-AOL. O card se funde ao do pedido na
+    //    hora de servir (fundirPedidos) se a linha tiver o elo para ele — que o
+    //    PDF grava, na FASE 2.2 — ou, sem elo, se a coleta bater com a dtaColeta
+    //    de exatamente uma requisição. A linha continua separada.
     let falhaAol: unknown = null
     try {
       const ordens = await this.aol.listOrders(periodoIni, periodoFim)
@@ -428,7 +429,9 @@ export class LaudoService {
             // de uma remessa anterior) e esta também é do pedido. Sem o caminho
             // do PDF ela era simplesmente ignorada; com ele ligado, vale a
             // regra de que o paciente vê todos os seus exames — entra como
-            // linha própria, igual às O.S. extras do PDF.
+            // linha própria, igual às O.S. extras do PDF, e com o mesmo elo
+            // para o pedido: aqui quem diz de qual requisição ela é é o
+            // próprio `idOsLis`.
             //
             // A identidade desta O.S. é a do `idOsLis`, nem mais nem menos do
             // que a da O.S. que a mesma varredura põe na linha da requisição:
@@ -436,9 +439,12 @@ export class LaudoService {
             //
             // Falha aqui fica nesta O.S.; não pode abortar a varredura.
             try {
-              if (!(await this.repo.findByCodigoOs(pacienteId, orderId))) {
-                await this.repo.insertAwaiting(pacienteId, cpf, null, orderId)
+              const existente = await this.repo.findByCodigoOs(pacienteId, orderId)
+              if (!existente) {
+                await this.repo.insertAwaiting(pacienteId, cpf, null, orderId, chave)
                 vinculadasPeloIdOsLis++
+              } else {
+                await this.#ligarAoPedido(existente, chave, 'idOsLis', log)
               }
             } catch (err) {
               logInsertFalhou(err, { pacienteId, orderId }, log)
@@ -487,7 +493,11 @@ export class LaudoService {
         : await this.#mapearSoApLIS(linha, cpf, log)
 
       if (!grupo) continue
-      laudos.push(...grupo)
+      // O elo para o pedido de origem acompanha o laudo só na resposta, como
+      // no caminho cacheado (findByPaciente): ele é coluna da linha, não parte
+      // do conteúdo clínico gravado.
+      const pedido = linha.codigo_lis_pedido
+      laudos.push(...(pedido ? grupo.map((l) => ({ ...l, codigo_lis_pedido: pedido })) : grupo))
       await this.#gravarSeMudou(linha, grupo, log)
     }
 
@@ -510,15 +520,21 @@ export class LaudoService {
    * só. A principal — a maior entre as do paciente, ver laudoExterno.ts — entra na
    * linha da requisição; cada uma das outras ganha linha própria, só com a
    * O.S., exatamente como a FASE 2.5 já faz com a O.S. achada pelo CPF. Assim
-   * nenhuma fica só no log: sai como card do próprio Álvaro até existir o elo
-   * que as funde no card do pedido.
+   * nenhuma fica só no log.
+   *
+   * UM PEDIDO, UM CARD. A linha própria carrega o ELO para a requisição em cujo
+   * anexo a O.S. apareceu (`codigo_lis_pedido`), e é ele que a funde no card do
+   * pedido ao servir, com a coleta em qualquer data (ver fundirPedidos). Ganha
+   * o elo também a linha que já existia sem ele: a O.S. achada antes pelo CPF e
+   * a linha própria gravada antes de o elo existir.
    *
    * Por isso TODAS as requisições são lidas, e não só as que estão sem O.S.:
    * a que já foi vinculada pelo `idOsLis` também pode ter outras O.S. no PDF.
    *
    * Nada daqui chega ao paciente como erro. Site fora do ar, layout que mudou,
    * PDF ilegível: a requisição fica como estava e a varredura por `idOsLis`
-   * segue cobrindo. E nada é sobrescrito: linha que já tem O.S. fica com ela.
+   * segue cobrindo. E nada é sobrescrito: linha que já tem O.S. fica com ela,
+   * e elo já gravado para outra requisição fica como está.
    */
   async #vincularPeloPdf(
     pacienteId: string,
@@ -537,6 +553,7 @@ export class LaudoService {
       requisicoes: requisicoes.length,
       vinculadasPeloPdf: 0,
       extrasPeloPdf: 0,
+      elosGravados: 0,
       semIdRequisicao: 0,
       semAnexo: 0,
       layoutNaoReconhecido: 0,
@@ -660,13 +677,9 @@ export class LaudoService {
             // Já é do paciente. Se está na linha de OUTRA requisição, as duas
             // fontes discordam sobre de qual pedido ela é: nada é sobrescrito,
             // só registrado — decidir quem vence depende de olhar os casos.
-            if (existente.codigo_lis && existente.codigo_lis !== codigoLis) {
-              resumo.divergentes++
-              log?.warn(
-                { pacienteId, codigoLis, codigoOs: os, codigoLisVinculado: existente.codigo_lis },
-                'Laudo EXTERNO: O.S. do PDF já está vinculada a outra requisição do paciente',
-              )
-            }
+            const efeito = await this.#ligarAoPedido(existente, codigoLis, 'Laudo EXTERNO', log)
+            if (efeito === 'divergente') resumo.divergentes++
+            if (efeito === 'elo gravado') resumo.elosGravados++
             continue
           }
 
@@ -675,8 +688,9 @@ export class LaudoService {
             linhaTemOs = true
             resumo.vinculadasPeloPdf++
           } else {
-            await this.repo.insertAwaiting(pacienteId, cpf, null, os)
+            await this.repo.insertAwaiting(pacienteId, cpf, null, os, codigoLis)
             resumo.extrasPeloPdf++
+            resumo.elosGravados++
           }
         }
       } catch (err) {
@@ -687,6 +701,41 @@ export class LaudoService {
 
     log?.info({ pacienteId, ...resumo }, 'Laudo EXTERNO: vínculo pelo PDF concluído')
     return deOutroPaciente
+  }
+
+  /**
+   * Uma O.S. que o paciente JÁ TEM gravada e que uma fonte (o PDF, ou o
+   * `idOsLis`) diz ser da requisição `codigoLis`.
+   *
+   * - linha avulsa, sem pedido conhecido (achada pelo CPF, ou gravada antes de
+   *   o elo existir): ganha o elo;
+   * - já é dessa requisição, pela própria linha ou pelo elo: nada a fazer;
+   * - já é de OUTRA requisição: as fontes discordam. Nada é sobrescrito, só
+   *   registrado — decidir quem vence depende de olhar os casos.
+   */
+  async #ligarAoPedido(
+    existente: ExamResultRow,
+    codigoLis: string,
+    fonte: 'Laudo EXTERNO' | 'idOsLis',
+    log?: FastifyBaseLogger,
+  ): Promise<'elo gravado' | 'divergente' | 'nada'> {
+    const pedidoAtual = existente.codigo_lis ?? existente.codigo_lis_pedido
+    if (!pedidoAtual) {
+      await this.repo.setPedidoDeOrigem(existente.id, codigoLis)
+      return 'elo gravado'
+    }
+    if (pedidoAtual === codigoLis) return 'nada'
+
+    log?.warn(
+      {
+        pacienteId: existente.paciente_id,
+        codigoLis,
+        codigoOs: existente.codigo_os,
+        codigoLisVinculado: pedidoAtual,
+      },
+      `${fonte}: O.S. já está vinculada a outra requisição do paciente`,
+    )
+    return 'divergente'
   }
 
   /**

@@ -8,16 +8,16 @@ Hoje a fusão de O.S. órfã só acontece quando a data de coleta coincide com a
 
 **Blocked by:** 02.
 
-**Status:** needs-triage
+**Status:** done
 
-- [ ] A segunda O.S. (e seguintes) de uma requisição — venha de outro PDF ou do mesmo — fica gravada com o elo explícito para o pedido de origem. Três O.S. no mesmo pedido funcionam como duas.
-- [ ] Requisição que já tinha uma O.S. vinculada (pelo `idOsLis` ou pelo ticket 02) também recebe as demais O.S. dos seus PDFs: o ticket 02 pula a requisição inteira quando ela já tem O.S., e é aqui que as outras entram.
-- [ ] O.S. que já existe como linha avulsa do paciente (achada pelo `idOsLis` = CPF) ganha o elo em vez de virar linha duplicada.
-- [ ] Ao servir, as O.S. com elo para o mesmo pedido saem fundidas num card só, na cache normal, na busca ao vivo e na consulta administrativa.
-- [ ] A fusão por data de coleta continua valendo para O.S. sem elo.
-- [ ] Linhas já gravadas antes da mudança continuam sendo lidas sem migração de dados manual.
-- [ ] A barreira de identidade roda para cada O.S. separadamente; uma O.S. reprovada não derruba as outras do pedido.
-- [ ] Testes cobrem: duas O.S. em datas diferentes fundidas pelo elo; três O.S. vindas de um PDF só; requisição já vinculada pelo `idOsLis` recebendo as O.S. restantes; O.S. avulsa (por CPF) recebendo o elo; O.S. sem elo fundida por data; O.S. reprovada na identidade.
+- [x] A segunda O.S. (e seguintes) de uma requisição — venha de outro PDF ou do mesmo — fica gravada com o elo explícito para o pedido de origem. Três O.S. no mesmo pedido funcionam como duas.
+- [x] Requisição que já tinha uma O.S. vinculada (pelo `idOsLis` ou pelo ticket 02) também recebe as demais O.S. dos seus PDFs: o ticket 02 pula a requisição inteira quando ela já tem O.S., e é aqui que as outras entram.
+- [x] O.S. que já existe como linha avulsa do paciente (achada pelo `idOsLis` = CPF) ganha o elo em vez de virar linha duplicada.
+- [x] Ao servir, as O.S. com elo para o mesmo pedido saem fundidas num card só, na cache normal, na busca ao vivo e na consulta administrativa.
+- [x] A fusão por data de coleta continua valendo para O.S. sem elo.
+- [x] Linhas já gravadas antes da mudança continuam sendo lidas sem migração de dados manual.
+- [x] A barreira de identidade roda para cada O.S. separadamente; uma O.S. reprovada não derruba as outras do pedido.
+- [x] Testes cobrem: duas O.S. em datas diferentes fundidas pelo elo; três O.S. vindas de um PDF só; requisição já vinculada pelo `idOsLis` recebendo as O.S. restantes; O.S. avulsa (por CPF) recebendo o elo; O.S. sem elo fundida por data; O.S. reprovada na identidade.
 
 ## Decisão em aberto
 
@@ -46,3 +46,30 @@ Com a regra "o paciente vê todos os seus exames", o ticket 02 passou a gravar c
 - a identidade é por O.S. desde o 02 (CPF das páginas de cada O.S.); aqui basta não a enfraquecer.
 
 Medição de 25/11/2026: 60 de 411 requisições (15%) têm mais de uma O.S. do próprio paciente no PDF.
+
+### 25/11/2026 — implementado
+
+Decisão em aberto fechada pela opção 1: coluna `exam_results.codigo_lis_pedido`
+(migration `20261125120000_exam_results_pedido_de_origem.sql`), sem tocar na
+unicidade de `codigo_lis`.
+
+- **Gravação** (só com `LAUDOS_OS_VIA_PDF` ligada): a O.S. extra do PDF nasce com
+  o elo; a linha avulsa que já existia (achada pelo CPF, ou gravada pelo 02 antes
+  do elo) ganha-o na busca seguinte; a O.S. que o `idOsLis` aponta para
+  requisição já ocupada também. Elo já gravado para outra requisição não é
+  trocado — conta em `divergentes`.
+- **Leitura**: `fundirPedidosPorColeta` virou `fundirPedidos`, com o elo antes da
+  data. O.S. com elo cujo pedido não está na lista fica como card próprio, sem
+  cair na fusão por data.
+- **Caso que apareceu no caminho**: quando a única O.S. do pedido já existia como
+  linha avulsa, a linha da requisição fica sem O.S. (nada é movido de linha) e
+  rende só a capa do apLIS. A fusão passou a tratar essa capa vazia como dona do
+  nome e do código do card, não como remessa — senão o card sairia com uma seção
+  vazia e "pendente" para sempre.
+- **Deploy**: a migration precisa ser aplicada antes da API nova (o select nomeia
+  a coluna; sem ela o PostgREST responde 400 na rota de laudos).
+
+Fora do escopo, visto no caminho: a O.S. em linha própria é mapeada sem a capa
+do apLIS (sem `codigo_lis` na linha), então as seções dela no card fundido saem
+sem as faixas de referência que o apLIS empresta. Com o elo já dá para buscar a
+capa do pedido para ela; não foi feito aqui.

@@ -13,7 +13,7 @@ const TABELA = 'exam_results'
 // Sem `cpf` e `result`: as colunas em claro foram dropadas (S-06, migration do
 // corte). Nomear coluna inexistente aqui não é erro silencioso — o PostgREST
 // responde 400 e a rota inteira cai.
-const COLUNAS = 'id, paciente_id, cpf_enc, codigo_os, codigo_lis, result_enc, cached_at'
+const COLUNAS = 'id, paciente_id, cpf_enc, codigo_os, codigo_lis, codigo_lis_pedido, result_enc, cached_at'
 
 /**
  * CPF da linha, cifrado ou não (S-06 fase 2a).
@@ -101,12 +101,19 @@ export interface IExamResultRepository {
   findAllRows(pacienteId: string): Promise<ExamResultRow[]>
   findByCodigoLis(pacienteId: string, codigoLis: string): Promise<ExamResultRow | null>
   findByCodigoOs(pacienteId: string, codigoOs: string): Promise<ExamResultRow | null>
+  /**
+   * `codigoLisPedido` é o elo da O.S. em linha própria para a requisição de que
+   * ela é remessa (ver `ExamResultRow.codigo_lis_pedido`).
+   */
   insertAwaiting(
     pacienteId: string,
     cpf: string,
     codigoLis: string | null,
     codigoOs: string | null,
+    codigoLisPedido?: string | null,
   ): Promise<void>
+  /** Grava o elo para o pedido de origem numa linha de O.S. que já existe. */
+  setPedidoDeOrigem(id: string, codigoLisPedido: string): Promise<void>
   /** Liga a OS da AOL a uma linha existente (link determinístico via idOsLis). */
   setCodigoOs(id: string, codigoOs: string): Promise<void>
   /** Grava os laudos da linha e renova o TTL. */
@@ -123,7 +130,7 @@ export class ExamResultRepository implements IExamResultRepository {
     // coluna inexistente (PostgREST 400, rota inteira fora).
     const { data, error } = await supabase
       .from(TABELA)
-      .select('id, cpf_enc, result_enc, cached_at')
+      .select('id, cpf_enc, codigo_lis_pedido, result_enc, cached_at')
       .eq('paciente_id', pacienteId)
       .not('result_enc', 'is', null)
 
@@ -141,6 +148,8 @@ export class ExamResultRepository implements IExamResultRepository {
     // diferente: só bloqueia divergência real, não diferença de pontuação.
     // `cached_at` é coluna, não vive dentro do JSON — mas o serviço precisa dele
     // junto do laudo para decidir se o cache venceu, então é injetado aqui.
+    // O elo para o pedido de origem (`codigo_lis_pedido`) vem pelo mesmo caminho
+    // e pelo mesmo motivo: é coluna da linha, e é o que a fusão ao servir lê.
     // Com `result` sendo lista, a ordenação por data saiu do SQL para cá.
     return (data ?? [])
       .filter((row) => !deveBloquear(conferirCpf(cpf, cpfDaLinha(row as { id: string }))))
@@ -148,6 +157,7 @@ export class ExamResultRepository implements IExamResultRepository {
         laudosDaLinha(row as LinhaComResult).map((l) => ({
           ...l,
           ...(row.cached_at ? { cached_at: row.cached_at as string } : {}),
+          ...(row.codigo_lis_pedido ? { codigo_lis_pedido: row.codigo_lis_pedido as string } : {}),
         })),
       )
       .sort((a, b) => (b.data_emissao ?? '').localeCompare(a.data_emissao ?? ''))
@@ -209,6 +219,7 @@ export class ExamResultRepository implements IExamResultRepository {
     cpf: string,
     codigoLis: string | null,
     codigoOs: string | null,
+    codigoLisPedido: string | null = null,
   ): Promise<void> {
     // Id gerado aqui, e não pelo `gen_random_uuid()` do banco, porque o AAD é
     // `tabela:coluna:id` e precisa existir ANTES de cifrar — mesmo motivo do
@@ -225,6 +236,7 @@ export class ExamResultRepository implements IExamResultRepository {
       cpf_enc: cifrar(cpf, aadDe(TABELA, 'cpf', id)),
       codigo_lis: codigoLis,
       codigo_os: codigoOs,
+      codigo_lis_pedido: codigoLisPedido,
       cached_at: null,
     })
 
@@ -250,6 +262,21 @@ export class ExamResultRepository implements IExamResultRepository {
 
     if (error) {
       throw new DatabaseError('Falha ao ligar a OS à linha do laudo', { id, codigoOs, cause: error })
+    }
+  }
+
+  async setPedidoDeOrigem(id: string, codigoLisPedido: string): Promise<void> {
+    const { error } = await supabase
+      .from(TABELA)
+      .update({ codigo_lis_pedido: codigoLisPedido })
+      .eq('id', id)
+
+    if (error) {
+      throw new DatabaseError('Falha ao gravar o pedido de origem da OS', {
+        id,
+        codigoLisPedido,
+        cause: error,
+      })
     }
   }
 

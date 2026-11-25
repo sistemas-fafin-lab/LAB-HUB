@@ -125,9 +125,8 @@ guarda uma O.S. só. Então:
   no empate, a que aparece antes — entra na linha da requisição, se ela ainda
   não tiver O.S.;
 - cada uma das **outras** ganha linha própria, só com a O.S., como a FASE 2.5 já
-  faz com a O.S. achada pelo CPF. Sai como card do Álvaro; funde-se ao card do
-  pedido quando a data de coleta coincide (`fundirPedidosPorColeta`). O elo
-  explícito que funde sempre é o ticket 03 da spec;
+  faz com a O.S. achada pelo CPF, e carrega o **elo para o pedido de origem**
+  (ver abaixo), que a funde no card do pedido;
 - por isso **todas** as requisições do paciente são lidas, e não só as que
   estão sem O.S.: a que já foi vinculada pelo `idOsLis` também pode ter outras
   O.S. no PDF;
@@ -137,6 +136,49 @@ guarda uma O.S. só. Então:
 O que nunca acontece: sobrescrever a O.S. de uma linha; copiar para uma
 requisição a O.S. que já está em outra do mesmo paciente (é logado como
 divergência); mostrar erro ao paciente por falha do site.
+
+### Um pedido, um card: o elo para o pedido de origem
+
+A cache guarda uma linha por O.S. e `codigo_lis` é único global, então a
+segunda O.S. de um pedido não cabe na linha da requisição. Ela vive em linha
+própria (sem `codigo_lis`) e guarda em `exam_results.codigo_lis_pedido` o código
+da requisição de que é remessa (migration `20261125120000`). A unicidade de
+`codigo_lis`, de que depende a detecção de "código já pertence a outro
+paciente", não mudou.
+
+Quem grava o elo, sempre com `LAUDOS_OS_VIA_PDF` ligada:
+
+- a O.S. extra do PDF, ao ganhar linha própria;
+- a linha que **já existia** sem elo e aparece no PDF de uma requisição: a
+  O.S. achada antes pelo `idOsLis` = CPF e a linha própria gravada antes de o
+  elo existir. Não há migração de dados: cada paciente se acerta na busca
+  seguinte;
+- a O.S. cujo `idOsLis` aponta uma requisição já ocupada por outra O.S.
+  (FASE 2.5) — ali é o próprio `idOsLis` que diz de qual pedido ela é.
+
+Elo já gravado nunca é trocado: PDF que situe a O.S. em outra requisição conta
+como divergência no log, como a O.S. que já está na linha de outra requisição.
+
+Quem lê é `fundirPedidos` (mappers.ts), ao **servir** — cache normal, busca ao
+vivo e consulta administrativa passam pelo mesmo ponto. O.S. com elo funde no
+card da requisição apontada, com a coleta em qualquer data; três O.S. funcionam
+como duas. Se o pedido apontado não está na lista (bloqueado pela barreira, ou
+sem laudo), a O.S. sai como card próprio e **não** tenta a fusão por data. A
+fusão por data de coleta continua valendo para a O.S. sem elo.
+
+Quando a linha da requisição não tem O.S. (a única O.S. do pedido foi achada
+pelo CPF e só depois ganhou o elo), ela rende só a capa do apLIS; a fusão usa o
+nome e o código do pedido e o conteúdo da O.S., e o card sai como `merged`.
+
+A identidade não mudou: cada O.S. passa pela conferência do PDF e depois pela
+do payload do Álvaro, linha a linha. O.S. reprovada não ganha elo ou não rende
+laudo, e as outras do pedido saem normalmente.
+
+O log `Laudo EXTERNO: vínculo pelo PDF concluído` ganhou `elosGravados`, que
+conta os elos gravados pelo passo do PDF (os da FASE 2.5 não entram nele).
+
+Como o `cached_at`, o elo é coluna da linha e o repositório o injeta em cada
+laudo ao ler (`codigo_lis_pedido`); não faz parte do JSON cifrado.
 
 **Identidade, por O.S., com duas provas.** Cada O.S. responde pelo que está
 impresso nas páginas em que ela aparece — não é por arquivo, porque um mesmo
@@ -523,7 +565,7 @@ Duas ressalvas da fatia de teste:
    requisição `0040001821006` (dtaColeta 20/05) = OS 380205029
    (fezes/urina, idOsLis certo) + OS 379779766 (sangue, idOsLis = CPF). O elo é
    a data: a dtaColeta da requisição é a da coleta original, a mesma que a AOL
-   registra na OS de sangue. `fundirPedidosPorColeta` (mappers.ts) funde, na
+   registra na OS de sangue. `fundirPedidos` (mappers.ts) funde, na
    hora de SERVIR, a órfã cuja `data_coleta` bate com o `data_coleta_pedido` de
    exatamente UM pedido — zero ou dois candidatos mantém o card separado
    (duplicar na tela é melhor que fundir no pedido errado). As linhas do banco

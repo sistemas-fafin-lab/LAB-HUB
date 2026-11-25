@@ -21,7 +21,7 @@ import {
   parseResponsavel,
   stripHtml,
 } from '../src/laudos/aplis.js'
-import { consolidaLaudosDaOs, fundirPedidosPorColeta, mapAplisResult } from '../src/laudos/mappers.js'
+import { consolidaLaudosDaOs, fundirPedidos, mapAplisResult } from '../src/laudos/mappers.js'
 import type { Laudo } from '../src/laudos/types.js'
 
 // Testes do mapeamento LIS → Laudo. Tudo puro: não tocam rede nem banco.
@@ -740,7 +740,7 @@ describe('consolidaLaudosDaOs', () => {
   })
 })
 
-describe('fundirPedidosPorColeta', () => {
+describe('fundirPedidos', () => {
   // O cenário real que motivou a fusão: pedido despachado em duas remessas — a
   // OS de fezes/urina ganhou o codRequisicao no idOsLis (card do pedido) e a de
   // sangue ganhou o CPF (card órfão "Exames Laboratoriais").
@@ -772,7 +772,7 @@ describe('fundirPedidosPorColeta', () => {
     })
 
   it('funde a OS órfã no pedido cuja coleta da requisição tem a mesma data', () => {
-    const fundidos = fundirPedidosPorColeta([pedido(), orfa()])
+    const fundidos = fundirPedidos([pedido(), orfa()])
 
     expect(fundidos).toHaveLength(1)
     const card = fundidos[0]!
@@ -791,14 +791,14 @@ describe('fundirPedidosPorColeta', () => {
 
   it('não funde quando duas requisições têm a mesma data de coleta (ambíguo)', () => {
     const gemeo = { ...pedido(), codigo_lis: 'REQ-2', codigo_os: 'OS-OUTRA' }
-    const fundidos = fundirPedidosPorColeta([pedido(), gemeo, orfa()])
+    const fundidos = fundirPedidos([pedido(), gemeo, orfa()])
     expect(fundidos).toHaveLength(3)
   })
 
   it('órfã sem pedido correspondente continua como card próprio', () => {
     const sozinha = orfa()
     const outroPedido = { ...pedido(), data_coleta_pedido: '2026-04-01' }
-    const fundidos = fundirPedidosPorColeta([outroPedido, sozinha])
+    const fundidos = fundirPedidos([outroPedido, sozinha])
     expect(fundidos).toHaveLength(2)
     expect(fundidos).toContain(sozinha)
   })
@@ -810,10 +810,132 @@ describe('fundirPedidosPorColeta', () => {
       data_emissao: '2026-05-27',
       groups: [{ name: 'Urina 24h', panels: [] }],
     }
-    const fundidos = fundirPedidosPorColeta([pedido(), orfa(), segunda])
+    const fundidos = fundirPedidos([pedido(), orfa(), segunda])
 
     expect(fundidos).toHaveLength(1)
     expect(fundidos[0]!.codigo_os).toBe('OS-SANGUE,OS-URINA24H,OS-FEZES')
     expect(fundidos[0]!.data_emissao).toBe('2026-05-28')
+  })
+
+  describe('elo explícito para o pedido de origem', () => {
+    // O.S. extra que o Laudo EXTERNO (ou o idOsLis) diz ser da requisição: a
+    // linha dela carrega o código do pedido, e a data deixa de importar.
+    const comElo = (over: Partial<Laudo> = {}): Laudo => ({
+      ...orfa(),
+      codigo_os: 'OS-EXTRA',
+      data_coleta: '2026-06-02', // remessa entregue depois: a data não bate
+      codigo_lis_pedido: 'REQ-1',
+      groups: [{ name: 'Parasitológico', panels: [] }],
+      ...over,
+    })
+
+    it('funde no pedido a O.S. com elo, mesmo com coleta em outra data', () => {
+      const fundidos = fundirPedidos([pedido(), comElo()])
+
+      expect(fundidos).toHaveLength(1)
+      const card = fundidos[0]!
+      expect(card.codigo_lis).toBe('REQ-1')
+      expect(card.name).toBe('MEDICINA LABORATORIAL')
+      expect(card.groups?.map((g) => g.name)).toEqual(['Urina Tipo I', 'Parasitológico'])
+      expect(card.codigo_os).toBe('OS-FEZES,OS-EXTRA')
+      // O elo é da linha da O.S.; o card do pedido não aponta para si mesmo.
+      expect(card.codigo_lis_pedido).toBeUndefined()
+    })
+
+    it('três O.S. no mesmo pedido saem num card só', () => {
+      const terceira = comElo({ codigo_os: 'OS-TERCEIRA', data_coleta: '2026-06-09' })
+      const fundidos = fundirPedidos([pedido(), comElo(), terceira])
+
+      expect(fundidos).toHaveLength(1)
+      expect(fundidos[0]!.codigo_os).toBe('OS-FEZES,OS-EXTRA,OS-TERCEIRA')
+    })
+
+    it('o elo manda sobre a data: a O.S. vai para o pedido apontado, não para o da mesma coleta', () => {
+      const outro = { ...pedido(), codigo_lis: 'REQ-2', codigo_os: 'OS-OUTRA', data_coleta_pedido: '2026-06-02' }
+      const fundidos = fundirPedidos([pedido(), outro, comElo()])
+
+      expect(fundidos).toHaveLength(2)
+      expect(fundidos.find((l) => l.codigo_lis === 'REQ-1')!.codigo_os).toBe('OS-FEZES,OS-EXTRA')
+      expect(fundidos.find((l) => l.codigo_lis === 'REQ-2')!.codigo_os).toBe('OS-OUTRA')
+    })
+
+    it('O.S. com elo e sem elo convivem: cada uma chega ao pedido pelo seu critério', () => {
+      const fundidos = fundirPedidos([pedido(), comElo(), orfa()])
+
+      expect(fundidos).toHaveLength(1)
+      expect(fundidos[0]!.codigo_os).toBe('OS-SANGUE,OS-FEZES,OS-EXTRA')
+    })
+
+    it('elo para pedido que não está na lista: a O.S. fica como card próprio, sem cair na fusão por data', () => {
+      // O pedido apontado foi bloqueado ou ainda não tem laudo. Fundir pela
+      // data em OUTRO pedido contrariaria o que o elo afirma.
+      const outro = { ...pedido(), codigo_lis: 'REQ-2', data_coleta_pedido: '2026-06-02' }
+      const sozinha = comElo()
+      const fundidos = fundirPedidos([outro, sozinha])
+
+      expect(fundidos).toHaveLength(2)
+      expect(fundidos).toContain(sozinha)
+    })
+
+    it('pedido sem O.S. própria (só a capa do apLIS) recebe os exames e deixa de estar pendente', () => {
+      // A única O.S. do pedido foi achada pelo CPF e ganhou o elo depois: a
+      // linha da requisição continua sem O.S. e rende só a capa.
+      const capa = laudoDeExame({
+        name: 'MEDICINA LABORATORIAL',
+        codigo_os: '',
+        codigo_lis: 'REQ-1',
+        source: 'aplis',
+        status: 'pending',
+        partial: true,
+        panels: [],
+        data_coleta: '2026-05-20',
+        data_coleta_pedido: '2026-05-20',
+      })
+      const fundidos = fundirPedidos([capa, comElo()])
+
+      expect(fundidos).toHaveLength(1)
+      const card = fundidos[0]!
+      expect(card.name).toBe('MEDICINA LABORATORIAL')
+      expect(card.source).toBe('merged')
+      expect(card.status).toBe('ready')
+      expect(card.partial).toBe(false)
+      expect(card.codigo_os).toBe('OS-EXTRA')
+      // Sem seção vazia com o nome do pedido.
+      expect(card.groups?.map((g) => g.name)).toEqual(['Parasitológico'])
+    })
+
+    it('capa com procedimentos ainda não liberados também não vira seção do card', () => {
+      // O apLIS lista o procedimento antes de liberar: a capa tem painel, mas
+      // só com "—". Continua sendo capa.
+      const capa = laudoDeExame({
+        name: 'MEDICINA LABORATORIAL',
+        codigo_os: '',
+        codigo_lis: 'REQ-1',
+        source: 'aplis',
+        status: 'pending',
+        partial: true,
+        panels: [{ name: 'GLICOSE', value: '—', unit: '', ref: '', ok: true, trend: [] }],
+      })
+      const card = fundirPedidos([capa, comElo()])[0]!
+
+      expect(card.groups?.map((g) => g.name)).toEqual(['Parasitológico'])
+      // Só os valores medidos da remessa; nenhum "—" da capa.
+      expect(card.panels.map((p) => p.value)).toEqual(['95'])
+      expect(card.status).toBe('ready')
+    })
+
+    it('pedido só-apLIS com resultado liberado entra no card como remessa', () => {
+      const comResultado = laudoDeExame({
+        name: 'GENOTIPAGEM HPV',
+        codigo_os: '',
+        codigo_lis: 'REQ-1',
+        source: 'aplis',
+        status: 'ready',
+        data_coleta: '2026-05-20',
+      })
+      const card = fundirPedidos([comResultado, comElo()])[0]!
+
+      expect(card.groups?.map((g) => g.name)).toEqual(['GENOTIPAGEM HPV', 'Parasitológico'])
+    })
   })
 })

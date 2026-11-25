@@ -56,7 +56,7 @@ function statusCombinado(laudos: Laudo[]): Laudo['status'] {
  *
  * `dataColetaPedido` (dtaColeta da requisição, formato do ApLIS) vira a chave
  * `data_coleta_pedido` — é ela que permite fundir depois uma OS órfã da mesma
- * coleta (ver fundirPedidosPorColeta).
+ * coleta (ver fundirPedidos).
  */
 export function consolidaLaudosDaOs(
   porExame: Laudo[],
@@ -110,35 +110,55 @@ function comoGrupos(laudo: Laudo): NonNullable<Laudo['groups']> {
   return laudo.groups?.length ? laudo.groups : [{ name: laudo.name, panels: laudo.panels }]
 }
 
+// Pedido que só existe no apLIS e sem nada liberado por ele: é só a capa. O
+// critério é o status, não a falta de painéis — o apLIS lista o procedimento
+// antes de liberar, e a capa vem com painéis só de "—".
+function soACapa(laudo: Laudo): boolean {
+  return laudo.source === 'aplis' && laudo.status === 'pending'
+}
+
 /**
- * Funde na lista final as OS ÓRFÃS — OS da AOL cujo `idOsLis` foi digitado como
- * CPF e que por isso viraram card próprio ("Exames Laboratoriais") em vez de
- * entrar no card do pedido.
+ * Funde na lista final as O.S. que saíram como card próprio do Álvaro
+ * ("Exames Laboratoriais") mas são remessa de um pedido que também está na
+ * lista. Um pedido despachado em duas ou três remessas (sangue no dia da
+ * coleta, fezes/urina quando o paciente entrega) vira várias O.S. no Álvaro,
+ * e a requisição do apLIS é uma só. Dois critérios, nesta ordem:
  *
- * O elo é a data: um pedido despachado em duas remessas (sangue no dia da
- * coleta, fezes/urina quando o paciente entrega) vira duas OS no Álvaro, mas a
- * requisição do ApLIS é uma só e a sua dtaColeta é a da coleta original — a
- * mesma que a AOL registra na OS de sangue. Então: órfã cuja `data_coleta` bate
- * com o `data_coleta_pedido` de EXATAMENTE UM pedido é remessa dele e os cards
- * se fundem. Zero candidatos (pedido antigo no cache, ainda sem a chave) ou
- * mais de um (duas requisições na mesma data) mantém a órfã como card próprio —
- * duplicar na tela é melhor que fundir no pedido errado.
+ * 1. ELO EXPLÍCITO (`codigo_lis_pedido`): a linha da O.S. guarda de qual
+ *    requisição ela é — foi o PDF "Laudo EXTERNO" anexado nela, ou o `idOsLis`,
+ *    que disse. Funde sempre, com a coleta em qualquer data. Se o pedido
+ *    apontado não está na lista (bloqueado, ou ainda sem laudo), a O.S. fica
+ *    como card próprio: NÃO cai no critério 2, que poderia juntá-la a outro
+ *    pedido contra o que o elo afirma.
+ *
+ * 2. DATA DE COLETA, para a O.S. sem elo (`idOsLis` digitado como CPF e sem
+ *    PDF que a situe): a dtaColeta da requisição é a da coleta original, a
+ *    mesma que a AOL registra na O.S. de sangue. Órfã cuja `data_coleta` bate
+ *    com o `data_coleta_pedido` de EXATAMENTE UM pedido é remessa dele. Zero
+ *    candidatos (pedido antigo no cache, ainda sem a chave) ou mais de um (duas
+ *    requisições na mesma data) mantém a órfã como card próprio — duplicar na
+ *    tela é melhor que fundir no pedido errado.
  */
-export function fundirPedidosPorColeta(laudos: Laudo[]): Laudo[] {
-  const orfas = laudos.filter((l) => l.source === 'aol' && !l.codigo_lis && l.data_coleta)
-  if (orfas.length === 0) return laudos
+export function fundirPedidos(laudos: Laudo[]): Laudo[] {
+  // Candidatas a remessa: O.S. em card próprio, com elo ou com data para casar.
+  const avulsas = laudos.filter(
+    (l) => l.source === 'aol' && !l.codigo_lis && (l.codigo_lis_pedido || l.data_coleta),
+  )
+  if (avulsas.length === 0) return laudos
 
   const remessasPorPedido = new Map<Laudo, Laudo[]>()
   const absorvidas = new Set<Laudo>()
 
-  for (const orfa of orfas) {
-    const candidatos = laudos.filter(
-      (l) => l.codigo_lis && l.data_coleta_pedido === orfa.data_coleta,
+  for (const avulsa of avulsas) {
+    const candidatos = laudos.filter((l) =>
+      avulsa.codigo_lis_pedido
+        ? l.codigo_lis === avulsa.codigo_lis_pedido
+        : l.codigo_lis && l.data_coleta_pedido === avulsa.data_coleta,
     )
     if (candidatos.length !== 1) continue
     const pedido = candidatos[0]!
-    remessasPorPedido.set(pedido, [...(remessasPorPedido.get(pedido) ?? []), orfa])
-    absorvidas.add(orfa)
+    remessasPorPedido.set(pedido, [...(remessasPorPedido.get(pedido) ?? []), avulsa])
+    absorvidas.add(avulsa)
   }
   if (absorvidas.size === 0) return laudos
 
@@ -151,9 +171,18 @@ export function fundirPedidosPorColeta(laudos: Laudo[]): Laudo[] {
     .sort((a, b) => (b.data_emissao ?? '').localeCompare(a.data_emissao ?? ''))
 }
 
-function fundeRemessas(pedido: Laudo, orfas: Laudo[]): Laudo {
+function fundeRemessas(pedido: Laudo, remessas: Laudo[]): Laudo {
   // Remessas em ordem de coleta: o paciente vê primeiro o que colheu primeiro.
-  const partes = [pedido, ...orfas].sort((a, b) =>
+  // A capa sem conteúdo dá nome e requisição ao card, mas não é remessa: se
+  // entrasse aqui, deixaria uma seção vazia e o card eternamente "pendente" —
+  // a análise clínica é medida no Álvaro, o apLIS nunca a libera.
+  //
+  // O preço: se a linha do pedido TEM O.S. e ela não rendeu laudo (fetch
+  // falhou, ou a barreira de identidade a bloqueou), o que chega aqui é a
+  // mesma capa, e o card sai "pronto" só com as outras remessas. É o que o
+  // paciente já via antes do elo, em card próprio; a O.S. que falhou volta na
+  // revalidação seguinte.
+  const partes = (soACapa(pedido) ? remessas : [pedido, ...remessas]).sort((a, b) =>
     (a.data_coleta ?? '').localeCompare(b.data_coleta ?? ''),
   )
   const groups = partes.flatMap(comoGrupos)
@@ -182,7 +211,7 @@ function fundeRemessas(pedido: Laudo, orfas: Laudo[]): Laudo {
     results,
     groups,
     exam_type: 'pedido',
-    // Rastro das duas OS — a lista separada por vírgula preserva a origem.
+    // Rastro de todas as OS do card — a lista separada por vírgula preserva a origem.
     codigo_os: partes.map((p) => p.codigo_os).filter(Boolean).join(','),
     source: 'merged',
     partial: partes.some((p) => p.partial),

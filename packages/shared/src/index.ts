@@ -386,8 +386,14 @@ export interface Laudo {
   // Data de coleta da REQUISIÇÃO no ApLIS (ISO) — pode diferir de `data_coleta`
   // quando a OS da AOL é de outra remessa (fezes entregues dias após o sangue).
   // É a chave que liga uma OS órfã (idOsLis digitado como CPF) de volta ao
-  // pedido; ver fundirPedidosPorColeta.
+  // pedido quando não há elo explícito; ver fundirPedidos.
   data_coleta_pedido?: string
+  // Elo explícito: código da requisição do ApLIS de que esta O.S. é remessa,
+  // quando ela vive em linha própria (pedido com mais de uma O.S.). Vem da
+  // coluna de `exam_results`, não do JSON do laudo — é injetado na leitura,
+  // como `cached_at`. Some no card fundido; sobra só na O.S. cujo pedido não
+  // está na lista.
+  codigo_lis_pedido?: string
   source: 'aol' | 'aplis' | 'merged'
   partial: boolean // true = faltou uma das fontes; o dado pode mudar
   cached_at?: string // ISO 8601 — quando este laudo foi cacheado

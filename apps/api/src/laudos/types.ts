@@ -143,6 +143,11 @@ export interface ExamResultRow {
   cpf: string
   codigo_os: string | null
   codigo_lis: string | null
+  // Elo para o pedido de origem: requisição do ApLIS de que esta O.S. é
+  // remessa, quando ela vive em linha própria (a linha da requisição já está
+  // com outra O.S., e `codigo_lis` é único). null na linha da própria
+  // requisição, na O.S. sem pedido conhecido e nas linhas antigas.
+  codigo_lis_pedido: string | null
   result: Laudo[] | null
   cached_at: string | null
 }

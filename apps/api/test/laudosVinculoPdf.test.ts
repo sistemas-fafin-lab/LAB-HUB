@@ -32,13 +32,14 @@ class RepositorioEmMemoria implements IExamResultRepository {
   linhas: ExamResultRow[] = []
   #serial = 0
 
-  semente(codigoLis: string | null, codigoOs: string | null): ExamResultRow {
+  semente(codigoLis: string | null, codigoOs: string | null, pedido: string | null = null): ExamResultRow {
     const linha: ExamResultRow = {
       id: `linha-${++this.#serial}`,
       paciente_id: PACIENTE,
       cpf: CPF,
       codigo_lis: codigoLis,
       codigo_os: codigoOs,
+      codigo_lis_pedido: pedido,
       result: null,
       cached_at: null,
     }
@@ -51,8 +52,23 @@ class RepositorioEmMemoria implements IExamResultRepository {
     return Object.fromEntries(this.linhas.map((l) => [l.codigo_lis ?? `avulsa:${l.codigo_os}`, l.codigo_os]))
   }
 
+  /** O elo para o pedido de origem, por O.S. (só as linhas que o têm). */
+  elos(): Record<string, string> {
+    return Object.fromEntries(
+      this.linhas.filter((l) => l.codigo_lis_pedido).map((l) => [l.codigo_os, l.codigo_lis_pedido!]),
+    )
+  }
+
+  // Como o repositório real: o elo e o `cached_at` são colunas da linha,
+  // entregues junto de cada laudo dela.
   async findByPaciente(): Promise<Laudo[]> {
-    return []
+    return this.linhas.flatMap((l) =>
+      (l.result ?? []).map((laudo) => ({
+        ...laudo,
+        ...(l.cached_at ? { cached_at: l.cached_at } : {}),
+        ...(l.codigo_lis_pedido ? { codigo_lis_pedido: l.codigo_lis_pedido } : {}),
+      })),
+    )
   }
   async findAllRows(): Promise<ExamResultRow[]> {
     return [...this.linhas]
@@ -63,14 +79,25 @@ class RepositorioEmMemoria implements IExamResultRepository {
   async findByCodigoOs(_p: string, codigoOs: string): Promise<ExamResultRow | null> {
     return this.linhas.find((l) => l.codigo_os === codigoOs) ?? null
   }
-  async insertAwaiting(_p: string, _cpf: string, codigoLis: string | null, codigoOs: string | null): Promise<void> {
-    this.semente(codigoLis, codigoOs)
+  async insertAwaiting(
+    _p: string,
+    _cpf: string,
+    codigoLis: string | null,
+    codigoOs: string | null,
+    pedido: string | null = null,
+  ): Promise<void> {
+    this.semente(codigoLis, codigoOs, pedido)
+  }
+  async setPedidoDeOrigem(id: string, pedido: string): Promise<void> {
+    this.linhas.find((l) => l.id === id)!.codigo_lis_pedido = pedido
   }
   async setCodigoOs(id: string, codigoOs: string): Promise<void> {
     this.linhas.find((l) => l.id === id)!.codigo_os = codigoOs
   }
   async saveResult(id: string, result: Laudo[]): Promise<void> {
-    this.linhas.find((l) => l.id === id)!.result = result
+    const linha = this.linhas.find((l) => l.id === id)!
+    linha.result = result
+    linha.cached_at = new Date().toISOString()
   }
   async renewCachedAt(): Promise<void> {}
 }
@@ -167,11 +194,14 @@ function montar(cenario: Cenario = {}) {
   const servico = new LaudoService(repo, aplis, aol, cenario.comFonte === false ? null : externos)
   const buscar = () => servico.fetchAndCacheExams(PACIENTE, CPF, true, log as unknown as FastifyBaseLogger)
 
-  return { repo, aplis, aol, externos, log, buscar }
+  return { repo, aplis, aol, externos, log, buscar, servico }
 }
 
-/** As O.S. dos laudos que o paciente recebe, em ordem estável. */
-const osNaTela = (exams: Laudo[]): string[] => exams.map((e) => e.codigo_os ?? '').sort()
+/**
+ * As O.S. que chegam à tela do paciente, em ordem estável — estejam em card
+ * próprio ou fundidas no card do pedido (que as lista separadas por vírgula).
+ */
+const osNaTela = (exams: Laudo[]): string[] => exams.flatMap((e) => (e.codigo_os ?? '').split(',')).sort()
 
 /** O log estruturado do passo do PDF. */
 function resumoDoPdf(log: { info: ReturnType<typeof vi.fn> }): Record<string, unknown> {
@@ -353,6 +383,212 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
 
       expect(repo.vinculos()).toEqual({ [REQ_A]: '111111101', 'avulsa:444444404': '444444404' })
       expect(osNaTela(exams)).toEqual(['111111101', '444444404'])
+    })
+  })
+
+  describe('elo para o pedido de origem: várias O.S., um card só', () => {
+    /** O card de um pedido na resposta. */
+    const cardDe = (exams: Laudo[], codigoLis: string): Laudo | undefined =>
+      exams.find((e) => e.codigo_lis === codigoLis)
+
+    it('duas O.S. com coletas em datas diferentes saem fundidas no card do pedido', async () => {
+      const { repo, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['333333303']), pdf(['222222202'])] } })
+
+      const { exams } = await buscar()
+
+      expect(repo.elos()).toEqual({ '222222202': REQ_A })
+      expect(exams).toHaveLength(1)
+      expect(osNaTela([cardDe(exams, REQ_A)!])).toEqual(['222222202', '333333303'])
+      expect(exams[0]!.groups?.map((g) => g.name)).toEqual(['EXAME 222222202', 'EXAME 333333303'])
+    })
+
+    it('três O.S. vindas de um PDF só funcionam como duas', async () => {
+      const { repo, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['333333303', '222222202', '111111101'])] } })
+
+      const { exams } = await buscar()
+
+      expect(repo.elos()).toEqual({ '222222202': REQ_A, '111111101': REQ_A })
+      expect(exams).toHaveLength(1)
+      expect(osNaTela(exams)).toEqual(['111111101', '222222202', '333333303'])
+    })
+
+    it('requisição já vinculada pelo idOsLis recebe as O.S. restantes do PDF, com o elo', async () => {
+      const { repo, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['333333303', '111111101'])] } })
+      repo.semente(REQ_A, '111111101')
+
+      const { exams } = await buscar()
+
+      expect(repo.elos()).toEqual({ '333333303': REQ_A })
+      expect(exams).toHaveLength(1)
+      expect(osNaTela(exams)).toEqual(['111111101', '333333303'])
+    })
+
+    it('O.S. que já existe como linha avulsa (achada pelo CPF) ganha o elo, sem duplicar', async () => {
+      const { repo, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['333333303', '111111101'])] },
+        ordens: [{ orderId: '111111101', idOsLis: CPF }],
+      })
+      repo.semente(null, '111111101')
+
+      const { exams } = await buscar()
+
+      expect(repo.linhas.filter((l) => l.codigo_os === '111111101')).toHaveLength(1)
+      expect(repo.elos()).toEqual({ '111111101': REQ_A })
+      expect(exams).toHaveLength(1)
+    })
+
+    it('linha própria gravada antes de existir o elo ganha-o na busca seguinte', async () => {
+      // O estado que o ticket 02 deixou no banco: principal na requisição,
+      // extra em linha própria, sem elo. Nenhuma migração manual.
+      const { repo, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['333333303', '222222202'])] } })
+      repo.semente(REQ_A, '333333303')
+      repo.semente(null, '222222202')
+
+      const { exams } = await buscar()
+
+      expect(repo.linhas).toHaveLength(2)
+      expect(repo.elos()).toEqual({ '222222202': REQ_A })
+      expect(exams).toHaveLength(1)
+    })
+
+    it('a única O.S. do pedido, achada antes pelo CPF: o card do pedido sai com os exames dela', async () => {
+      // A linha da requisição fica sem O.S. (nada é movido de linha); é o elo
+      // que leva os valores ao card do pedido.
+      const { repo, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['111111101'])] } })
+      repo.semente(null, '111111101')
+
+      const { exams } = await buscar()
+
+      expect(repo.vinculos()).toEqual({ 'avulsa:111111101': '111111101', [REQ_A]: null })
+      expect(exams).toHaveLength(1)
+      expect(exams[0]).toMatchObject({ codigo_lis: REQ_A, codigo_os: '111111101', source: 'merged' })
+    })
+
+    it('O.S. sem elo continua fundida pela data de coleta', async () => {
+      // idOsLis = CPF e nenhum PDF que a situe: vale a regra antiga.
+      const { repo, buscar } = montar({
+        requisicoes: [requisicao(REQ_A, { data_solicitacao: '2026-10-07' })],
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '555555507', idOsLis: CPF }], // coleta em 2026-10-07
+      })
+
+      const { exams } = await buscar()
+
+      expect(repo.elos()).toEqual({})
+      expect(exams).toHaveLength(1)
+      expect(osNaTela(exams)).toEqual(['111111101', '555555507'])
+    })
+
+    it('O.S. que o idOsLis aponta para requisição já ocupada entra com o elo', async () => {
+      const { repo, buscar } = montar({
+        pdfs: { [REQ_A]: [pdf(['111111101'])] },
+        ordens: [{ orderId: '444444404', idOsLis: REQ_A }],
+      })
+
+      const { exams } = await buscar()
+
+      expect(repo.elos()).toEqual({ '444444404': REQ_A })
+      expect(exams).toHaveLength(1)
+    })
+
+    it('cada pedido funde só as suas O.S.', async () => {
+      const { buscar } = montar({
+        requisicoes: [requisicao(REQ_A), requisicao(REQ_B)],
+        pdfs: { [REQ_A]: [pdf(['333333303', '111111101'])], [REQ_B]: [pdf(['444444404', '222222202'])] },
+      })
+
+      const { exams } = await buscar()
+
+      expect(exams).toHaveLength(2)
+      expect(osNaTela([cardDe(exams, REQ_A)!])).toEqual(['111111101', '333333303'])
+      expect(osNaTela([cardDe(exams, REQ_B)!])).toEqual(['222222202', '444444404'])
+    })
+
+    it('O.S. reprovada pelo CPF do laudo não ganha elo nem derruba as outras do pedido', async () => {
+      const { repo, buscar } = montar({
+        pdfs: {
+          [REQ_A]: [pdf(['333333303', '222222202', '111111101'], CPF, { '222222202': OUTRO_CPF })],
+        },
+      })
+
+      const { exams } = await buscar()
+
+      expect(repo.elos()).toEqual({ '111111101': REQ_A })
+      expect(exams).toHaveLength(1)
+      expect(osNaTela(exams)).toEqual(['111111101', '333333303'])
+    })
+
+    it('O.S. com elo bloqueada pela barreira do Álvaro fica fora; as outras do pedido saem', async () => {
+      const { aol, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['333333303', '222222202', '111111101'])] } })
+      aol.fetchExam.mockImplementation(async (os: string) => [
+        exameDaOs(os, os === '222222202' ? OUTRO_CPF : CPF),
+      ])
+
+      const { exams } = await buscar()
+
+      expect(exams).toHaveLength(1)
+      expect(osNaTela(exams)).toEqual(['111111101', '333333303'])
+    })
+
+    it('a O.S. principal bloqueada pela barreira do Álvaro não leva junto as demais', async () => {
+      const { aol, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['333333303', '111111101'])] } })
+      aol.fetchExam.mockImplementation(async (os: string) => [
+        exameDaOs(os, os === '333333303' ? OUTRO_CPF : CPF),
+      ])
+
+      const { exams } = await buscar()
+
+      expect(osNaTela(exams)).toEqual(['111111101'])
+    })
+
+    it('elo já gravado para outra requisição não é sobrescrito: fica o registro da divergência', async () => {
+      const { repo, log, buscar } = montar({
+        requisicoes: [requisicao(REQ_A), requisicao(REQ_B)],
+        pdfs: { [REQ_A]: [pdf(['333333303', '111111101'])] },
+      })
+      repo.semente(null, '111111101', REQ_B)
+
+      await buscar()
+
+      expect(repo.elos()).toEqual({ '111111101': REQ_B })
+      expect(resumoDoPdf(log)).toMatchObject({ divergentes: 1 })
+    })
+
+    it('repetir a busca não regrava o elo', async () => {
+      const { repo, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['333333303', '222222202'])] } })
+      repo.semente(REQ_A, '333333303')
+      repo.semente(null, '222222202')
+      const gravar = vi.spyOn(repo, 'setPedidoDeOrigem')
+
+      await buscar()
+      await buscar()
+
+      expect(gravar).toHaveBeenCalledTimes(1)
+    })
+
+    it('a cache normal e a consulta administrativa servem o mesmo card fundido', async () => {
+      const { servico, aol, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['333333303', '222222202'])] } })
+      await buscar()
+      aol.listOrders.mockClear()
+
+      const daCache = await servico.fetchAndCacheExams(PACIENTE, CPF)
+      const doAdmin = await servico.readCachedExams(PACIENTE, CPF)
+
+      expect(daCache.source).toBe('cached')
+      expect(aol.listOrders).not.toHaveBeenCalled()
+      for (const exams of [daCache.exams, doAdmin]) {
+        expect(exams).toHaveLength(1)
+        expect(osNaTela(exams)).toEqual(['222222202', '333333303'])
+      }
+    })
+
+    it('o log da busca conta os elos gravados', async () => {
+      const { repo, log, buscar } = montar({ pdfs: { [REQ_A]: [pdf(['333333303', '222222202', '111111101'])] } })
+      repo.semente(null, '111111101')
+
+      await buscar()
+
+      expect(resumoDoPdf(log)).toMatchObject({ extrasPeloPdf: 1, elosGravados: 2 })
     })
   })
 
