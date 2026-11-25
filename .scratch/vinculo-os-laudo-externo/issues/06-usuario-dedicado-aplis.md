@@ -10,7 +10,7 @@ Tarefa humana, no cadastro de usuários do apLIS — não é de código. Não bl
 
 - [ ] Usuário criado no apLIS, exclusivo do LAB-HUB.
 - [ ] Permissões conferidas: lê as fotos da requisição (inclusive o tipo "Laudo EXTERNO"); inserir, alterar e excluir desligados.
-- [ ] Credenciais gravadas no ambiente de produção da API, fora do repositório.
+- [x] Credenciais gravadas no ambiente de produção da API, fora do repositório.
 - [x] A auditoria do ticket 01 roda com esse usuário e devolve o mesmo resultado que com o usuário de teste.
 - [ ] O uso do site interno foi combinado com o fornecedor do apLIS, junto do pedido para expor o tipo 14 na API de integração.
 
@@ -42,3 +42,9 @@ Contra a rodada de 24/11 (usuário de investigação):
 - A linha de identidade não é comparável: o script passou a aceitar nome + nascimento como segunda prova depois da rodada do ticket 01.
 
 Não conferido aqui: que inserir, alterar e excluir estão desligados para o usuário (a auditoria só lê; conferir no cadastro do apLIS). Antes de o login funcionar houve duas recusas por senha errada no `.env`.
+
+### 25/11/2026 — credenciais em produção
+
+As três `APLIS_WEB_*` estão no `.env` da raiz do repositório no VPS, que é o arquivo que o `docker-compose.yml` lê (`env_file: .env`). Conferido dentro do container, que foi recriado: as três definidas. Na primeira tentativa elas tinham ido para `apps/api/.env`, que o Docker não lê.
+
+`LAUDOS_OS_VIA_PDF` segue fora do `.env` de produção: o vínculo pelo PDF continua desligado e a API ainda não fez nenhum login no site a partir do VPS. A senha gravada lá não foi testada.
