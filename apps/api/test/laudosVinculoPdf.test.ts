@@ -103,6 +103,12 @@ class RepositorioEmMemoria implements IExamResultRepository {
     linha.cached_at = new Date().toISOString()
   }
   async renewCachedAt(): Promise<void> {}
+  // Busca histórica já concluída: estes testes são da janela normal (a
+  // histórica tem os seus em laudosPrimeiroAcesso.test.ts).
+  async historicoJaBuscado(): Promise<boolean> {
+    return true
+  }
+  async marcarHistoricoBuscado(): Promise<void> {}
 }
 
 function requisicao(codigo: string, over: Partial<AplisRequisicao> = {}): AplisRequisicao {

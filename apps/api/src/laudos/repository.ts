@@ -126,6 +126,13 @@ export interface IExamResultRepository {
   saveResult(id: string, result: Laudo[]): Promise<void>
   /** Renova só o TTL — usado quando o conteúdo clínico não mudou. */
   renewCachedAt(id: string): Promise<void>
+  /**
+   * Se a busca histórica do paciente (primeiro acesso, janela longa) já foi
+   * CONCLUÍDA. Fica em `pacientes.laudos_historico_em`.
+   */
+  historicoJaBuscado(pacienteId: string): Promise<boolean>
+  /** Registra que a busca histórica do paciente terminou sem falha de LIS. */
+  marcarHistoricoBuscado(pacienteId: string): Promise<void>
 }
 
 export class ExamResultRepository implements IExamResultRepository {
@@ -329,6 +336,32 @@ export class ExamResultRepository implements IExamResultRepository {
 
     if (error) {
       throw new DatabaseError('Falha ao renovar o cache do laudo', { id, cause: error })
+    }
+  }
+
+  // A marca mora em `pacientes`, e não em `exam_results`, porque o paciente sem
+  // exame nenhum também precisa dela: é exatamente quem não tem linha.
+  async historicoJaBuscado(pacienteId: string): Promise<boolean> {
+    const { data, error } = await supabase
+      .from('pacientes')
+      .select('laudos_historico_em')
+      .eq('id', pacienteId)
+      .maybeSingle()
+
+    if (error) {
+      throw new DatabaseError('Falha ao ler a marca da busca histórica', { pacienteId, cause: error })
+    }
+    return Boolean(data?.laudos_historico_em)
+  }
+
+  async marcarHistoricoBuscado(pacienteId: string): Promise<void> {
+    const { error } = await supabase
+      .from('pacientes')
+      .update({ laudos_historico_em: new Date().toISOString() })
+      .eq('id', pacienteId)
+
+    if (error) {
+      throw new DatabaseError('Falha ao gravar a marca da busca histórica', { pacienteId, cause: error })
     }
   }
 }

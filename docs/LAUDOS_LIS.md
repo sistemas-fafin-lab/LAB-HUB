@@ -110,6 +110,47 @@ uma navegação comum já faz várias chamadas por minuto.
 Se o volume incomodar, o passo seguinte é uma varredura compartilhada — uma
 listagem alimenta todos os pacientes — e não aumentar a concorrência por paciente.
 
+> Atualização de 25/11/2026: hoje a listagem sai com `nomPaciente` = CPF e o
+> ApLIS filtra no servidor (~0,3 s para 5 anos, medido). Quem continua sem
+> filtro por paciente é a listagem `orders/status` da AOL.
+
+## Busca histórica (primeiro acesso)
+
+A janela normal (`APLIS_PERIODO_DIAS`) só alcança exame recente. Quem cria a
+conta depois que o exame saiu dela não tinha cache para guardá-lo e via a lista
+vazia para sempre. Caso real (25/11/2026): requisições de 22 e 23/06, conta
+criada em 24/11. Os vínculos no ApLIS e na AOL estavam certos, só a janela
+deixava o exame de fora.
+
+Enquanto `pacientes.laudos_historico_em` for null, a varredura (`#varrerLis`)
+faz a busca histórica:
+
+- **ApLIS** com `APLIS_PERIODO_PRIMEIRO_ACESSO_DIAS` (padrão 1825, 5 anos).
+- **AOL** com a listagem normal mais janelas curtas `[pedido − 2 d, pedido + 30 d)`
+  em torno de cada requisição mais antiga que a janela normal
+  (`janelasDaAolHistorica`). As janelas que se tocam viram uma só. A AOL lista a
+  O.S. um dia depois do pedido, e a folga cobre remessa tardia. O fim da janela é
+  exclusivo (medido).
+- A marca só é gravada quando as listagens do ApLIS e da AOL responderam e
+  nenhuma requisição veio sem data legível. Em qualquer outro caso, a próxima
+  busca tenta de novo. Falha ao ler a marca resulta em busca histórica.
+- No caminho do cache, a busca histórica pendente dispara a revalidação em
+  background mesmo com o cache fresco. Se a AOL cair no primeiro acesso, a capa
+  do ApLIS já vira cache, e esperar o TTL esconderia o exame antigo por um dia.
+
+Limite conhecido: a busca histórica só procura O.S. perto de uma requisição do
+ApLIS. Uma O.S. antiga cujo `idOsLis` é o CPF, sem requisição correspondente no
+ApLIS, continua fora.
+
+A listagem da AOL para em `MAX_PAGINAS_ORDERS` (40) **sem avisar**. A janela
+normal de 90 dias já rendeu 572 O.S. (~36 páginas) em 25/11/2026, perto do teto.
+Por isso a janela normal não foi aumentada: com 180 dias, o teto cortou as O.S.
+de junho.
+
+As contas que já existiam também começam sem a marca e ganham a busca histórica
+uma vez, na próxima revalidação. Migration:
+`supabase/migrations/20261125150000_pacientes_laudos_historico.sql`.
+
 ## Vínculo da O.S. pelo PDF "Laudo EXTERNO" (desde 25/11/2026, atrás de flag)
 
 O portal só mostra valores quando sabe qual O.S. do Álvaro corresponde à
@@ -691,7 +732,7 @@ Duas ressalvas da fatia de teste:
 
 Variáveis em `apps/api/.env` — ver `.env.example` para a lista comentada:
 `APLIS_BASE_URL`, `APLIS_USUARIO`, `APLIS_SENHA`, `APLIS_PERIODO_DIAS`,
-`AOL_BASE_URL`, `AOL_IDAGENTE`, `AOL_SENHA`, `AOL_ENTIDADE`,
+`APLIS_PERIODO_PRIMEIRO_ACESSO_DIAS` (ver "Busca histórica"), `AOL_BASE_URL`, `AOL_IDAGENTE`, `AOL_SENHA`, `AOL_ENTIDADE`,
 `EXAM_CACHE_TTL_HOURS`, `LAUDOS_SOMENTE_ALVARO` (ver "Corte de exibição"),
 `LAUDOS_OS_VIA_PDF`, `APLIS_WEB_URL`, `APLIS_WEB_USUARIO`, `APLIS_WEB_SENHA`
 (ver "Vínculo da O.S. pelo PDF").

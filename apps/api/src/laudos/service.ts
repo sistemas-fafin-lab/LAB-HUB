@@ -19,7 +19,7 @@ import { FONTE_QUE_VENCE, pedidoDaOs, type PedidoDaOs } from './divergencia.js'
 import type { OsDoLaudoExterno } from './laudoExterno.js'
 import { cpfValido } from '../lib/cpf.js'
 import { booleanEnv, numeroEnv } from '../lib/env.js'
-import { idadeEmAnos, type PerfilPaciente } from './mapperHelpers.js'
+import { idadeEmAnos, parseData, type PerfilPaciente } from './mapperHelpers.js'
 import type { ILaudosExternos } from './vinculoPdf.js'
 import { emParalelo } from '../lib/concorrencia.js'
 
@@ -31,6 +31,18 @@ const TTL_MS = numeroEnv('EXAM_CACHE_TTL_HOURS', 24) * 60 * 60 * 1000
 // nenhum sinal. Errar para cima só custa tempo de varredura (~47s em 90 dias),
 // que o cache SWR amortiza. Mínimo 1: zero dias não descobriria nada.
 export const PERIODO_DIAS = numeroEnv('APLIS_PERIODO_DIAS', 90, 1)
+
+// Janela da busca HISTÓRICA: a do primeiro acesso, enquanto ela não tiver sido
+// concluída (marca em `pacientes.laudos_historico_em`). Sem ela, quem cria a
+// conta mais de PERIODO_DIAS depois do exame nunca o vê — não havia cache para
+// guardá-lo quando ainda estava na janela (caso real de 25/11/2026: exames de
+// junho, conta criada em novembro).
+//
+// Longa sai barato só no ApLIS, que filtra pelo CPF (~0,3 s para 5 anos,
+// medido em 25/11/2026). A AOL não filtra por paciente, então NÃO é varrida
+// com esta janela: é consultada em janelas curtas em torno de cada requisição
+// antiga (ver janelasDaAolHistorica). Nunca menor que a janela normal.
+export const PERIODO_PRIMEIRO_ACESSO_DIAS = numeroEnv('APLIS_PERIODO_PRIMEIRO_ACESSO_DIAS', 1825, PERIODO_DIAS)
 
 // Quantas requisições têm os PDFs lidos ao mesmo tempo no site interno do
 // apLIS. Baixo de propósito: é o site que a recepção usa, sem contrato de
@@ -97,6 +109,59 @@ export function saoListasIguais(anterior: Laudo[] | null, novos: Laudo[]): boole
 
 export function isCacheStale(cachedAt: string, ttlMs = TTL_MS): boolean {
   return Date.now() - new Date(cachedAt).getTime() > ttlMs
+}
+
+// ---------------------------------------------------------------------------
+// Busca histórica na AOL
+// ---------------------------------------------------------------------------
+
+// Quantos dias antes e depois do pedido a O.S. pode aparecer na listagem da
+// AOL. Medido em 25/11/2026: ela lista a O.S. um dia depois do pedido (a
+// remessa sai no dia seguinte). A folga para depois cobre remessa tardia
+// (urina e fezes chegam depois do sangue) e erra para o lado largo: perder a
+// O.S. aqui é perdê-la para sempre (a marca fecha a busca), enquanto uma
+// janela mais longa só custa algumas páginas a mais, uma vez por paciente.
+const AOL_DIAS_ANTES_DO_PEDIDO = 2
+const AOL_DIAS_DEPOIS_DO_PEDIDO = 30
+
+const somarDias = (d: Date, dias: number): Date => new Date(d.getTime() + dias * 86_400_000)
+const diaIso = (d: Date): string => d.toISOString().slice(0, 10)
+
+/**
+ * As janelas curtas `[início, fim)` da listagem da AOL que cobrem as
+ * requisições pedidas ANTES de `inicioDaJanelaNormal` — que a listagem normal
+ * não alcança. Janelas que se tocam viram uma só, e nenhuma invade a janela
+ * normal (que já foi listada). O fim é exclusivo, como na AOL.
+ *
+ * Requisição sem data legível não gera janela — sem data não há onde
+ * procurar, e a listagem inteira de anos é justamente o custo que isto evita —
+ * mas é contada em `semData`, para quem chama não dar a busca por concluída.
+ */
+export function janelasDaAolHistorica(
+  requisicoes: readonly AplisRequisicao[],
+  inicioDaJanelaNormal: string,
+): { janelas: Array<[string, string]>; semData: number } {
+  const limite = new Date(`${inicioDaJanelaNormal}T00:00:00Z`)
+  const datas = requisicoes.map((r) => (r.data_solicitacao ? parseData(r.data_solicitacao) : null))
+  const semData = datas.filter((d) => d === null).length
+  const intervalos = datas
+    .filter((d): d is Date => d !== null && d < limite)
+    .map((d): [Date, Date] => {
+      const fim = somarDias(d, AOL_DIAS_DEPOIS_DO_PEDIDO)
+      return [somarDias(d, -AOL_DIAS_ANTES_DO_PEDIDO), fim < limite ? fim : limite]
+    })
+    .sort((a, b) => a[0].getTime() - b[0].getTime())
+
+  const unidas: Array<[Date, Date]> = []
+  for (const [ini, fim] of intervalos) {
+    const ultima = unidas.at(-1)
+    if (ultima && ini <= ultima[1]) {
+      if (fim > ultima[1]) ultima[1] = fim
+    } else {
+      unidas.push([ini, fim])
+    }
+  }
+  return { janelas: unidas.map(([ini, fim]) => [diaIso(ini), diaIso(fim)]), semData }
 }
 
 // ---------------------------------------------------------------------------
@@ -292,7 +357,13 @@ export class LaudoService {
         // Um único laudo vencido obriga a revalidar o conjunto: a tela mostra a
         // lista inteira, então não adianta metade estar em dia.
         const todosFrescos = cacheados.every((l) => (l.cached_at ? !isCacheStale(l.cached_at) : false))
-        if (!todosFrescos) this.#revalidarEmBackground(pacienteId, cpf, perfil, log)
+        // Busca histórica por concluir também revalida, com o cache fresco ou
+        // não: o primeiro acesso em que a AOL falhou já deixou cache (as
+        // requisições do ApLIS), e esperar o TTL esconderia o exame antigo por
+        // um dia inteiro.
+        if (!todosFrescos || (await this.#precisaDeBuscaHistorica(pacienteId, log))) {
+          this.#revalidarEmBackground(pacienteId, cpf, perfil, log)
+        }
         // A fusão roda ao SERVIR (não ao gravar): a linha do banco continua uma
         // por OS — unidade natural do cache — e o card do pedido com as suas
         // remessas órfãs é montado aqui, nos dois caminhos.
@@ -404,17 +475,20 @@ export class LaudoService {
     log?: FastifyBaseLogger,
   ): Promise<BuscaAoVivo> {
     // A mesma janela vale para as duas fontes: capa no ApLIS, valores na AOL.
+    // Tudo em UTC: é nele que as janelas históricas da AOL são cortadas, e as
+    // duas contas precisam cair no mesmo dia.
     const hoje = new Date()
-    const inicio = new Date()
-    inicio.setDate(inicio.getDate() - PERIODO_DIAS)
-    const periodoIni = inicio.toISOString().slice(0, 10)
-    const periodoFim = hoje.toISOString().slice(0, 10)
+    const periodoIni = diaIso(somarDias(hoje, -PERIODO_DIAS))
+    const periodoFim = diaIso(hoje)
+
+    const historico = await this.#precisaDeBuscaHistorica(pacienteId, log)
+    const inicioDoApLIS = historico ? diaIso(somarDias(hoje, -PERIODO_PRIMEIRO_ACESSO_DIAS)) : periodoIni
 
     // FASE 1 — descobrir quais requisições o paciente tem no ApLIS.
     let requisicoes: AplisRequisicao[] = []
     let falhaNaListagem: unknown = null
     try {
-      requisicoes = await this.aplis.requisicaoListar(cpf, periodoIni, periodoFim)
+      requisicoes = await this.aplis.requisicaoListar(cpf, inicioDoApLIS, periodoFim)
       log?.info({ pacienteId, total: requisicoes.length }, 'ApLIS requisicaoListar OK')
     } catch (err) {
       if (err instanceof ValidationError) throw err
@@ -456,6 +530,17 @@ export class LaudoService {
       // ApLIS — por isso a falha é guardada, não só logada.
       falhaAol = err
       log?.warn({ pacienteId, err }, 'AOL orders/status falhou — descoberta de OS pulada')
+    }
+
+    // FASE 2.1b — busca histórica: as O.S. das requisições mais antigas que a
+    // janela normal. Falha aqui não descarta as O.S. da janela normal; só deixa
+    // a busca histórica por concluir, para a próxima tentar de novo.
+    let historicaCompleta = false
+    if (historico && !falhaAol) {
+      const extra = await this.#buscarOrdensHistoricas(pacienteId, requisicoes, periodoIni, log)
+      const vistas = new Set(ordens.map((o) => o.orderId))
+      ordens.push(...extra.ordens.filter((o) => !vistas.has(o.orderId)))
+      historicaCompleta = extra.completa
     }
 
     // O que o `idOsLis` afirma: só conta o que aponta requisição DESTE
@@ -602,6 +687,17 @@ export class LaudoService {
       await this.#gravarSeMudou(linha, grupo, log)
     }
 
+    // A busca histórica só conta como concluída se as duas listagens
+    // responderam: com qualquer uma em falha, uma O.S. antiga pode não ter sido
+    // descoberta, e marcar agora a esconderia para sempre. A falha no laudo de
+    // UMA linha (FASE 3) não importa aqui — a linha já existe e é refeita na
+    // próxima revalidação, com qualquer janela.
+    if (historico && historicaCompleta && !falhaNaListagem && !falhaAol) {
+      await this.repo
+        .marcarHistoricoBuscado(pacienteId)
+        .catch((err) => log?.warn({ pacienteId, err }, 'Marca da busca histórica não gravada — será refeita'))
+    }
+
     // A falha do ApLIS vem primeiro: sem a listagem dele não há nem o que
     // enriquecer, então ela explica melhor uma tela vazia do que a da AOL.
     // Quem transforma isto em erro HTTP é fetchAndCacheExams — ver lá o porquê.
@@ -609,6 +705,50 @@ export class LaudoService {
       // Mesma ordenação do caminho cacheado (findByPaciente): mais recente primeiro.
       laudos: laudos.sort((a, b) => (b.data_emissao ?? '').localeCompare(a.data_emissao ?? '')),
       falha: falhaNaListagem ?? falhaAol,
+    }
+  }
+
+  /**
+   * As O.S. da AOL nas janelas curtas em torno das requisições antigas.
+   * `completa` diz se dá para dar a busca histórica por concluída. Não dá
+   * quando a AOL falhou, e não dá quando alguma requisição veio sem data
+   * legível: sem data não há onde procurar a O.S. dela, e marcar agora a
+   * esconderia para sempre. Esse paciente repete a busca histórica, que sem
+   * janela nenhuma custa só a listagem do ApLIS.
+   *
+   * A falha não sobe para `falha`: as O.S. da janela normal seguem valendo, e
+   * uma lista vazia aqui não é "não conseguimos consultar" — a janela normal
+   * respondeu.
+   */
+  async #buscarOrdensHistoricas(
+    pacienteId: string,
+    requisicoes: readonly AplisRequisicao[],
+    inicioDaJanelaNormal: string,
+    log?: FastifyBaseLogger,
+  ): Promise<{ ordens: AolOrderRef[]; completa: boolean }> {
+    const { janelas, semData } = janelasDaAolHistorica(requisicoes, inicioDaJanelaNormal)
+    const ordens: AolOrderRef[] = []
+    try {
+      for (const [ini, fim] of janelas) ordens.push(...(await this.aol.listOrders(ini, fim)))
+    } catch (err) {
+      log?.warn({ pacienteId, err }, 'AOL busca histórica falhou — fica para a próxima busca')
+      return { ordens, completa: false }
+    }
+    if (semData > 0) {
+      log?.warn({ pacienteId, semData }, 'Busca histórica: requisição sem data legível — fica por concluir')
+    }
+    log?.info({ pacienteId, janelas: janelas.length }, 'AOL busca histórica OK')
+    return { ordens, completa: semData === 0 }
+  }
+
+  // Falha ao ler a marca erra para o lado de buscar: a busca histórica custa
+  // alguns segundos a mais, e pulá-la pode esconder exame para sempre.
+  async #precisaDeBuscaHistorica(pacienteId: string, log?: FastifyBaseLogger): Promise<boolean> {
+    try {
+      return !(await this.repo.historicoJaBuscado(pacienteId))
+    } catch (err) {
+      log?.warn({ pacienteId, err }, 'Marca da busca histórica ilegível — fazendo a busca histórica')
+      return true
     }
   }
 

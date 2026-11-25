@@ -18,7 +18,7 @@ const MESES_EXTENSO = [
 
 // Os LIS misturam formatos: o ApLIS manda "12/05/2026 14:12" e a AOL manda ISO.
 // Tudo é lido em UTC para a data não escorregar um dia por fuso.
-function parseData(bruta: string): Date | null {
+export function parseData(bruta: string): Date | null {
   if (!bruta) return null
 
   const br = bruta.match(/^(\d{2})\/(\d{2})\/(\d{4})/)

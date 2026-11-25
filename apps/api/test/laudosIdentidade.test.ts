@@ -55,6 +55,9 @@ function supaHandler(cenario: Cenario = {}): SupaHandler {
           cpf_enc: cifrar(CPF, aadDe('pacientes', 'cpf', 'pac-1')),
           data_nascimento: '1990-01-01',
           sexo: 'M',
+          // Busca histórica já concluída: estes testes são do caminho normal
+          // (a histórica tem os seus em laudosPrimeiroAcesso.test.ts).
+          laudos_historico_em: '2026-11-01T00:00:00Z',
         },
         error: null,
       }
