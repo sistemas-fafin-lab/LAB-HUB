@@ -8,8 +8,8 @@ Tarefa humana, no cadastro de usuários do apLIS — não é de código. Não bl
 
 **Status:** ready-for-human
 
-- [ ] Usuário criado no apLIS, exclusivo do LAB-HUB.
-- [ ] Permissões conferidas: lê as fotos da requisição (inclusive o tipo "Laudo EXTERNO"); inserir, alterar e excluir desligados.
+- [x] Usuário criado no apLIS, exclusivo do LAB-HUB.
+- [x] Permissões conferidas: lê as fotos da requisição (inclusive o tipo "Laudo EXTERNO"); inserir, alterar e excluir desligados.
 - [x] Credenciais gravadas no ambiente de produção da API, fora do repositório.
 - [x] A auditoria do ticket 01 roda com esse usuário e devolve o mesmo resultado que com o usuário de teste.
 - [ ] O uso do site interno foi combinado com o fornecedor do apLIS, junto do pedido para expor o tipo 14 na API de integração.
@@ -48,3 +48,9 @@ Não conferido aqui: que inserir, alterar e excluir estão desligados para o usu
 As três `APLIS_WEB_*` estão no `.env` da raiz do repositório no VPS, que é o arquivo que o `docker-compose.yml` lê (`env_file: .env`). Conferido dentro do container, que foi recriado: as três definidas. Na primeira tentativa elas tinham ido para `apps/api/.env`, que o Docker não lê.
 
 `LAUDOS_OS_VIA_PDF` segue fora do `.env` de produção: o vínculo pelo PDF continua desligado e a API ainda não fez nenhum login no site a partir do VPS. A senha gravada lá não foi testada.
+
+### 25/11/2026 — usuário e permissões
+
+Confirmado pelo responsável: o usuário é exclusivo do LAB-HUB e, no cadastro do apLIS, inserir, alterar e excluir estão desligados. A leitura dos anexos tipo 14 está provada pela auditoria acima; a ausência de gravação vale pela conferência no cadastro, não por teste (a API não tem função de gravação para tentar).
+
+Falta só o item do fornecedor. O ticket segue aberto por ele.
