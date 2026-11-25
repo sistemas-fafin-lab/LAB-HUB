@@ -142,10 +142,12 @@ Limite conhecido: a busca histórica só procura O.S. perto de uma requisição 
 ApLIS. Uma O.S. antiga cujo `idOsLis` é o CPF, sem requisição correspondente no
 ApLIS, continua fora.
 
-A listagem da AOL para em `MAX_PAGINAS_ORDERS` (40) **sem avisar**. A janela
-normal de 90 dias já rendeu 572 O.S. (~36 páginas) em 25/11/2026, perto do teto.
-Por isso a janela normal não foi aumentada: com 180 dias, o teto cortou as O.S.
-de junho.
+A listagem da AOL para em `MAX_PAGINAS_ORDERS` (40) e corta o resto. Não vira
+erro, mas sai um `warn` no log, "AOL orders/status: teto de páginas atingido",
+com o período e quantas O.S. foram lidas. Se ele aparecer, exame recente está
+sumindo da tela. A janela normal de 90 dias já rendeu 572 O.S. (~36 páginas) em
+25/11/2026, perto do teto. Por isso a janela normal não foi aumentada: com 180
+dias, o teto cortou as O.S. de junho.
 
 As contas que já existiam também começam sem a marca e ganham a busca histórica
 uma vez, na próxima revalidação. Migration:

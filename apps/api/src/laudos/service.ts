@@ -523,7 +523,7 @@ export class LaudoService {
     let ordens: AolOrderRef[] = []
     let falhaAol: unknown = null
     try {
-      ordens = await this.aol.listOrders(periodoIni, periodoFim)
+      ordens = await this.aol.listOrders(periodoIni, periodoFim, log)
     } catch (err) {
       // A AOL é a fonte que SOBREVIVE ao corte de LAUDOS_SOMENTE_ALVARO. Se ela
       // cair, o paciente pode acabar com a lista vazia mesmo tendo laudo no
@@ -729,7 +729,7 @@ export class LaudoService {
     const { janelas, semData } = janelasDaAolHistorica(requisicoes, inicioDaJanelaNormal)
     const ordens: AolOrderRef[] = []
     try {
-      for (const [ini, fim] of janelas) ordens.push(...(await this.aol.listOrders(ini, fim)))
+      for (const [ini, fim] of janelas) ordens.push(...(await this.aol.listOrders(ini, fim, log)))
     } catch (err) {
       log?.warn({ pacienteId, err }, 'AOL busca histórica falhou — fica para a próxima busca')
       return { ordens, completa: false }

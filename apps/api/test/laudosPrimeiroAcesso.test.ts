@@ -194,7 +194,7 @@ describe('busca histórica no primeiro acesso', () => {
     expect(exams.map((e) => e.codigo_os)).toEqual(['383000001'])
     // A AOL NÃO é varrida com a janela longa — só a normal e a curta em torno
     // do pedido antigo.
-    expect(aol.listOrders.mock.calls).toEqual([
+    expect(aol.listOrders.mock.calls.map(([ini, fim]) => [ini, fim])).toEqual([
       ['2026-08-27', '2026-11-25'],
       ['2026-06-21', '2026-07-23'],
     ])
@@ -213,7 +213,7 @@ describe('busca histórica no primeiro acesso', () => {
 
     await buscar()
 
-    expect(aol.listOrders.mock.calls).toEqual([
+    expect(aol.listOrders.mock.calls.map(([ini, fim]) => [ini, fim])).toEqual([
       ['2026-08-27', '2026-11-25'],
       ['2025-03-08', '2025-04-09'],
       ['2026-06-20', '2026-07-23'],

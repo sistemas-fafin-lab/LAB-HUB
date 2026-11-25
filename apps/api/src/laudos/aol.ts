@@ -1,3 +1,4 @@
+import type { FastifyBaseLogger } from 'fastify'
 import { XMLParser } from 'fast-xml-parser'
 import type { AolAnalito, AolExam } from './types.js'
 import { IntegrationError, ValidationError } from './errors.js'
@@ -345,7 +346,7 @@ const MAX_PAGINAS_ORDERS = 40
 
 export interface IAolService {
   fetchExam(codigoOs: string): Promise<AolExam[]>
-  listOrders(dataInicial: string, dataFinal: string): Promise<AolOrderRef[]>
+  listOrders(dataInicial: string, dataFinal: string, log?: FastifyBaseLogger): Promise<AolOrderRef[]>
 }
 
 export class AolService implements IAolService {
@@ -417,8 +418,12 @@ export class AolService implements IAolService {
    * entidade no período. Serve para a fatia de teste; em produção precisa virar
    * um job de fundo que varre uma vez e alimenta um índice compartilhado entre
    * pacientes (ver docs/LAUDOS_LIS.md).
+   *
+   * Para em MAX_PAGINAS_ORDERS mesmo que a AOL ainda tenha páginas. O corte não
+   * vira erro (as O.S. lidas seguem valendo), mas vira aviso no `log`: o que
+   * ficou para trás são O.S. de paciente que somem da tela sem rastro.
    */
-  async listOrders(dataInicial: string, dataFinal: string): Promise<AolOrderRef[]> {
+  async listOrders(dataInicial: string, dataFinal: string, log?: FastifyBaseLogger): Promise<AolOrderRef[]> {
     if (!dataInicial || !dataFinal) {
       throw new ValidationError('período é obrigatório', { dataInicial, dataFinal })
     }
@@ -475,10 +480,15 @@ export class AolService implements IAolService {
         }
       }
 
-      if (!corpo.hasNext || !corpo.nextCursor) break
+      if (!corpo.hasNext || !corpo.nextCursor) return ordens
       cursor = corpo.nextCursor
     }
 
+    // Só chega aqui quem saiu pelo teto com a AOL ainda dizendo que há mais.
+    log?.warn(
+      { dataInicial, dataFinal, paginas: MAX_PAGINAS_ORDERS, ordens: ordens.length },
+      'AOL orders/status: teto de páginas atingido — listagem cortada, O.S. do período podem estar faltando',
+    )
     return ordens
   }
 }
