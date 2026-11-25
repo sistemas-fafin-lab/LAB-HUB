@@ -2,6 +2,7 @@ import { AolService } from './aol.js'
 import { AplisService } from './aplis.js'
 import { AplisSiteService, lerConfigAplisSite } from './aplisSite.js'
 import { ExamResultRepository } from './repository.js'
+import { LaudoOriginalService } from './laudoOriginal.js'
 import { LaudoService } from './service.js'
 import { LaudosExternosDoSite } from './vinculoPdf.js'
 
@@ -15,12 +16,14 @@ import { LaudosExternosDoSite } from './vinculoPdf.js'
 // reaproveitada entre as buscas.
 const configDoSite = lerConfigAplisSite()
 
-export const laudoService = new LaudoService(
-  new ExamResultRepository(),
-  new AplisService(),
-  new AolService(),
-  configDoSite ? new LaudosExternosDoSite(new AplisSiteService(configDoSite)) : null,
-)
+const repositorio = new ExamResultRepository()
+const aplis = new AplisService()
+const laudosExternos = configDoSite ? new LaudosExternosDoSite(new AplisSiteService(configDoSite)) : null
+
+export const laudoService = new LaudoService(repositorio, aplis, new AolService(), laudosExternos)
+
+/** "Baixar laudo original" — mesma sessão do site que a busca de laudos usa. */
+export const laudoOriginalService = new LaudoOriginalService(repositorio, aplis, laudosExternos)
 
 export { LaudoService } from './service.js'
 export { DatabaseError, IntegrationError, LaudoError, ValidationError } from './errors.js'

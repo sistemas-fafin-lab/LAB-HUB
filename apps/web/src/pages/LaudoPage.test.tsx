@@ -4,6 +4,7 @@ import { LaudoPage } from './LaudoPage'
 import { api } from '../lib/api'
 import { track } from '../lib/analytics'
 import { avisar } from '../lib/avisos'
+import { baixarArquivo } from '../lib/baixarArquivo'
 import { laudoToExam } from '../lib/mappers'
 import type { Laudo, LaudoPainel } from '@lab-hub/shared'
 
@@ -21,7 +22,10 @@ const sessao = vi.hoisted(() => ({
 const flags = vi.hoisted(() => ({ enviarAoMedico: false }))
 
 vi.mock('../lib/usePaciente', () => ({ usePaciente: () => sessao }))
-vi.mock('../lib/api', () => ({ api: { declaracao: vi.fn() } }))
+vi.mock('../lib/api', () => ({
+  api: { declaracao: vi.fn(), laudosOriginais: vi.fn(), laudoOriginalPdf: vi.fn() },
+}))
+vi.mock('../lib/baixarArquivo', () => ({ baixarArquivo: vi.fn() }))
 vi.mock('../lib/analytics', () => ({ track: vi.fn() }))
 vi.mock('../lib/avisos', () => ({ avisar: vi.fn() }))
 vi.mock('../lib/flags', async (importOriginal) => ({
@@ -464,6 +468,112 @@ describe('declaração sem a folha', () => {
     render(<LaudoPage exam={{ ...laudoToExam(laudo()), declaracaoUrl: 'decl/1.pdf' }} onBack={() => {}} />)
 
     expect(screen.getByRole('button', { name: 'Laudo original' })).toBeTruthy()
+  })
+})
+
+describe('baixar laudo original (PDF do laboratório de apoio)', () => {
+  const REQ = '0040000000001'
+  const PDF = new Blob(['%PDF-1.4'], { type: 'application/pdf' })
+  const abre = (over: Partial<Laudo> = { laudo_original_requisicao: REQ }) =>
+    render(<LaudoPage exam={laudoToExam(laudo(over))} onBack={() => {}} />)
+  const botao = () => screen.getByRole('button', { name: 'Baixar laudo original' })
+
+  it('a ação só aparece quando a API marca o laudo com a requisição do original', () => {
+    abre({})
+
+    expect(screen.queryByRole('button', { name: 'Baixar laudo original' })).toBeNull()
+  })
+
+  it('com um PDF só, baixa direto', async () => {
+    vi.mocked(api.laudosOriginais).mockResolvedValue({ arquivos: [{ id: '501', retificacao: false }] })
+    vi.mocked(api.laudoOriginalPdf).mockResolvedValue(PDF)
+    abre()
+
+    fireEvent.click(botao())
+
+    await waitFor(() =>
+      expect(baixarArquivo).toHaveBeenCalledWith(`laudo-original-${REQ}.pdf`, PDF, 'application/pdf'),
+    )
+    expect(api.laudosOriginais).toHaveBeenCalledWith(REQ)
+    expect(api.laudoOriginalPdf).toHaveBeenCalledWith(REQ, '501')
+    expect(track).toHaveBeenCalledWith('laudo_download', { origem: 'laudo_original_lis' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('enquanto busca, o botão fica bloqueado', async () => {
+    vi.mocked(api.laudosOriginais).mockReturnValue(new Promise(() => {}))
+    abre()
+
+    fireEvent.click(botao())
+
+    await waitFor(() => expect(botao()).toHaveProperty('disabled', true))
+    fireEvent.click(botao())
+    expect(api.laudosOriginais).toHaveBeenCalledOnce()
+  })
+
+  it('com mais de um PDF, o paciente vê a lista e escolhe qual baixar', async () => {
+    vi.mocked(api.laudosOriginais).mockResolvedValue({
+      arquivos: [
+        { id: '501', retificacao: false },
+        { id: '502', retificacao: true },
+      ],
+    })
+    vi.mocked(api.laudoOriginalPdf).mockResolvedValue(PDF)
+    abre()
+
+    fireEvent.click(botao())
+
+    const caixa = await screen.findByRole('dialog')
+    expect(api.laudoOriginalPdf).not.toHaveBeenCalled()
+    expect(within(caixa).getByRole('button', { name: 'Laudo 1' })).toBeTruthy()
+
+    fireEvent.click(within(caixa).getByRole('button', { name: 'Laudo 2 (retificação)' }))
+
+    await waitFor(() =>
+      expect(baixarArquivo).toHaveBeenCalledWith(`laudo-original-${REQ}-2.pdf`, PDF, 'application/pdf'),
+    )
+    expect(api.laudoOriginalPdf).toHaveBeenCalledWith(REQ, '502')
+  })
+
+  it('site do laboratório fora do ar: mostra "indisponível no momento", sem erro técnico', async () => {
+    vi.mocked(api.laudosOriginais).mockRejectedValue(new Error('API 502: Bad Gateway'))
+    abre()
+
+    fireEvent.click(botao())
+
+    const aviso = await screen.findByRole('alert')
+    expect(aviso.textContent).toBe('O laudo original está indisponível no momento. Tente novamente mais tarde.')
+    expect(botao()).toHaveProperty('disabled', false)
+    expect(baixarArquivo).not.toHaveBeenCalled()
+  })
+
+  it('falha ao baixar o arquivo escolhido também vira "indisponível no momento"', async () => {
+    vi.mocked(api.laudosOriginais).mockResolvedValue({ arquivos: [{ id: '501', retificacao: false }] })
+    vi.mocked(api.laudoOriginalPdf).mockRejectedValue(new Error('409'))
+    abre()
+
+    fireEvent.click(botao())
+
+    expect((await screen.findByRole('alert')).textContent).toMatch(/indisponível no momento/)
+  })
+
+  it('requisição sem PDF anexado: diz que não há o documento, sem pedir para tentar de novo', async () => {
+    vi.mocked(api.laudosOriginais).mockResolvedValue({ arquivos: [] })
+    abre()
+
+    fireEvent.click(botao())
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Este laudo não tem o documento original do laboratório.',
+    )
+    expect(api.laudoOriginalPdf).not.toHaveBeenCalled()
+  })
+
+  it('não aparece no laudo de outro paciente aberto pela consulta administrativa', () => {
+    const exam = { ...laudoToExam(laudo({ laudo_original_requisicao: REQ })), somenteLeituraAdmin: true }
+    render(<LaudoPage exam={exam} onBack={() => {}} />)
+
+    expect(screen.queryByRole('button', { name: 'Baixar laudo original' })).toBeNull()
   })
 })
 

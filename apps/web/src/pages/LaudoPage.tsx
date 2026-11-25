@@ -1,11 +1,12 @@
 import { useMemo } from 'react'
-import { BackLink, Btn, EmptyState, FalhaAoCarregar, Node, Panel } from '../components/portal'
+import { BackLink, Btn, EmptyState, FalhaAoCarregar, MensagemDeErro, Modal, Node, Panel } from '../components/portal'
 import { LaudoDocumento } from '../components/laudo/LaudoDocumento'
 import { documentoDoExame } from '../components/laudo/modelo'
 import type { Exam } from '../lib/exame'
 import { track } from '../lib/analytics'
 import { baixarDeclaracao } from '../lib/declaracao'
 import { MOSTRAR_ENVIAR_AO_MEDICO } from '../lib/flags'
+import { useLaudoOriginal } from '../lib/useLaudoOriginal'
 import { usePaciente } from '../lib/usePaciente'
 
 interface LaudoPageProps {
@@ -46,6 +47,12 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
     void baixarDeclaracao(exam.id)
   }
 
+  // O mesmo documento para o laudo que veio dos LIS: o PDF do laboratório de
+  // apoio, buscado ao vivo pela API. Fora da consulta administrativa — ali o
+  // exame é de outro paciente, e a API só entrega o do titular da sessão.
+  const original = useLaudoOriginal(exam.somenteLeituraAdmin ? undefined : exam.requisicaoLaudoOriginal)
+  const ofereceOriginal = Boolean(exam.requisicaoLaudoOriginal) && !exam.somenteLeituraAdmin
+
   const exportar = () => {
     track('laudo_imprimir')
     window.print()
@@ -61,6 +68,11 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
               Laudo original
             </Btn>
           )}
+          {ofereceOriginal && (
+            <Btn variant="secondary" size="sm" icon="file-text" loading={original.carregando} onClick={original.iniciar}>
+              Baixar laudo original
+            </Btn>
+          )}
           {temFolha && MOSTRAR_ENVIAR_AO_MEDICO && (
             <Btn variant="secondary" size="sm" icon="send">
               Enviar ao médico
@@ -73,6 +85,34 @@ export function LaudoPage({ exam, onBack }: LaudoPageProps) {
           )}
         </div>
       </div>
+
+      {original.falha && (
+        <div className="lh-noprint mb-4">
+          <MensagemDeErro>{original.falha}</MensagemDeErro>
+        </div>
+      )}
+
+      <Modal
+        open={original.opcoes !== null}
+        onClose={original.fecharOpcoes}
+        title="Qual laudo você quer baixar?"
+        description="Este pedido tem mais de um laudo original emitido pelo laboratório."
+        width={420}
+      >
+        <div className="grid gap-2">
+          {original.opcoes?.map((opcao) => (
+            <Btn
+              key={opcao.id}
+              variant="secondary"
+              icon="file-text"
+              disabled={original.carregando}
+              onClick={() => original.escolher(opcao.id)}
+            >
+              {opcao.rotulo}
+            </Btn>
+          ))}
+        </div>
+      </Modal>
 
       {temFolha ? (
         <LaudoDocumento doc={doc} />

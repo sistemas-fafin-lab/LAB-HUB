@@ -1,7 +1,8 @@
-// Entrega um arquivo gerado no navegador (CSV, .ics) como download.
+// Entrega como download um arquivo gerado no navegador (CSV, .ics) ou recebido
+// da API já em memória (PDF do laudo original).
 
 /** Baixa `conteudo` como `nomeArquivo` e libera a URL temporária. */
-export function baixarArquivo(nomeArquivo: string, conteudo: string, tipo: string): void {
+export function baixarArquivo(nomeArquivo: string, conteudo: BlobPart, tipo: string): void {
   const url = URL.createObjectURL(new Blob([conteudo], { type: tipo }))
   const a = document.createElement('a')
   a.href = url

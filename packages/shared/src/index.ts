@@ -394,6 +394,11 @@ export interface Laudo {
   // como `cached_at`. Some no card fundido; sobra só na O.S. cujo pedido não
   // está na lista.
   codigo_lis_pedido?: string
+  // Requisição do ApLIS em que o laudo original (o PDF do laboratório de
+  // apoio) está anexado. Presente = a tela pode oferecer "baixar laudo
+  // original" (GET /laudos/requisicoes/:codigoLis/original). Injetado ao
+  // servir, como `cached_at`; ausente quando a API está com o recurso desligado.
+  laudo_original_requisicao?: string
   source: 'aol' | 'aplis' | 'merged'
   partial: boolean // true = faltou uma das fontes; o dado pode mudar
   cached_at?: string // ISO 8601 — quando este laudo foi cacheado
@@ -401,6 +406,12 @@ export interface Laudo {
 
 // GET /api/v1/laudos. `source` diz se veio do cache ou de uma busca ao vivo nos
 // LIS — útil para a tela sinalizar "atualizando…" numa revalidação em background.
+// GET /api/v1/laudos/requisicoes/:codigoLis/original — os laudos originais
+// anexados à requisição. Só o id: o PDF em si sai por `.../original/:id`.
+export interface LaudosOriginais {
+  arquivos: Array<{ id: string; retificacao: boolean }>
+}
+
 export interface RespostaLaudos {
   exams: Laudo[]
   source: 'cached' | 'live'

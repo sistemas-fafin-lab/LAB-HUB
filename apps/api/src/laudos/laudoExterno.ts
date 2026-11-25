@@ -193,20 +193,55 @@ export function extrairVinculoDoLaudoExterno(textoOuPaginas: string | string[]):
 }
 
 /**
+ * Os CPFs impressos em páginas que NÃO trazem O.S. nenhuma, só dígitos; `null`
+ * quando alguma ocorrência é ilegível.
+ *
+ * O vínculo não precisa disto — ele só fala das O.S. Quem ENTREGA o arquivo
+ * precisa: uma folha de outra pessoa sem o cabeçalho da O.S. não aparece em
+ * `os`, e sairia junto com as páginas do paciente.
+ */
+export function cpfsEmPaginasSemOs(paginas: string[]): string[] | null {
+  const cpfs = new Set<string>()
+  for (const pagina of paginas) {
+    if ([...pagina.matchAll(ROTULO_OS)].length > 0) continue
+    const cpfsDaPagina = valoresDoRotulo(pagina, ROTULO_CPF, CPF_VALIDO)
+    if (cpfsDaPagina === null) return null
+    for (const cpf of cpfsDaPagina) cpfs.add(cpf)
+  }
+  return [...cpfs]
+}
+
+/** O que a entrega do arquivo ao paciente confere (ver laudoOriginal.ts). */
+export interface LaudoExternoParaEntrega {
+  vinculo: VinculoLaudoExterno
+  /** Ver `cpfsEmPaginasSemOs`. */
+  cpfsSemOs: string[] | null
+}
+
+/** O texto de cada página; vazio se o arquivo não abre como PDF. Nunca lança. */
+async function paginasDoPdf(pdf: Uint8Array): Promise<string[]> {
+  try {
+    // Cópia: o pdf.js pode transferir o buffer para si, e quem chamou ainda
+    // pode precisar dos bytes (entregar o arquivo ao paciente, por exemplo).
+    const documento = await getDocumentProxy(pdf.slice(), { verbosity: 0 })
+    return (await extractText(documento, { mergePages: false })).text
+  } catch {
+    return []
+  }
+}
+
+/**
  * PDF em memória → O.S. (com o CPF de cada uma) e layout. Nunca lança: arquivo
  * corrompido, cifrado ou sem camada de texto devolve `layout: 'ilegivel'` sem
  * O.S., que para quem chama é só mais um jeito de ficar sem vínculo pelo PDF.
  */
 export async function lerLaudoExterno(pdf: Uint8Array): Promise<VinculoLaudoExterno> {
-  let paginas: string[]
-  try {
-    // Cópia: o pdf.js pode transferir o buffer para si, e quem chamou ainda
-    // pode precisar dos bytes (entregar o arquivo ao paciente, por exemplo).
-    const documento = await getDocumentProxy(pdf.slice(), { verbosity: 0 })
-    paginas = (await extractText(documento, { mergePages: false })).text
-  } catch {
-    paginas = []
-  }
-  if (!paginas.join('').trim()) return { os: [], layout: 'ilegivel' }
-  return extrairVinculoDoLaudoExterno(paginas)
+  return (await lerLaudoExternoParaEntrega(pdf)).vinculo
+}
+
+/** O mesmo que `lerLaudoExterno`, mais o que só a entrega do arquivo confere. */
+export async function lerLaudoExternoParaEntrega(pdf: Uint8Array): Promise<LaudoExternoParaEntrega> {
+  const paginas = await paginasDoPdf(pdf)
+  if (!paginas.join('').trim()) return { vinculo: { os: [], layout: 'ilegivel' }, cpfsSemOs: [] }
+  return { vinculo: extrairVinculoDoLaudoExterno(paginas), cpfsSemOs: cpfsEmPaginasSemOs(paginas) }
 }

@@ -1,4 +1,4 @@
-import type { AdminConsultaResultadosResposta, DocumentoUrl } from '@lab-hub/shared'
+import type { AdminConsultaResultadosResposta, DocumentoUrl, LaudosOriginais } from '@lab-hub/shared'
 import { supabase } from './supabase'
 import { avisaDoisFatoresPendente, avisaSessaoExpirada } from './sessao'
 
@@ -37,7 +37,8 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** Faz a chamada autenticada e devolve a resposta 2xx; o resto vira `ApiError`. */
+async function resposta(path: string, init?: RequestInit): Promise<Response> {
   // FormData define o próprio Content-Type COM o boundary. Fixar
   // 'application/json' aqui (como fazíamos p/ todo request) apagaria o boundary e
   // o parser multipart da API rejeitaria com "Boundary not found".
@@ -70,6 +71,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (res.status === 403 && codigo === 'DOIS_FATORES_PENDENTE') avisaDoisFatoresPendente()
     throw new ApiError(res.status, detail || mensagemPadrao(res.status), codigo)
   }
+  return res
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await resposta(path, init)
 
   // 204 não tem corpo (ex.: DELETE /documentos/:id) — res.json() lançaria
   // SyntaxError. Ninguém tinha esbarrado nisso: api.del existia mas nunca fora usado.
@@ -95,6 +101,17 @@ export const api = {
   // Signed URL temporária de um documento do paciente (bucket privado).
   documentoUrl: (id: string, download = false): Promise<DocumentoUrl> =>
     request<DocumentoUrl>(`/documentos/${id}/url${download ? '?download=true' : ''}`),
+  // Laudos originais (PDF do laboratório de apoio) anexados à requisição.
+  laudosOriginais: (codigoLis: string): Promise<LaudosOriginais> =>
+    request<LaudosOriginais>(`/laudos/requisicoes/${encodeURIComponent(codigoLis)}/original`, { cache: 'no-store' }),
+  // O PDF em si, em memória: a API não o guarda e o navegador não o cacheia.
+  laudoOriginalPdf: async (codigoLis: string, idAnexo: string): Promise<Blob> =>
+    (
+      await resposta(
+        `/laudos/requisicoes/${encodeURIComponent(codigoLis)}/original/${encodeURIComponent(idAnexo)}`,
+        { cache: 'no-store' },
+      )
+    ).blob(),
   // Consulta administrativa de dev: resultados FlowLab de outro paciente por
   // CPF (ver lib/admin.ts). `cpf` já normalizado para 11 dígitos.
   adminResultadosPorCpf: (cpf: string): Promise<AdminConsultaResultadosResposta> =>

@@ -47,6 +47,7 @@ export interface RegistroAcesso {
 export const ACOES = [
   'laudos.listar',
   'laudos.ler',
+  'laudo.original',
   'resultados.listar',
   'resultado.declaracao',
   'documento.url',

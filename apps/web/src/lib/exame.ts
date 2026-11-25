@@ -60,6 +60,10 @@ export interface Exam {
   metodo?: string // ex.: "Hexoquinase"
   laboratorio?: string // nome do laboratório executor
   groups?: ExamGroup[]
+  // Requisição em que o laudo original (PDF do laboratório de apoio) está
+  // anexado. Presente = dá para oferecer "baixar laudo original"; quem decide
+  // é a API (ver `Laudo.laudo_original_requisicao`).
+  requisicaoLaudoOriginal?: string
   // Quantos exames o pedido consolidado reúne — a lista mostra isto quando o
   // pedido não tem um médico responsável único.
   totalExames?: number

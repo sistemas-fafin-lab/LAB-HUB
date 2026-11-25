@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { extrairVinculoDoLaudoExterno, lerLaudoExterno } from '../src/laudos/laudoExterno.js'
+import {
+  cpfsEmPaginasSemOs,
+  extrairVinculoDoLaudoExterno,
+  lerLaudoExterno,
+  lerLaudoExternoParaEntrega,
+} from '../src/laudos/laudoExterno.js'
 
 // Textos SINTÉTICOS no formato que a leitura de PDF devolve para o "Laudo
 // EXTERNO" (uma linha por rótulo). Nenhum PDF nem dado real de paciente entra
@@ -280,6 +285,28 @@ function pdfSintetico(...paginas: string[][]): Uint8Array {
   return new TextEncoder().encode(corpo)
 }
 
+describe('cpfsEmPaginasSemOs — o que a entrega do arquivo confere além das O.S.', () => {
+  it('página com O.S. não entra: o CPF dela já responde pela O.S.', () => {
+    expect(cpfsEmPaginasSemOs([laudoAtual(), laudoAtual({ cpf: OUTRO_CPF })])).toEqual([])
+  })
+
+  it('devolve o CPF impresso numa página que não traz O.S. nenhuma', () => {
+    // A folha de outra pessoa, em outro layout, no meio do arquivo: nenhuma
+    // O.S. responde por ela, e sem isto ela sairia junto.
+    const folhaAvulsa = ['RELATÓRIO', 'Fulano de Tal', `CPF: ${OUTRO_CPF}`].join('\n')
+
+    expect(cpfsEmPaginasSemOs([laudoAtual(), folhaAvulsa])).toEqual(['11144477735'])
+  })
+
+  it('CPF ilegível numa página sem O.S. não deixa afirmar nada', () => {
+    expect(cpfsEmPaginasSemOs([laudoAtual(), 'CPF: 123'])).toBeNull()
+  })
+
+  it('página sem O.S. e sem CPF não acrescenta nada', () => {
+    expect(cpfsEmPaginasSemOs([laudoAtual(), 'Observações gerais'])).toEqual([])
+  })
+})
+
 describe('lerLaudoExterno', () => {
   it('lê O.S. e CPF de um PDF com texto no layout atual', async () => {
     const pdf = pdfSintetico([
@@ -325,5 +352,17 @@ describe('lerLaudoExterno', () => {
 
   it('PDF sem texto (digitalização) resulta em sem O.S.', async () => {
     expect(await lerLaudoExterno(pdfSintetico([], []))).toEqual({ os: [], layout: 'ilegivel' })
+  })
+
+  it('para a entrega, lê também o CPF das páginas sem O.S.', async () => {
+    const pdf = pdfSintetico(['OS: 111111101', 'CPF: 529.982.247-25'], ['CPF: 111.444.777-35'])
+
+    expect(await lerLaudoExternoParaEntrega(pdf)).toEqual({
+      vinculo: {
+        os: [{ numero: '111111101', cpf: '52998224725', nome: null, nascimento: null, paginas: 1 }],
+        layout: 'atual',
+      },
+      cpfsSemOs: ['11144477735'],
+    })
   })
 })

@@ -1,18 +1,43 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { supabase } from '../lib/supabase.js'
 import { authenticate } from '../middlewares/auth.js'
 import { decifrarCpfPaciente } from '../lib/crypto.js'
 import { registrarAcesso } from '../lib/auditoria.js'
-import { laudoService } from '../laudos/index.js'
+import { laudoOriginalService, laudoService } from '../laudos/index.js'
+import type { LaudoOriginalService } from '../laudos/laudoOriginal.js'
 import { laudosDaLinha } from '../laudos/repository.js'
 import { filtraPorFonte } from '../laudos/service.js'
-import { DatabaseError, IntegrationError, ValidationError } from '../laudos/errors.js'
+import {
+  DatabaseError,
+  EntregaRecusadaError,
+  IntegrationError,
+  NaoEncontradoError,
+  ValidationError,
+} from '../laudos/errors.js'
 
 // Laudos buscados nos LIS (ApLIS / AOL). Fonte independente da tabela
 // `resultados`, que continua sendo alimentada pelo webhook do FlowLab.
 // Ver docs/LAUDOS_LIS.md.
 
-export async function laudosRoutes(app: FastifyInstance): Promise<void> {
+// Formatos aceitos na URL do laudo original. Fora deles a resposta é o mesmo
+// 404 de "não existe": nenhum valor estranho chega ao apLIS nem ao cabeçalho.
+const CODIGO_REQUISICAO = /^[A-Za-z0-9-]{1,40}$/
+const ID_ANEXO = /^\d{1,20}$/
+
+const LAUDO_ORIGINAL_INDISPONIVEL = 'O laudo original está indisponível no momento. Tente novamente mais tarde.'
+
+// Tão apertado quanto o `?refresh=true` do GET /laudos: cada chamada vai ao
+// apLIS e ao site interno, que é o que a recepção usa e não tem contrato de carga.
+const LIMITE_LAUDO_ORIGINAL = { rateLimit: { max: 5, timeWindow: '1 minute' } }
+
+export interface LaudosRoutesOptions {
+  /** Só os testes passam: troca o serviço por um montado com dublês. */
+  laudoOriginal?: LaudoOriginalService
+}
+
+export async function laudosRoutes(app: FastifyInstance, opts: LaudosRoutesOptions = {}): Promise<void> {
+  const laudoOriginal = opts.laudoOriginal ?? laudoOriginalService
+
   // Erros do módulo de laudos → HTTP. O 502 é o que importa distinguir: LIS fora
   // do ar não é defeito nosso e a tela deve poder dizer "tente de novo".
   const comoHttpError = (err: unknown): Error => {
@@ -159,4 +184,87 @@ export async function laudosRoutes(app: FastifyInstance): Promise<void> {
 
     return visiveis
   })
+
+  // ---------------------------------------------------------------------------
+  // Laudo original — o PDF do laboratório de apoio, anexado à requisição no
+  // apLIS. Buscado ao vivo e nunca guardado (ver laudos/laudoOriginal.ts).
+  // ---------------------------------------------------------------------------
+
+  // Tudo que sai daqui é do paciente e de agora: nem o navegador nem um proxy
+  // podem guardar.
+  const semCache = (reply: FastifyReply): FastifyReply =>
+    reply.header('Cache-Control', 'no-store').header('Pragma', 'no-cache')
+
+  const naoEncontrado = (): Error => app.httpErrors.notFound('Laudo original não encontrado')
+
+  // O paciente nunca vê erro técnico: site fora do ar e entrega recusada têm a
+  // mesma mensagem. O status separa os dois para quem opera.
+  const comoErroDoOriginal = (err: unknown): Error => {
+    if (err instanceof NaoEncontradoError) return naoEncontrado()
+    if (err instanceof IntegrationError) return app.httpErrors.badGateway(LAUDO_ORIGINAL_INDISPONIVEL)
+    if (err instanceof EntregaRecusadaError) return app.httpErrors.conflict(LAUDO_ORIGINAL_INDISPONIVEL)
+    return comoHttpError(err)
+  }
+
+  // GET /laudos/requisicoes/:codigoLis/original — os laudos originais da
+  // requisição. Só ids: o nome que a recepção deu ao arquivo pode trazer o nome
+  // de alguém, e aqui o PDF ainda não foi conferido.
+  app.get(
+    '/laudos/requisicoes/:codigoLis/original',
+    { preHandler: authenticate, config: LIMITE_LAUDO_ORIGINAL },
+    async (request, reply) => {
+      const { codigoLis } = request.params as { codigoLis: string }
+      if (!CODIGO_REQUISICAO.test(codigoLis)) throw naoEncontrado()
+      const { cpf } = await dadosDoPaciente(request.pacienteId)
+
+      semCache(reply)
+      try {
+        return { arquivos: await laudoOriginal.listar(request.pacienteId, cpf, codigoLis) }
+      } catch (err) {
+        if (err instanceof IntegrationError) request.log.warn({ codigoLis, err }, 'Laudo original: listagem falhou')
+        throw comoErroDoOriginal(err)
+      }
+    },
+  )
+
+  // GET /laudos/requisicoes/:codigoLis/original/:idAnexo — o PDF.
+  app.get(
+    '/laudos/requisicoes/:codigoLis/original/:idAnexo',
+    { preHandler: authenticate, config: LIMITE_LAUDO_ORIGINAL },
+    async (request, reply) => {
+      const { codigoLis, idAnexo } = request.params as { codigoLis: string; idAnexo: string }
+      if (!CODIGO_REQUISICAO.test(codigoLis) || !ID_ANEXO.test(idAnexo)) throw naoEncontrado()
+      const { cpf } = await dadosDoPaciente(request.pacienteId)
+
+      semCache(reply)
+      let entrega: Awaited<ReturnType<LaudoOriginalService['baixar']>>
+      try {
+        entrega = await laudoOriginal.baixar(request.pacienteId, cpf, codigoLis, idAnexo, request.log)
+      } catch (err) {
+        if (err instanceof IntegrationError) {
+          request.log.warn({ codigoLis, idAnexo, err }, 'Laudo original: download falhou')
+        }
+        throw comoErroDoOriginal(err)
+      }
+
+      // Depois da conferência e antes do envio: a trilha conta o que foi entregue.
+      await registrarAcesso(request, {
+        atorTipo: 'paciente',
+        atorId: request.pacienteId,
+        titularId: request.pacienteId,
+        acao: 'laudo.original',
+        recursoTipo: 'exam_result',
+        recursoId: entrega.linhaId,
+      })
+      // A trilha guarda a linha do laudo; QUAL dos anexos saiu fica aqui.
+      request.log.info({ codigoLis, idAnexo, linhaId: entrega.linhaId }, 'Laudo original entregue')
+
+      return reply
+        .type('application/pdf')
+        // O nome é montado aqui, com o código já validado acima — o do arquivo
+        // no apLIS não é repetido.
+        .header('Content-Disposition', `attachment; filename="laudo-original-${codigoLis}.pdf"`)
+        .send(Buffer.from(entrega.pdf))
+    },
+  )
 }

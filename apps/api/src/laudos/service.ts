@@ -30,7 +30,7 @@ const TTL_MS = numeroEnv('EXAM_CACHE_TTL_HOURS', 24) * 60 * 60 * 1000
 // antigo que a janela e ainda não descoberto nunca entra, e some da tela sem
 // nenhum sinal. Errar para cima só custa tempo de varredura (~47s em 90 dias),
 // que o cache SWR amortiza. Mínimo 1: zero dias não descobriria nada.
-const PERIODO_DIAS = numeroEnv('APLIS_PERIODO_DIAS', 90, 1)
+export const PERIODO_DIAS = numeroEnv('APLIS_PERIODO_DIAS', 90, 1)
 
 // Quantas requisições têm os PDFs lidos ao mesmo tempo no site interno do
 // apLIS. Baixo de propósito: é o site que a recepção usa, sem contrato de
@@ -42,7 +42,7 @@ const CONCORRENCIA_PDF = 3
  * padrão; lida a cada chamada, como `LAUDOS_SOMENTE_ALVARO`, para dar para
  * desligar sem deploy se o site do apLIS mudar.
  */
-const osViaPdfLigada = (): boolean => booleanEnv('LAUDOS_OS_VIA_PDF', false)
+export const osViaPdfLigada = (): boolean => booleanEnv('LAUDOS_OS_VIA_PDF', false)
 
 // ---------------------------------------------------------------------------
 // Cache
@@ -273,12 +273,12 @@ export class LaudoService {
         // lista inteira de propósito: paciente que só tem laudo ApLIS tem cache
         // (é só que nada nele é exibível hoje), e cair no caminho ao vivo o
         // faria varrer os LIS a cada requisição para chegar na mesma lista vazia.
-        return { exams: LaudoService.#compoe(cacheados), source: 'cached' }
+        return { exams: this.#compoe(cacheados), source: 'cached' }
       }
     }
 
     const { laudos, falha } = await this.#buscarAoVivo(pacienteId, cpf, perfil, log)
-    const exams = LaudoService.#compoe(laudos)
+    const exams = this.#compoe(laudos)
 
     // A checagem vem DEPOIS do corte de fonte, e não dentro do #buscarAoVivo,
     // porque é aqui que se sabe o que o paciente realmente vai ver.
@@ -306,14 +306,24 @@ export class LaudoService {
    */
   async readCachedExams(pacienteId: string, cpf: string): Promise<Laudo[]> {
     const cacheados = await this.repo.findByPaciente(pacienteId, cpf)
-    return LaudoService.#compoe(cacheados)
+    return this.#compoe(cacheados)
   }
 
   // Fusão de pedidos + corte de fonte — a composição de exibição, num lugar
   // só para os três caminhos (cache normal, ao vivo, cache-only do admin)
   // não poderem divergir silenciosamente.
-  static #compoe(laudos: Laudo[]): Laudo[] {
-    return filtraPorFonte(fundirPedidos(laudos))
+  //
+  // Por último, a marca do "baixar laudo original" (ver laudoOriginal.ts): a
+  // requisição do apLIS em que o PDF está anexado. Entra ao SERVIR, como o
+  // corte de fonte, porque depende da flag e não do laudo — desligar a flag
+  // tira a ação da tela sem tocar no cache.
+  #compoe(laudos: Laudo[]): Laudo[] {
+    const visiveis = filtraPorFonte(fundirPedidos(laudos))
+    if (this.laudosExternos === null || !osViaPdfLigada()) return visiveis
+    return visiveis.map((laudo) => {
+      const requisicao = laudo.codigo_lis ?? laudo.codigo_lis_pedido
+      return requisicao ? { ...laudo, laudo_original_requisicao: requisicao } : laudo
+    })
   }
 
   // A resposta já foi enviada quando isto roda: falha aqui não pode derrubar a

@@ -132,5 +132,6 @@ export function laudoToExam(l: Laudo): Exam {
     ...(l.laboratorio?.nome ? { laboratorio: l.laboratorio.nome } : {}),
     ...(l.groups?.length ? { groups: l.groups } : {}),
     ...(totalExames ? { totalExames } : {}),
+    ...(l.laudo_original_requisicao ? { requisicaoLaudoOriginal: l.laudo_original_requisicao } : {}),
   }
 }

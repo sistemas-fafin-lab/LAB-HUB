@@ -58,10 +58,12 @@ apps/api/src/laudos/
   mapperHelpers.ts      datas, material, faixa de referência
   strategies/           AnalisesClinicas (quantitativo), LaudoTexto (citologia/
                         biópsia), Generic (fallback)
-  errors.ts             ValidationError / IntegrationError / DatabaseError
+  errors.ts             ValidationError / IntegrationError / DatabaseError /
+                        NaoEncontradoError / EntregaRecusadaError
   aplisSite.ts          cliente SOMENTE LEITURA do site interno do apLIS (anexo tipo 14)
   laudoExterno.ts       PDF "Laudo EXTERNO" → O.S., CPF e layout
   vinculoPdf.ts         fonte dos PDFs de uma requisição, vista pelo serviço
+  laudoOriginal.ts      "baixar laudo original": o anexo conferido e entregue ao paciente
   auditoriaOsPdf.ts     comparação PDF × idOsLis (script de auditoria)
 apps/api/src/routes/laudos.ts
 ```
@@ -314,6 +316,55 @@ paciente (até 3 requisições ao mesmo tempo). O log `Laudo EXTERNO: vínculo p
 PDF concluído` traz as contagens por busca; o `AOL orders/status OK` traz
 `vinculadasPeloIdOsLis`. É comparando os dois que se decide quando a varredura
 pode ser aposentada.
+
+### Baixar o laudo original (ticket 05)
+
+Com a mesma flag ligada (e as `APLIS_WEB_*` definidas), o paciente baixa o PDF
+do laboratório de apoio pela tela do `laudo`. Código em `laudos/laudoOriginal.ts`
+e `routes/laudos.ts`.
+
+| Rota | O que devolve |
+|---|---|
+| `GET /laudos/requisicoes/:codigoLis/original` | `{ arquivos: [{ id, retificacao }] }` — os anexos tipo 14 ativos da requisição |
+| `GET /laudos/requisicoes/:codigoLis/original/:idAnexo` | o PDF (`application/pdf`, `Content-Disposition: attachment`) |
+
+- **Quando a ação aparece.** O `GET /laudos` marca cada laudo que tem
+  requisição com `laudo_original_requisicao` (o `codigo_lis`, ou o
+  `codigo_lis_pedido` da O.S. em linha própria). A marca entra ao servir, como
+  o corte de fonte: desligar a flag tira o botão sem tocar no cache, e as duas
+  rotas passam a responder 404.
+- **Ao vivo, sem guardar.** A cada pedido a API acha o id interno da requisição
+  (`requisicaoListar` com o CPF do paciente), lista os anexos no site interno e
+  baixa o escolhido em memória. Nada vai para disco nem para o Storage, e as
+  respostas saem com `Cache-Control: no-store`.
+- **Três travas.** (1) A linha de `exam_results` é procurada com o
+  `paciente_id` do token e conferida pelo CPF gravado nela — a de outro
+  paciente responde 404, igual à que não existe. (2) O `idAnexo` da URL só
+  vale se estiver na listagem daquela requisição. (3) O CPF impresso no PDF é
+  conferido contra o do paciente em **todas** as O.S. do arquivo e em qualquer
+  página que traga CPF sem trazer O.S. (`cpfsEmPaginasSemOs`). Não é pega a
+  página sem O.S. e sem CPF em texto, como uma digitalização no meio do
+  arquivo.
+- **A conferência é mais dura que a do vínculo.** Aqui não vale a segunda prova
+  (nome + nascimento): `diverge` e `indisponivel` recusam a entrega (409) e
+  saem em log `error` "Laudo original: … entrega RECUSADA", com `pacienteId`,
+  `codigoLis`, `idAnexo`, `veredito` e `layout`. O arquivo sai inteiro para o
+  paciente e não há barreira depois dele; um PDF com uma O.S. de outro CPF não
+  é entregue mesmo que as demais sejam dele. Pela medição de 25/11/2026 (488
+  O.S.: 14 sem CPF, 3 com CPF diferente), cerca de 3% dos laudos ficam sem
+  download por essa regra.
+- **O nome do arquivo no apLIS não sai da API** — pode trazer o nome de alguém,
+  e a listagem acontece antes da conferência do PDF. O download se chama
+  `laudo-original-<requisição>.pdf`.
+- **Falhas.** Site ou apLIS fora do ar, e requisição fora da listagem: 502 com
+  "O laudo original está indisponível no momento…", a mesma frase do 409. A
+  tela mostra só isso.
+- **Janela da listagem.** Os `APLIS_PERIODO_DIAS` da busca, recuada até 30
+  dias antes da data mais antiga do laudo em cache quando ele é mais velho que
+  a janela.
+- **Trilha e limite.** Cada PDF entregue grava `laudo.original` em
+  `auditoria_acesso` (`recurso_id` = linha de `exam_results`); a listagem não
+  grava. Qual dos anexos saiu fica no log `Laudo original entregue` (`idAnexo`). As duas rotas têm o limite do `?refresh=true`: 5 por minuto.
 
 Spec e tickets: `.scratch/vinculo-os-laudo-externo/`.
 

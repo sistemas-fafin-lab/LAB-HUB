@@ -256,6 +256,25 @@ describe('vínculo da O.S. pelo PDF "Laudo EXTERNO"', () => {
       await expect(buscar()).resolves.toBeDefined()
       expect(repo.vinculos()).toEqual({ [REQ_A]: null })
     })
+
+    it('o laudo com requisição no apLIS sai marcado com a requisição do laudo original', async () => {
+      // É o que a tela usa para oferecer "baixar laudo original".
+      const { buscar } = montar({ pdfs: { [REQ_A]: [pdf(['111111111'])] } })
+
+      const { exams } = await buscar()
+
+      expect(exams.map((e) => e.laudo_original_requisicao)).toEqual([REQ_A])
+    })
+
+    it('flag desligada ou site sem credenciais: nenhum laudo oferece o original', async () => {
+      const ordens = [{ orderId: '111111101', idOsLis: REQ_A }]
+      const semFonte = montar({ comFonte: false, ordens })
+      expect((await semFonte.buscar()).exams.map((e) => e.laudo_original_requisicao)).toEqual([undefined])
+
+      vi.stubEnv('LAUDOS_OS_VIA_PDF', 'false')
+      const desligada = montar({ ordens })
+      expect((await desligada.buscar()).exams.map((e) => e.laudo_original_requisicao)).toEqual([undefined])
+    })
   })
 
   describe('uma O.S. na requisição', () => {

@@ -37,3 +37,10 @@ export class IntegrationError extends LaudoError {
 
 // Falha ao ler/gravar no Supabase → 500.
 export class DatabaseError extends LaudoError {}
+
+// O recurso não existe PARA ESTE PACIENTE → 404. Cobre o que não existe e o que
+// é de outra pessoa, de propósito indistinguíveis.
+export class NaoEncontradoError extends LaudoError {}
+
+// O arquivo existe, mas a conferência de identidade não deixou entregá-lo → 409.
+export class EntregaRecusadaError extends LaudoError {}
