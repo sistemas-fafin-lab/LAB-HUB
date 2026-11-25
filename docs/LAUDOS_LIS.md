@@ -35,6 +35,8 @@ GET /api/v1/laudos            (authenticate → pacienteId → cpf)
                         │
                         ├─ FASE 1  ApLIS requisicaoListar  → quais requisições existem
                         ├─ FASE 2  insertAwaiting          → registra as novas como pendentes
+                        ├─ FASE 2.2 PDF "Laudo EXTERNO"    → O.S. pelo anexo (se LAUDOS_OS_VIA_PDF)
+                        ├─ FASE 2.5 AOL orders/status      → O.S. pelo idOsLis digitado à mão
                         └─ FASE 3  por linha:
                              ├─ sem codigo_os → ApLIS requisicaoResultado → mapAplisResult
                              └─ com codigo_os → AOL fetchExam (+ApLIS) → estratégia do tipo
@@ -57,6 +59,10 @@ apps/api/src/laudos/
   strategies/           AnalisesClinicas (quantitativo), LaudoTexto (citologia/
                         biópsia), Generic (fallback)
   errors.ts             ValidationError / IntegrationError / DatabaseError
+  aplisSite.ts          cliente SOMENTE LEITURA do site interno do apLIS (anexo tipo 14)
+  laudoExterno.ts       PDF "Laudo EXTERNO" → O.S., CPF e layout
+  vinculoPdf.ts         fonte dos PDFs de uma requisição, vista pelo serviço
+  auditoriaOsPdf.ts     comparação PDF × idOsLis (script de auditoria)
 apps/api/src/routes/laudos.ts
 ```
 
@@ -101,6 +107,79 @@ uma navegação comum já faz várias chamadas por minuto.
 
 Se o volume incomodar, o passo seguinte é uma varredura compartilhada — uma
 listagem alimenta todos os pacientes — e não aumentar a concorrência por paciente.
+
+## Vínculo da O.S. pelo PDF "Laudo EXTERNO" (desde 25/11/2026, atrás de flag)
+
+O portal só mostra valores quando sabe qual O.S. do Álvaro corresponde à
+requisição do apLIS. Até aqui esse elo era só o `idOsLis`, digitado à mão pela
+recepção na AOL (FASE 2.5). O apLIS guarda, anexado à própria requisição, o PDF
+que o laboratório de apoio emitiu (imagem tipo 14, "Laudo EXTERNO"), e esse PDF
+traz a O.S. e o CPF em texto. Com `LAUDOS_OS_VIA_PDF=true`, a busca ao vivo lê
+esses anexos antes da varredura.
+
+**Regra que manda no desenho: o paciente vê todos os seus exames.** Um PDF pode
+trazer 2 ou 3 O.S. (pedido despachado em remessas), e a linha de `exam_results`
+guarda uma O.S. só. Então:
+
+- a O.S. **principal** — a que ocupa mais páginas entre as que são do paciente;
+  no empate, a que aparece antes — entra na linha da requisição, se ela ainda
+  não tiver O.S.;
+- cada uma das **outras** ganha linha própria, só com a O.S., como a FASE 2.5 já
+  faz com a O.S. achada pelo CPF. Sai como card do Álvaro; funde-se ao card do
+  pedido quando a data de coleta coincide (`fundirPedidosPorColeta`). O elo
+  explícito que funde sempre é o ticket 03 da spec;
+- por isso **todas** as requisições do paciente são lidas, e não só as que
+  estão sem O.S.: a que já foi vinculada pelo `idOsLis` também pode ter outras
+  O.S. no PDF;
+- com a flag ligada, a FASE 2.5 também deixa de descartar a O.S. cujo `idOsLis`
+  aponta uma requisição já ocupada por outra O.S.: ela entra como linha própria.
+
+O que nunca acontece: sobrescrever a O.S. de uma linha; copiar para uma
+requisição a O.S. que já está em outra do mesmo paciente (é logado como
+divergência); mostrar erro ao paciente por falha do site.
+
+**Identidade, por O.S.** Cada O.S. responde pelo CPF impresso nas páginas em que
+ela aparece, conferido por `conferirCpf` contra o paciente do token, com falha
+fechada: `diverge` (log em `error`) e `indisponivel` descartam aquela O.S. Não
+é por arquivo porque um mesmo PDF já veio com O.S. de pessoas diferentes
+(25/11/2026: duas O.S. do paciente e uma terceira, a maior, com outro CPF). A
+barreira sobre o payload da AOL continua valendo depois, mas ela sozinha não
+bastaria: a AOL muitas vezes não devolve CPF.
+
+**O site interno não é API do fornecedor** (`/areas/shared/imagem.php`; a API de
+integração só entrega os tipos 1 e 5). Pode mudar sem aviso: toda falha vira
+log e a varredura por `idOsLis` segue cobrindo. O cliente só lista e baixa —
+nenhuma função de gravação existe em `aplisSite.ts` — e, depois de um login
+recusado, espera 10 minutos (recusas seguidas ativam captcha para todos que
+usam o mesmo usuário do apLIS). O PDF é lido em memória e descartado.
+
+**Medição** (24/11/2026, 398 requisições de Medicina Laboratorial em 80 dias,
+`scripts/auditar-vinculos.ts --os-pdf`): 396 com O.S. pelo PDF, 35 delas sem
+O.S. nenhuma pelo `idOsLis`; 407 PDFs, todos no layout atual, 60 com mais de
+uma O.S.; CPF conferiu em 400, divergiu em 1 e não saiu em 6; 490 O.S. no
+total — 354 iguais nas duas fontes, 103 só no PDF, 17 só no `idOsLis`, 16 com
+as fontes apontando requisições diferentes.
+
+**Limites conhecidos.**
+
+- Desligar a flag para de ler PDFs, mas não desfaz o que já foi gravado: a O.S.
+  posta na linha de uma requisição continua lá, e as linhas próprias também.
+- A O.S. que entra em linha própria por causa do `idOsLis` (requisição já
+  ocupada) tem a mesma garantia de identidade de qualquer O.S. vinda do
+  `idOsLis`: só a barreira sobre o payload da AOL, que deixa passar quando a AOL
+  não devolve CPF. As que vêm do PDF passaram antes pela conferência fechada.
+- "Já existe essa O.S.? então insere" não é transação. Duas buscas ao vivo do
+  mesmo paciente no mesmo processo são fundidas numa só (`#buscasEmAndamento`);
+  com mais de uma instância da API seria preciso unicidade de paciente + O.S.
+  no banco, que hoje não existe.
+
+Cada busca ao vivo passa a custar uma listagem e um download por requisição do
+paciente (até 3 requisições ao mesmo tempo). O log `Laudo EXTERNO: vínculo pelo
+PDF concluído` traz as contagens por busca; o `AOL orders/status OK` traz
+`vinculadasPeloIdOsLis`. É comparando os dois que se decide quando a varredura
+pode ser aposentada.
+
+Spec e tickets: `.scratch/vinculo-os-laudo-externo/`.
 
 ## Corte de exibição: só o Álvaro (desde 28/07/2026)
 
@@ -424,6 +503,8 @@ Duas ressalvas da fatia de teste:
 Variáveis em `apps/api/.env` — ver `.env.example` para a lista comentada:
 `APLIS_BASE_URL`, `APLIS_USUARIO`, `APLIS_SENHA`, `APLIS_PERIODO_DIAS`,
 `AOL_BASE_URL`, `AOL_IDAGENTE`, `AOL_SENHA`, `AOL_ENTIDADE`,
-`EXAM_CACHE_TTL_HOURS`, `LAUDOS_SOMENTE_ALVARO` (ver "Corte de exibição").
+`EXAM_CACHE_TTL_HOURS`, `LAUDOS_SOMENTE_ALVARO` (ver "Corte de exibição"),
+`LAUDOS_OS_VIA_PDF`, `APLIS_WEB_URL`, `APLIS_WEB_USUARIO`, `APLIS_WEB_SENHA`
+(ver "Vínculo da O.S. pelo PDF").
 
 Migration: `supabase/migrations/20260721120000_exam_results_lis.sql`.

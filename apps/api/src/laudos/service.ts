@@ -5,10 +5,11 @@ import type { IExamResultRepository } from './repository.js'
 import type { AolExam, AplisExam, AplisRequisicao, ExamResultRow, Laudo } from './types.js'
 import { consolidaLaudosDaOs, fundirPedidosPorColeta, mapAplisResult, mapExamResult } from './mappers.js'
 import { DatabaseError, ValidationError } from './errors.js'
-import { conferirCpf, deveBloquear } from './identidade.js'
+import { conferirCpf, deveBloquear, type Veredito } from './identidade.js'
 import { cpfValido } from '../lib/cpf.js'
 import { booleanEnv, numeroEnv } from '../lib/env.js'
 import { idadeEmAnos, type PerfilPaciente } from './mapperHelpers.js'
+import { emParalelo, type ILaudosExternos } from './vinculoPdf.js'
 
 const TTL_MS = numeroEnv('EXAM_CACHE_TTL_HOURS', 24) * 60 * 60 * 1000
 
@@ -18,6 +19,18 @@ const TTL_MS = numeroEnv('EXAM_CACHE_TTL_HOURS', 24) * 60 * 60 * 1000
 // nenhum sinal. Errar para cima só custa tempo de varredura (~47s em 90 dias),
 // que o cache SWR amortiza. Mínimo 1: zero dias não descobriria nada.
 const PERIODO_DIAS = numeroEnv('APLIS_PERIODO_DIAS', 90, 1)
+
+// Quantas requisições têm os PDFs lidos ao mesmo tempo no site interno do
+// apLIS. Baixo de propósito: é o site que a recepção usa, sem contrato de
+// carga, e um paciente raramente tem mais que meia dúzia de requisições.
+const CONCORRENCIA_PDF = 3
+
+/**
+ * Liga o vínculo requisição ↔ O.S. pelo PDF "Laudo EXTERNO". Desligada por
+ * padrão; lida a cada chamada, como `LAUDOS_SOMENTE_ALVARO`, para dar para
+ * desligar sem deploy se o site do apLIS mudar.
+ */
+const osViaPdfLigada = (): boolean => booleanEnv('LAUDOS_OS_VIA_PDF', false)
 
 // ---------------------------------------------------------------------------
 // Cache
@@ -156,7 +169,21 @@ export class LaudoService {
     private readonly repo: IExamResultRepository,
     private readonly aplis: IAplisService,
     private readonly aol: IAolService,
+    // `null` = credenciais do site interno ausentes: o caminho do PDF fica
+    // inerte mesmo com a flag ligada.
+    private readonly laudosExternos: ILaudosExternos | null = null,
   ) {}
+
+  // Buscas ao vivo em andamento, por paciente. Toda leitura com cache vencido
+  // dispara uma revalidação, então duas quase juntas são o caso comum — e as
+  // fases de descoberta fazem "já existe? então insere" sem transação: duas
+  // varreduras paralelas gravariam a mesma O.S. em duas linhas, e a partir daí
+  // a busca por O.S. deixaria de ser única. A segunda chamada pega carona na
+  // primeira (que ainda economiza uma varredura inteira dos LIS).
+  //
+  // Vale dentro de UM processo. Com mais de uma instância da API a proteção
+  // teria que ser do banco (unicidade de paciente + O.S.).
+  readonly #buscasEmAndamento = new Map<string, Promise<{ laudos: Laudo[]; falha: unknown }>>()
 
   /**
    * Busca os laudos do paciente nos LIS, com estratégia stale-while-revalidate.
@@ -272,7 +299,23 @@ export class LaudoService {
    * de fonte já foi aplicado e portanto onde se sabe se sobrou algo para o
    * paciente ver. Engolir a falha aqui foi o que produziu a tela vazia mentirosa.
    */
-  async #buscarAoVivo(
+  #buscarAoVivo(
+    pacienteId: string,
+    cpf: string,
+    perfil?: PerfilPaciente,
+    log?: FastifyBaseLogger,
+  ): Promise<{ laudos: Laudo[]; falha: unknown }> {
+    const emAndamento = this.#buscasEmAndamento.get(pacienteId)
+    if (emAndamento) return emAndamento
+
+    const busca = this.#varrerLis(pacienteId, cpf, perfil, log).finally(() => {
+      this.#buscasEmAndamento.delete(pacienteId)
+    })
+    this.#buscasEmAndamento.set(pacienteId, busca)
+    return busca
+  }
+
+  async #varrerLis(
     pacienteId: string,
     cpf: string,
     perfil?: PerfilPaciente,
@@ -310,6 +353,12 @@ export class LaudoService {
         .catch((err) => logInsertFalhou(err, { pacienteId, codigoLis: req.cod_requisicao }, log))
     }
 
+    // FASE 2.2 — vínculo pelo PDF "Laudo EXTERNO" anexado à requisição. Roda
+    // ANTES da varredura: é determinístico (o PDF está anexado naquele pedido)
+    // e não depende do campo digitado à mão. A FASE 2.5 preenche o que sobrar.
+    const viaPdf = osViaPdfLigada() && this.laudosExternos !== null
+    if (viaPdf) await this.#vincularPeloPdf(pacienteId, cpf, requisicoes, log)
+
     // FASE 2.5 — descobrir as OS do paciente na AOL, que é onde estão os
     // valores. A listagem não filtra por paciente (⚠ ver aviso de custo em
     // aol.listOrders); uma falha aqui não derruba o caminho ApLIS — as OS
@@ -328,6 +377,7 @@ export class LaudoService {
       const codigosDoPaciente = new Set(requisicoes.map((r) => r.cod_requisicao))
       const cpfDigitos = cpf.replace(/\D/g, '')
       let doPaciente = 0
+      let vinculadasPeloIdOsLis = 0
 
       for (const { orderId, idOsLis } of ordens) {
         const chave = normalizaIdOsLis(idOsLis)
@@ -336,9 +386,30 @@ export class LaudoService {
           doPaciente++
           const linha = await this.repo.findByCodigoLis(pacienteId, chave)
           if (linha && !linha.codigo_os) {
+            vinculadasPeloIdOsLis++
             await this.repo
               .setCodigoOs(linha.id, orderId)
               .catch((err) => log?.warn({ pacienteId, orderId, err }, 'setCodigoOs falhou'))
+          } else if (linha && viaPdf && linha.codigo_os !== orderId) {
+            // A linha da requisição já está ocupada por OUTRA O.S. (do PDF, ou
+            // de uma remessa anterior) e esta também é do pedido. Sem o caminho
+            // do PDF ela era simplesmente ignorada; com ele ligado, vale a
+            // regra de que o paciente vê todos os seus exames — entra como
+            // linha própria, igual às O.S. extras do PDF.
+            //
+            // A identidade desta O.S. é a do `idOsLis`, nem mais nem menos do
+            // que a da O.S. que a mesma varredura põe na linha da requisição:
+            // quem a confere é a barreira sobre o payload da AOL, na FASE 3.
+            //
+            // Falha aqui fica nesta O.S.; não pode abortar a varredura.
+            try {
+              if (!(await this.repo.findByCodigoOs(pacienteId, orderId))) {
+                await this.repo.insertAwaiting(pacienteId, cpf, null, orderId)
+                vinculadasPeloIdOsLis++
+              }
+            } catch (err) {
+              logInsertFalhou(err, { pacienteId, orderId }, log)
+            }
           } else if (!linha) {
             // insertAwaiting da FASE 2 falhou: registra já com os dois códigos.
             await this.repo
@@ -358,7 +429,7 @@ export class LaudoService {
             .catch((err) => logInsertFalhou(err, { pacienteId, orderId }, log))
         }
       }
-      log?.info({ pacienteId, total: ordens.length, doPaciente }, 'AOL orders/status OK')
+      log?.info({ pacienteId, total: ordens.length, doPaciente, vinculadasPeloIdOsLis }, 'AOL orders/status OK')
     } catch (err) {
       // A AOL é a fonte que SOBREVIVE ao corte de LAUDOS_SOMENTE_ALVARO. Se ela
       // cair, o paciente pode acabar com a lista vazia mesmo tendo laudo no
@@ -395,6 +466,165 @@ export class LaudoService {
       laudos: laudos.sort((a, b) => (b.data_emissao ?? '').localeCompare(a.data_emissao ?? '')),
       falha: falhaNaListagem ?? falhaAol,
     }
+  }
+
+  /**
+   * Vínculo pelo PDF "Laudo EXTERNO": para cada requisição do paciente, lê os
+   * anexos tipo 14 e grava as O.S. que eles trazem.
+   *
+   * O PACIENTE VÊ TODOS OS SEUS EXAMES. Um PDF pode trazer 2 ou 3 O.S. (15% dos
+   * arquivos na medição de 24/11/2026) e a linha de `exam_results` guarda uma
+   * só. A principal — a maior entre as do paciente, ver laudoExterno.ts — entra na
+   * linha da requisição; cada uma das outras ganha linha própria, só com a
+   * O.S., exatamente como a FASE 2.5 já faz com a O.S. achada pelo CPF. Assim
+   * nenhuma fica só no log: sai como card do próprio Álvaro até existir o elo
+   * que as funde no card do pedido.
+   *
+   * Por isso TODAS as requisições são lidas, e não só as que estão sem O.S.:
+   * a que já foi vinculada pelo `idOsLis` também pode ter outras O.S. no PDF.
+   *
+   * Nada daqui chega ao paciente como erro. Site fora do ar, layout que mudou,
+   * PDF ilegível: a requisição fica como estava e a varredura por `idOsLis`
+   * segue cobrindo. E nada é sobrescrito: linha que já tem O.S. fica com ela.
+   */
+  async #vincularPeloPdf(
+    pacienteId: string,
+    cpf: string,
+    requisicoes: AplisRequisicao[],
+    log?: FastifyBaseLogger,
+  ): Promise<void> {
+    const externos = this.laudosExternos
+    if (!externos) return
+
+    const resumo = {
+      requisicoes: requisicoes.length,
+      vinculadasPeloPdf: 0,
+      extrasPeloPdf: 0,
+      semIdRequisicao: 0,
+      semAnexo: 0,
+      layoutNaoReconhecido: 0,
+      semOsLegivel: 0,
+      cpfDivergente: 0,
+      cpfIndisponivel: 0,
+      divergentes: 0,
+      falhas: 0,
+    }
+
+    // Leitura em paralelo (limitada); gravação em série logo abaixo, para duas
+    // requisições com a mesma O.S. não disputarem a mesma linha.
+    const lidas = await emParalelo(requisicoes, CONCORRENCIA_PDF, async (req) => {
+      if (!req.id_requisicao) {
+        resumo.semIdRequisicao++
+        return null
+      }
+      try {
+        return await externos.lerDaRequisicao(req.id_requisicao, req.cod_requisicao)
+      } catch (err) {
+        resumo.falhas++
+        log?.warn({ pacienteId, codigoLis: req.cod_requisicao, err }, 'Laudo EXTERNO: leitura do anexo falhou')
+        return null
+      }
+    })
+
+    for (const [i, req] of requisicoes.entries()) {
+      const pdfs = lidas[i]
+      if (!pdfs) continue
+      const codigoLis = req.cod_requisicao
+      if (pdfs.length === 0) {
+        resumo.semAnexo++
+        continue
+      }
+
+      // Barreira de identidade, por O.S. e FECHADA.
+      //
+      // Por O.S., e não por arquivo: um mesmo PDF já veio com O.S. de pessoas
+      // diferentes (a maior delas com o CPF de outro paciente). Cada O.S.
+      // responde pelo CPF impresso nas páginas dela.
+      //
+      // Fechada: aqui `indisponivel` também descarta (ao contrário de
+      // `deveBloquear`). O PDF é fonte nova, e a AOL muitas vezes não devolve
+      // CPF — a barreira de lá não seguraria uma O.S. alheia que passasse aqui.
+      //
+      // O veredito de uma O.S. junta TODOS os anexos da requisição: se ela
+      // confere num arquivo e diverge em outro, não confere. O Map guarda a
+      // ordem — anexos na ordem da listagem e, dentro do PDF, a maior O.S.
+      // primeiro —, então a principal é a maior ENTRE AS QUE SÃO DO PACIENTE.
+      const vereditos = new Map<string, Veredito>()
+      for (const pdf of pdfs) {
+        if (pdf.layout !== 'atual') {
+          resumo.layoutNaoReconhecido++
+          continue
+        }
+        // Layout atual sem O.S. nenhuma = rótulo ilegível: é o primeiro sinal
+        // de que o modelo do laudo mudou.
+        if (pdf.os.length === 0) resumo.semOsLegivel++
+
+        for (const os of pdf.os) {
+          const anterior = vereditos.get(os.numero)
+          const deste = conferirCpf(cpf, os.cpf)
+          // O pior veredito vence: diverge > indisponivel > confere.
+          const pior =
+            anterior === 'diverge' || deste === 'diverge'
+              ? 'diverge'
+              : anterior === 'indisponivel' || deste === 'indisponivel'
+                ? 'indisponivel'
+                : 'confere'
+          vereditos.set(os.numero, pior)
+        }
+      }
+
+      const osDaRequisicao: string[] = []
+      for (const [codigoOs, veredito] of vereditos) {
+        if (veredito === 'diverge') {
+          resumo.cpfDivergente++
+          log?.error(
+            { pacienteId, codigoLis, codigoOs },
+            'Laudo EXTERNO: O.S. com CPF de outro paciente — DESCARTADA (PDF anexado na requisição errada)',
+          )
+        } else if (veredito === 'indisponivel') {
+          resumo.cpfIndisponivel++
+          log?.warn({ pacienteId, codigoLis, codigoOs }, 'Laudo EXTERNO: O.S. sem CPF legível — descartada')
+        } else {
+          osDaRequisicao.push(codigoOs)
+        }
+      }
+
+      try {
+        const linha = await this.repo.findByCodigoLis(pacienteId, codigoLis)
+        let linhaTemOs = Boolean(linha?.codigo_os)
+
+        for (const os of osDaRequisicao) {
+          const existente = await this.repo.findByCodigoOs(pacienteId, os)
+          if (existente) {
+            // Já é do paciente. Se está na linha de OUTRA requisição, as duas
+            // fontes discordam sobre de qual pedido ela é: nada é sobrescrito,
+            // só registrado — decidir quem vence depende de olhar os casos.
+            if (existente.codigo_lis && existente.codigo_lis !== codigoLis) {
+              resumo.divergentes++
+              log?.warn(
+                { pacienteId, codigoLis, codigoOs: os, codigoLisVinculado: existente.codigo_lis },
+                'Laudo EXTERNO: O.S. do PDF já está vinculada a outra requisição do paciente',
+              )
+            }
+            continue
+          }
+
+          if (linha && !linhaTemOs) {
+            await this.repo.setCodigoOs(linha.id, os)
+            linhaTemOs = true
+            resumo.vinculadasPeloPdf++
+          } else {
+            await this.repo.insertAwaiting(pacienteId, cpf, null, os)
+            resumo.extrasPeloPdf++
+          }
+        }
+      } catch (err) {
+        resumo.falhas++
+        logInsertFalhou(err, { pacienteId, codigoLis }, log)
+      }
+    }
+
+    log?.info({ pacienteId, ...resumo }, 'Laudo EXTERNO: vínculo pelo PDF concluído')
   }
 
   // Caminho ApLIS puro — hoje o mais comum: a requisição não tem OS na AOL.

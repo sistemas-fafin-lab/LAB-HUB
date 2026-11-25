@@ -95,9 +95,9 @@ interface Alvo {
 }
 
 interface PdfAuditado {
-  os: string[]
+  /** Cada O.S. do arquivo com o veredito do CPF das páginas DELA. */
+  os: { numero: string; veredito: Veredito }[]
   layout: LayoutLaudoExterno | 'falha_download'
-  veredito: Veredito
 }
 
 interface RequisicaoAuditada {
@@ -195,9 +195,12 @@ async function auditarRequisicao(site: AplisSiteService, alvo: Alvo): Promise<Re
     for (const anexo of anexos) {
       try {
         const laudo = await lerLaudoExterno(await site.baixarAnexo(anexo))
-        pdfs.push({ os: laudo.os, layout: laudo.layout, veredito: conferirCpf(alvo.cpfReferencia, laudo.cpf) })
+        pdfs.push({
+          os: laudo.os.map((o) => ({ numero: o.numero, veredito: conferirCpf(alvo.cpfReferencia, o.cpf) })),
+          layout: laudo.layout,
+        })
       } catch {
-        pdfs.push({ os: [], layout: 'falha_download', veredito: 'indisponivel' })
+        pdfs.push({ os: [], layout: 'falha_download' })
       }
     }
     return { requisicao, pdfs }
@@ -274,11 +277,12 @@ async function auditar(argv: string[]): Promise<void> {
     await site.encerrar()
   }
 
-  // PDF com CPF divergente está anexado na requisição errada: a O.S. dele não é
-  // deste pedido e não entra na comparação (é o que o portal também fará).
+  // O.S. com CPF divergente é de outra pessoa (PDF anexado na requisição
+  // errada, ou arquivo que mistura pacientes): não entra na comparação, como
+  // também não entra no portal.
   const cpfPorRequisicao = new Map(alvos.map((a) => [a.requisicao, a.cpfReferencia]))
   const osValidas = (r: RequisicaoAuditada): string[] =>
-    r.pdfs.flatMap((p) => (p.veredito !== 'diverge' ? p.os : []))
+    r.pdfs.flatMap((p) => p.os.flatMap((o) => (o.veredito !== 'diverge' ? [o.numero] : [])))
   const doPdf: OsDoPdf[] = auditadas.flatMap((r) =>
     osValidas(r).map((os) => ({ requisicao: r.requisicao, os, cpf: cpfPorRequisicao.get(r.requisicao) ?? '' })),
   )
@@ -294,7 +298,9 @@ async function auditar(argv: string[]): Promise<void> {
       ? `ERRO: ${r.erro}`
       : r.pdfs.length === 0
         ? 'sem anexo tipo 14'
-        : r.pdfs.map((p) => `${p.os.join('+') || `sem O.S. (${p.layout})`} [cpf ${p.veredito}]`).join(', ')
+        : r.pdfs
+            .map((p) => p.os.map((o) => `${o.numero} [cpf ${o.veredito}]`).join(' + ') || `sem O.S. (${p.layout})`)
+            .join(', ')
     const pelaAol = classificadas.filter((c) => c.requisicaoIdOsLis === r.requisicao).map((c) => c.os)
     console.log(`req=${r.requisicao}  pdf: ${pdf}  |  idOsLis: ${pelaAol.join(', ') || '—'}`)
   }
@@ -324,7 +330,9 @@ async function auditar(argv: string[]): Promise<void> {
   ).length
   const soPdfComCpf = classificadas.filter((c) => c.idOsLisEhCpf).length
   const layout = (l: PdfAuditado['layout']): number => pdfs.filter((p) => p.layout === l).length
-  const veredito = (v: Veredito): number => pdfs.filter((p) => p.veredito === v).length
+  const osDosPdfs = pdfs.flatMap((p) => p.os)
+  const veredito = (v: Veredito): number => osDosPdfs.filter((o) => o.veredito === v).length
+  const pdfsMisturados = pdfs.filter((p) => p.os.some((o) => o.veredito === 'diverge') && p.os.some((o) => o.veredito === 'confere')).length
   const classe = (c: ClasseOs): number => classificadas.filter((x) => x.classe === c).length
 
   console.log(
@@ -334,7 +342,8 @@ async function auditar(argv: string[]): Promise<void> {
       `  PDFs: ${pdfs.length} · layout atual ${layout('atual')} · antigo ${layout('antigo')} · ` +
       `desconhecido ${layout('desconhecido')} · ilegível ${layout('ilegivel')} · falha no download ${layout('falha_download')}\n` +
       `    ${pdfs.filter((p) => p.os.length > 1).length} PDF(s) trazem mais de uma O.S.\n` +
-      `  CPF do PDF: ${veredito('confere')} confere · ${veredito('diverge')} DIVERGE · ${veredito('indisponivel')} indisponível\n` +
+      `  CPF por O.S. do PDF: ${veredito('confere')} confere · ${veredito('diverge')} DIVERGE · ${veredito('indisponivel')} indisponível\n` +
+      `    ${pdfsMisturados} PDF(s) misturam O.S. do paciente com O.S. de outro CPF\n` +
       `  O.S.: ${classificadas.length} · ${classe('iguais')} nas duas e iguais · ${classe('so_pdf')} só no PDF · ` +
       `${classe('so_idoslis')} só no idOsLis · ${classe('divergentes')} nas duas, requisições diferentes\n` +
       `    das "só no PDF", ${soPdfComCpf} têm o CPF no idOsLis: o método atual as acha, mas como card avulso, sem a requisição\n` +

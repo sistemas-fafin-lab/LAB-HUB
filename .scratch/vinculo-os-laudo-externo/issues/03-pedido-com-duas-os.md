@@ -35,3 +35,14 @@ O ticket tratava várias O.S. como caso de dois anexos (1 em 75 na amostra da sp
 - deixa de ser acabamento: sem este ticket, uma parte relevante dos pacientes vê o pedido incompleto mesmo com a flag do ticket 02 ligada. Vale rever a prioridade na triagem;
 - entraram dois casos que o texto original não cobria: a requisição que já tem uma O.S. (o ticket 02 a pula) e a O.S. que já existe como linha avulsa;
 - a decisão em aberto sobre o formato do elo continua igual; o volume reforça a opção 1 (coluna nova), que não toca a unicidade de `codigo_lis`.
+
+### 25/11/2026 — o que o ticket 02 já entregou
+
+Com a regra "o paciente vê todos os seus exames", o ticket 02 passou a gravar cada O.S. extra em linha própria (só com a O.S., sem a requisição). Para este ticket isso significa:
+
+- os exames já aparecem; o que falta é a **fusão**: hoje a O.S. extra sai como card próprio do Álvaro, e só se junta ao card do pedido quando a data de coleta coincide;
+- o critério "a segunda O.S. fica gravada com o elo" vira "a linha própria que o 02 cria passa a carregar o elo" — e as linhas próprias já gravadas antes precisam ganhar o elo numa busca seguinte, sem migração manual;
+- os casos "requisição que já tinha uma O.S." e "O.S. avulsa já existente" continuam valendo, agora só para o elo;
+- a identidade é por O.S. desde o 02 (CPF das páginas de cada O.S.); aqui basta não a enfraquecer.
+
+Medição de 25/11/2026: 60 de 411 requisições (15%) têm mais de uma O.S. do próprio paciente no PDF.
