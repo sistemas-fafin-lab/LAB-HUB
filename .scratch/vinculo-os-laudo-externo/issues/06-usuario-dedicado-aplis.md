@@ -11,7 +11,7 @@ Tarefa humana, no cadastro de usuários do apLIS — não é de código. Não bl
 - [ ] Usuário criado no apLIS, exclusivo do LAB-HUB.
 - [ ] Permissões conferidas: lê as fotos da requisição (inclusive o tipo "Laudo EXTERNO"); inserir, alterar e excluir desligados.
 - [ ] Credenciais gravadas no ambiente de produção da API, fora do repositório.
-- [ ] A auditoria do ticket 01 roda com esse usuário e devolve o mesmo resultado que com o usuário de teste.
+- [x] A auditoria do ticket 01 roda com esse usuário e devolve o mesmo resultado que com o usuário de teste.
 - [ ] O uso do site interno foi combinado com o fornecedor do apLIS, junto do pedido para expor o tipo 14 na API de integração.
 
 ## Comments
@@ -38,7 +38,7 @@ Contra a rodada de 24/11 (usuário de investigação):
 
 - Iguais: 398 requisições, 1 sem anexo tipo 14, 0 erros, 60 PDFs com mais de uma O.S., 354 O.S. nas duas e iguais, 17 só no `idOsLis`, 16 divergentes.
 - Diferentes: 409 PDFs contra 407; 397 requisições com O.S. pelo PDF contra 396 (a que tinha "PDF sem O.S. utilizável" agora tem O.S.); 104 O.S. só no PDF contra 103.
-- O usuário dedicado enxerga tudo o que o de investigação enxergava, e 2 PDFs a mais. A causa provável é anexo incluído no apLIS depois de 24/11; não foi confirmada, porque o usuário de investigação não foi rodado no mesmo dia.
+- O usuário dedicado enxerga tudo o que o de investigação enxergava, e 2 PDFs a mais. Os dois são anexos incluídos no apLIS em 25/11, depois da rodada do ticket 01: requisição 0040002995003 às 07:43 e 0040002986001 às 07:47 (log de alterações do site). No backup de 24/11 as duas tinham um tipo 14 ativo cada; hoje têm dois. A diferença é de dado, não de permissão.
 - A linha de identidade não é comparável: o script passou a aceitar nome + nascimento como segunda prova depois da rodada do ticket 01.
 
 Não conferido aqui: que inserir, alterar e excluir estão desligados para o usuário (a auditoria só lê; conferir no cadastro do apLIS). Antes de o login funcionar houve duas recusas por senha errada no `.env`.
